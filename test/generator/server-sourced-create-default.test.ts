@@ -213,7 +213,10 @@ describe("server-sourced create-path defaults — Java", () => {
     const files = await generateSystemFiles(JAVA("createdAt: datetime = now()"));
     const svc = fileEndingWith(files, "orders/OrderService.java");
     expect(svc).toMatch(
-      /var createdAt = request\.createdAt\(\) != null \? Instant\.parse\(request\.createdAt\(\)\) : Instant\.now\(\)/,
+      // The parse half is the GUARDED form since F19 (a malformed datetime is a
+      // 422 naming the field, not a DateTimeParseException past every advice
+      // arm), so the coalesce reads `!= null ? WireFormatException.instant(…)`.
+      /var createdAt = request\.createdAt\(\) != null \? WireFormatException\.instant\("\/createdAt", request\.createdAt\(\)\) : Instant\.now\(\)/,
     );
   });
 

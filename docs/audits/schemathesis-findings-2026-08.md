@@ -806,46 +806,136 @@ comments say Phoenix "raises NoRouteError" for a wrong verb as well as an
 unmatched path, i.e. it answers **404 where the other four answer 405**. That
 is a design question of its own and deliberately out of this slice.
 
-### F19 — dotnet + java: a malformed declared `date-time` reaches the domain layer
-**Waiver:** W24/W25 (dotnet), W29/W30 (java) · **Severity: high**
+### F19 — java: a malformed declared `date-time` reaches the domain layer
+**Waiver:** none — fixed · **Severity: high** · **Status: FIXED (2026-09-03) on
+java; already fixed on .NET, which the original entry did not know.**
 
 ```
-curl -X POST http://host/api/orders -d '{"customerId":"…","placedAt":"","status":"Draft"}'
-→ 500   System.FormatException: String '' was not recognized as a valid DateTime.   (.NET)
-→ 500   java.time.format.DateTimeParseException: Text '' could not be parsed at index 0  (java)
+curl -X POST http://host/api/orders -d '{"placedAt":"", …}'
+→ 500   java.time.format.DateTimeParseException: Text '' could not be parsed at index 0
 ```
 
-The field publishes `{"type":"string","format":"date-time"}`, and both backends
-parse it inside the domain constructor rather than refusing it at the wire
-boundary. F7's family — declared but unenforced — on the two statically typed
-backends.
+The field publishes `{"type":"string","format":"date-time"}`; the service parsed
+it bare (`Instant.parse(request.placedAt())`) and the resulting
+`DateTimeParseException` matched no `@ExceptionHandler`, so the catch-all
+answered `500 "internal"` — a server fault for input the server itself refused.
 
-### F20 — dotnet: a NUL character in a declared string reaches Postgres
-**Waiver:** W24/W25 · **Severity: medium**
+**.NET was already fixed.** Measured on a booted app before touching anything:
+`placedAt: ""` and `placedAt: "not-a-date"` both answer **422** there, through
+the `WireFormatException` arm M-T6.48 landed. The finding's `dotnet + java`
+framing was stale; W24/W25 have been narrowed to their F20 half rather than
+retired.
+
+**Java now mirrors it exactly.** `WireFormatException` (`domain/common`) carries
+the pointer plus the guarded parses — `instant`, `decimal`, `uuid` — each
+wrapping the very parse that used to run bare, and `ApiExceptionAdvice` gains an
+arm ahead of the catch-all rendering it as the same 422 + `errors[]` envelope:
+
+```json
+{"status":422,"title":"Validation failed","detail":"One or more fields are invalid.",
+ "errors":[{"pointer":"/placedAt","message":"Invalid datetime: \"not-a-date\""}]}
+```
+
+The guard is **opt-in per call site**: `wireToDomain` takes a `pointer`, and its
+presence is what turns a bare parse into a guarded one. The wire boundary (the
+service and workflow emitters) passes one; the emitters that are NOT the wire
+boundary — seeds, the channel decoder, the emitted tests — keep the bare parse
+byte-identical.
+
+Measured on a booted app before and after: `""` and `"not-a-date"` → 500 → 422
+with `/placedAt`; a valid body still 201. Gated by
+`test/generator/java/wire-boundary-refusals.test.ts`; five mutations each fail
+exactly the assertion that names them.
+
+### F20 — dotnet AND java: a NUL character in a declared string reaches Postgres
+**Waiver:** W24/W25 (narrowed to this finding on 2026-09-03) · **Severity: medium**
+· **Status: OPEN — the last 500 on the create path.**
 
 ```
-curl -X POST http://host/api/customers -d '{"email":" ","name":""}' → 500
+curl -X POST http://host/api/customers -d '{"email":"\u0000","name":""}' → 500
 asyncpg/Npgsql: CharacterNotInRepertoireError (22021) — invalid byte sequence
 ```
 
-` ` is a legal JSON string character and an illegal Postgres `text` byte.
-Nothing on the write path rejects it, so the driver's error escapes as a 500. The
-same generated body also reproduces F21 (see below) when the NUL half happens not
-to be generated, which is why W27/W28 are marked `intermittent`.
+NUL is a legal JSON string character and an illegal Postgres `text` byte.
+Nothing on the write path refuses it, so the driver's error escapes as a 500.
 
-### F21 — dotnet + java: `minLength` is published and enforced nowhere
-**Waiver:** W27/W28 (dotnet), W34 (java) · **Severity: medium**
+**It reproduces on java too**, measured on a booted app while fixing F19/F23:
+with those two closed, a NUL in `sku` is the ONLY body on the create path still
+answering 500 there. The original entry named only .NET because that is the leg
+that reported it.
+
+This is a STORAGE-layer refusal, not a parse — the value is a well-formed string
+of the declared type, and it is the column that cannot hold it. That makes it a
+different fix from F19's wire guard (a shared rule over every declared string
+bound for a `text` column, on every backend with postgres) and its own slice.
+
+The same generated body also reproduced F21 when the NUL half happened not to be
+generated, which is why W27 is marked `intermittent` (W28 was too, and is now
+retired).
+
+### F21 — dotnet: the response schema claims a `minLength` nothing declared
+**Waiver:** W28 retired — fixed · W27 / W34 re-diagnosed, kept ·
+**Severity: medium** · **Status: the READ half is FIXED (2026-09-03); the write
+half was mis-diagnosed and is re-recorded below.**
 
 ```
-curl -X POST http://host/api/customers -d '{"name":"","email":"a@b.c"}'  → 201
+curl -X POST http://host/api/customers -d '{"name":"","email":"a@b.c"}'  → 201   (correct)
 curl     http://host/api/customers                                       → 200, and the
-  response violates the API's OWN schema: "" is shorter than 1 character
+  response violates the API's OWN schema: "" is shorter than the published minLength: 1
 ```
 
-One defect with two halves. `name` carries `minLength: 1` in both the request and
-the response schema; .NET and java enforce it in neither, so the write is
-accepted and the *read* then violates the published contract. Enforcing the
-declared bound on the write closes both.
+**The original entry got the cause wrong, and the wrong half of it.** It said
+`name` publishes `minLength: 1` in *both* the request and the response schema
+and that .NET and java enforce it in neither. Measured on booted apps of both,
+with the fixture's own model (`aggregate Customer with crudish { name, email,
+invariant email.length > 0 }`):
+
+| | request `email` | response `name` / `email` | `email: ""` | `name: ""` |
+|---|---|---|---|---|
+| node | `minLength: 1` | — | 422 | 201 |
+| dotnet | **nothing** | **`minLength: 1` on BOTH** | 422 | 201 |
+| java | **nothing** | **nothing** | 422 | 201 |
+
+So the *behaviour* is correct and identical on all three: the declared bound
+(`email`) is enforced — FluentValidation on .NET, the domain invariant on java —
+and `name`, which declares nothing, is correctly accepted empty. What is wrong
+is the CONTRACT, and only on .NET, and only on the response.
+
+**Cause: `RequiredAttribute` defaults `AllowEmptyStrings` to false**, and
+ASP.NET's schema generator renders that as `minLength: 1`. Response DTOs are
+serialized, never validated, so nothing enforces it, and `name: string` declares
+nothing, so nothing asked for it. A row the server itself accepted is then
+served by a document saying that row is impossible — the server breaking its own
+contract on a plain read. That is W28's `response_schema_conformance`, and it is
+the real finding.
+
+**Fix:** response string properties carry `[property: Required(AllowEmptyStrings
+= true)]`, mirroring what the request side has carried (for a different, still
+valid reason) all along. Measured before and after on the same booted app: the
+phantom `minLength` is gone from `CustomerResponse`, `required` still lists every
+field, and `email: ""` → 422 / `name: ""` → 201 / `name: null` → 422 /
+`name` omitted → 422 are all unmoved. Gated by
+`test/generator/dotnet/response-string-minlength.test.ts`, mutation-proved both
+ways (revert the fix → 2 cases fail; widen it to non-strings → the narrowness
+case fails).
+
+**What this deliberately does not do.** `email` DOES declare `length > 0`, so
+its `minLength: 1` was accidentally correct; it goes too, leaving .NET where
+java already is — publishing no length bound at all. Publishing the bounds a
+`len-*` invariant actually declares (node emits them from `openapiLengthMeta`)
+is a separate slice on both backends, and it has to go through the
+schema-document layer: the DataAnnotations / Bean Validation annotations that
+would publish them (`[MinLength]`, `@Size`) also ENFORCE them, counting UTF-16
+code units rather than the code points the bound is defined in
+(`src/generator/_expr/code-point.ts`). Trading a false claim for a wrong count
+is not an improvement.
+
+**W27 and W34 are kept, not retired.** Both claimed an unenforced `minLength` on
+`POST /api/customers`; the measurements above say that is not what is there. What
+those two rules are actually absorbing cannot be established without running the
+leg, and retiring a rule on a guess is exactly how W31 came back four-fold on the
+next nightly. Their reasons now record the measurement and say "re-triage against
+a nightly".
 
 ### F22 — dotnet: a bodyless operation POST answers 415 before the path parameter is looked at
 **Waiver:** W26 (widened 2026-09-01) · **Severity: low**
@@ -871,7 +961,7 @@ check in the same run, which is what makes the 415 a .NET divergence rather than
 a shared decision.
 
 ### F23 — java: a required body field arriving as JSON `null` NPEs in the domain layer
-**Waiver:** W29/W30 · **Severity: high**
+**Waiver:** none — fixed · **Severity: high** · **Status: FIXED (2026-09-03).**
 
 ```
 curl -X POST http://host/api/products -d '{"sku":null,"price":{"amount":1,"currency":"USD"}}'
@@ -880,8 +970,42 @@ curl -X POST http://host/api/products -d '{"sku":null,"price":{"amount":1,"curre
 
 Also observed as `"amount" is null` and `"qty" is null`. The field is `required`
 in the published request schema; the Spring binder maps a JSON `null` to a Java
-`null` and hands it straight to the invariant check. Same family as F19 — the
-declared shape is published and never enforced.
+`null` and hands it straight to the invariant check.
+
+**Two things had to move, and only the second was obvious from the trace.**
+
+1. **`@NotNull` on the create body.** Operation bodies have carried it since
+   RS-26; the create body never did. A nested record additionally carries
+   `@Valid`, which is what makes the Bean Validation walk DESCEND — without it
+   `{"price":{"amount":null}}` passes the outer check and NPEs inside the value
+   object instead. With it the answer names `/price/amount`.
+   A component whose wire form is a Java PRIMITIVE gets no `@NotNull`: it can
+   never be null, and the absence it would describe is already answered (Jackson
+   3 enables `FAIL_ON_NULL_FOR_PRIMITIVES`).
+
+2. **The invariant validator now SKIPS a null instead of dereferencing it.**
+   Adding `@NotNull` alone did not fix `sku: null` — measured, the app still
+   answered 500 and the trace named `CreateOrderValidator.validate` line 23. The
+   emitted invariant validator is a Spring `Validator` that Bean Validation runs
+   ALONGSIDE the record's annotations, not after them, so the length check still
+   reached `sku.codePoints()` first. A null now skips its bound, leaving the
+   absence to the annotation that describes it — which is exactly what .NET's
+   FluentValidation arms already do (`v == null || …`, and its built-in length
+   validators return true for null). Only where the Java type is a REFERENCE:
+   `int == null` would not compile.
+
+Measured on a booted app before and after:
+
+| body | before | after | pointer |
+|---|---|---|---|
+| `sku: null` | 500 | **422** | `/sku` |
+| `price: null` | 500 | **422** | `/price` |
+| `price: {amount: null}` | 500 | **422** | `/price/amount` |
+| `sku: ""` (the invariant) | 422 | 422 | `/sku` — unmoved |
+| a valid body | 201 | 201 | — |
+
+Gated by `test/generator/java/wire-boundary-refusals.test.ts` alongside F19;
+the null-skip and each annotation are separately mutation-proved.
 
 ### F24 — java: an adversarial query string 500s a paged find
 **Waiver:** none — fixed · **Severity: medium**

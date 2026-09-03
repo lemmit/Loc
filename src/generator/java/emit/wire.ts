@@ -190,11 +190,32 @@ function elementMapper(element: TypeIR): string | null {
 
 /** Expression converting a WIRE value (`expr`, a request-record read) to
  *  its domain form. */
-export function wireToDomain(t: TypeIR, expr: string): string {
+export function wireToDomain(t: TypeIR, expr: string, pointer?: string): string {
+  // `pointer` is the RFC-6901 pointer of the field being converted, and its
+  // presence is what turns a BARE parse into a GUARDED one.
+  //
+  // `money` and `datetime` cross the wire as STRINGS, so `"12,50"` and `""`
+  // are malformed REQUESTS — but `new BigDecimal(...)` / `Instant.parse(...)`
+  // answer them with NumberFormatException / DateTimeParseException, which no
+  // advice arm matched: the caller got 500 for input the server itself refused
+  // (schemathesis F19). `WireFormatException.decimal/instant` are the same
+  // parses wrapped, raising the exception the advice renders as the 422 +
+  // errors[] envelope .NET and node already send for these values.
+  //
+  // Callers that are NOT the wire boundary (the seed emitter, the channel
+  // decoder, the emitted tests) have their own `Instant.parse` and never reach
+  // here; callers here that pass no pointer keep the bare form byte-identical,
+  // so this is opt-in per call site rather than a blanket rewrite.
+  const guarded = (kind: "instant" | "decimal") =>
+    pointer === undefined
+      ? kind === "instant"
+        ? `Instant.parse(${expr})`
+        : `new BigDecimal(${expr})`
+      : `WireFormatException.${kind}(${JSON.stringify(pointer)}, ${expr})`;
   switch (t.kind) {
     case "primitive":
-      if (t.name === "money") return `new BigDecimal(${expr})`;
-      if (t.name === "datetime") return `Instant.parse(${expr})`;
+      if (t.name === "money") return guarded("decimal");
+      if (t.name === "datetime") return guarded("instant");
       return expr;
     case "id":
       return `new ${t.targetName}Id(${expr})`;
@@ -202,7 +223,7 @@ export function wireToDomain(t: TypeIR, expr: string): string {
       return `to${t.name}(${expr})`;
     case "array": {
       const el = t.element;
-      const mapped = wireToDomain(el, "__x");
+      const mapped = wireToDomain(el, "__x", pointer);
       if (mapped === "__x") return expr;
       // MUTABLE copy, not `Stream.toList()`.  This value is assigned straight
       // onto a domain field, and on a value-object collection that field is a
@@ -217,12 +238,30 @@ export function wireToDomain(t: TypeIR, expr: string): string {
       return `new java.util.ArrayList<>(${expr}.stream().map(__x -> ${mapped}).toList())`;
     }
     case "optional": {
-      const inner = wireToDomain(t.inner, expr);
+      const inner = wireToDomain(t.inner, expr, pointer);
       if (inner === expr) return expr;
       return `${expr} == null ? null : ${inner}`;
     }
     default:
       return expr;
+  }
+}
+
+/** True when converting this type at the WIRE BOUNDARY emits a guarded parse —
+ *  i.e. the type tree carries a `money` or `datetime`, the two primitives that
+ *  cross as strings and are parsed rather than bound. Call sites use it to add
+ *  the `WireFormatException` import only where the guard is actually emitted,
+ *  so a file with no such field keeps its import block byte-identical. */
+export function wireToDomainGuards(t: TypeIR): boolean {
+  switch (t.kind) {
+    case "primitive":
+      return t.name === "money" || t.name === "datetime";
+    case "array":
+      return wireToDomainGuards(t.element);
+    case "optional":
+      return wireToDomainGuards(t.inner);
+    default:
+      return false;
   }
 }
 

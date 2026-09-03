@@ -101,6 +101,7 @@ import {
   renderForbiddenException,
   renderPackageMarker,
   renderPagedRecord,
+  renderWireFormatException,
 } from "./emit/common.js";
 import { criterionEligible, renderJavaCriteriaClasses } from "./emit/criteria.js";
 import { renderJavaDispatcher } from "./emit/dispatch.js";
@@ -444,6 +445,11 @@ function emitProjectFromContexts(
     "domain-common",
     renderAggregateNotFoundException(basePkg),
   );
+  // F19 — money and datetime cross the wire as STRINGS and were parsed bare in
+  // the service, so a malformed one threw past every advice arm as a 500. This
+  // carries the guarded parses AND the exception they raise; the advice's own
+  // arm renders it as the 422 + errors[] envelope the other backends send.
+  place("WireFormatException.java", "domain-common", renderWireFormatException(basePkg));
   place("Paged.java", "domain-common", renderPagedRecord(basePkg));
   // File upload/download (M-T1.2): a hosted File field ⇒ emit the shared FileRef
   // record; the bound objectStore ⇒ mount root POST /files / GET /files/{key}
