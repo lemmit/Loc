@@ -15,9 +15,56 @@ import { extractErrors, parseString } from "./parse.js";
 
 export { HONO_V4_PINS };
 
-/** Generate the single-context Hono/TS project file map from an AST Model. */
-export const generateHono = (model: Model): Map<string, string> =>
-  generateTypeScript(model, HONO_V4_PINS);
+/**
+ * Phases ⑤/⑥/⑦ over an already-parsed AST Model — lower, merge, enrich, then
+ * the IR verifier and `validateLoomModel`.  Synchronous, so it can ride the
+ * synchronous legacy `generate` helpers as well as the async ones.
+ *
+ * This is the shared body of the phase-⑤-and-later half of `assertGeneratable`;
+ * both call it so the two paths cannot drift.  The whole point of extracting it
+ * was `generateHono` below: at the 2026-09 census that wrapper was one line with
+ * no checks at all, and its **66 call sites across 37 files** were the last
+ * corner of the tree that could assert on emitted output from an IR nothing had
+ * ever looked at (M-T9.44).
+ */
+export function assertModelVerifies(model: Model, context = ".ddd fixture"): void {
+  // Phases ⑤/⑥ — the IR the backends will consume must hold its own contract
+  // before phase ⑦ is asked whether the MODEL is valid.  Ordered first because
+  // the two answer different questions and a violation here invalidates the
+  // one below: `validateLoomModel` reads `refKind`, `receiverType` and
+  // `callKind` off the IR, so a check running on a malformed IR reports on
+  // something that was never built correctly.
+  const enriched = enrichLoomModel(mergeLoomModels([lowerModel(model)]));
+  assertLoomModelVerifies(enriched, context);
+  // Phase ⑦ — the same call the CLI and the api toolkit make.
+  const irErrors = validateLoomModel(enriched).filter((d) => d.severity === "error");
+  if (irErrors.length) {
+    throw new Error(
+      `${context} has ${irErrors.length} IR-validation error(s) (phase ⑦) — ` +
+        `\`ddd generate\` would exit non-zero on it, so the emitted output this test ` +
+        `asserts against is output no user can obtain.  Fix the fixture, or call ` +
+        `generateSystemFilesUnchecked(source, "<why this model must stay invalid>") if ` +
+        `emitting from a rejected model IS the subject:\n` +
+        irErrors.map((d) => `  ${d.code ?? "?"} ${d.message}`).join("\n"),
+    );
+  }
+}
+
+/**
+ * Generate the single-context Hono/TS project file map from an AST Model.
+ *
+ * Runs `assertModelVerifies` first, so this legacy single-context path asserts
+ * everything `generateSystemFiles` asserts about the IR — phases ⑤/⑥ via the
+ * verifier and phase ⑦ via `validateLoomModel`.  Phases ① and ④ are the
+ * CALLER's, because this helper takes a Model rather than a source string: a
+ * caller that reaches it through `parseValid` has both; one that reaches it
+ * through a bare `parseString` has neither, which is what
+ * `test/system/legacy-generate-path-ratchet.test.ts` pins.
+ */
+export const generateHono = (model: Model): Map<string, string> => {
+  assertModelVerifies(model);
+  return generateTypeScript(model, HONO_V4_PINS);
+};
 
 /**
  * The phases a `.ddd` fixture must survive before any test may assert on what
@@ -52,32 +99,12 @@ async function assertGeneratable(source: string): Promise<Model> {
         astErrors.map((e) => `  ${e}`).join("\n"),
     );
   }
-  // Phases ⑤/⑥ — the IR the backends will consume must hold its own contract
-  // before phase ⑦ is asked whether the MODEL is valid.  Ordered first because
-  // the two answer different questions and a violation here invalidates the
-  // one below: `validateLoomModel` reads `refKind`, `receiverType` and
-  // `callKind` off the IR, so a check running on a malformed IR reports on
-  // something that was never built correctly.
-  //
-  // Free, or nearly: the enriched model is computed here anyway for phase ⑦,
-  // and this walks it once more.  That is the whole reason the verifier can
-  // ride the shared helper at all rather than living in one gate — every
-  // fixture in the tree checks the contract because the helper they all go
-  // through already had the model in hand.
-  const enriched = enrichLoomModel(mergeLoomModels([lowerModel(model)]));
-  assertLoomModelVerifies(enriched, ".ddd fixture");
-  // Phase ⑦ — the same call the CLI and the api toolkit make.
-  const irErrors = validateLoomModel(enriched).filter((d) => d.severity === "error");
-  if (irErrors.length) {
-    throw new Error(
-      `.ddd fixture has ${irErrors.length} IR-validation error(s) (phase ⑦) — ` +
-        `\`ddd generate\` would exit non-zero on it, so the emitted output this test ` +
-        `asserts against is output no user can obtain.  Fix the fixture, or call ` +
-        `generateSystemFilesUnchecked(source, "<why this model must stay invalid>") if ` +
-        `emitting from a rejected model IS the subject:\n` +
-        irErrors.map((d) => `  ${d.code ?? "?"} ${d.message}`).join("\n"),
-    );
-  }
+  // Phases ⑤/⑥/⑦ — free, or nearly: the enriched model is computed here anyway
+  // for phase ⑦, and the verifier walks it once more.  That is the whole reason
+  // the verifier can ride the shared helper at all rather than living in one
+  // gate — every fixture in the tree checks the contract because the helper
+  // they all go through already had the model in hand.
+  assertModelVerifies(model);
   return model;
 }
 

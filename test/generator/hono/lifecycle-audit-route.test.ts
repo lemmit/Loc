@@ -10,22 +10,38 @@
 // delete, so `after` is always null.
 
 import { describe, expect, it } from "vitest";
-import { generateHono } from "../../_helpers/generate.js";
-import { parseValid } from "../../_helpers/parse.js";
+import { generateSystemFiles } from "../../_helpers/generate.js";
 
+// `audited` is a HOSTED capability, and this fixture used to be a bare loose
+// context emitted through the legacy `generateHono` path (M-T9.44).  Once that
+// path asserts phase ⑦, the fixture fails: `validateAuditedOperationSupport`
+// refuses an audited lifecycle action that no audit-capable backend deployable
+// hosts, and the legacy path CANNOT host one — declaring a `system` re-parents
+// every loose context into it, emptying the `loom.contexts` list that
+// `generateTypeScript` emits from.  So the fixture moves to the system
+// orchestrator, which is where a hosted capability can actually be expressed.
+// Verified before the move: `ddd parse` on the bare context exits 1 with
+// `loom.audited-backend-unsupported`.
 const SRC = `
-  context Invoicing {
-    aggregate Invoice {
-      total: money
-      create(total: money) audited { total := total }
-      destroy audited { }
+  system Sys {
+    subdomain Billing {
+      context Invoicing {
+        aggregate Invoice {
+          total: money
+          create(total: money) audited { total := total }
+          destroy audited { }
+        }
+        repository Invoices for Invoice { }
+      }
     }
-    repository Invoices for Invoice { }
+    storage primary { type: postgres }
+    resource st { for: Invoicing, kind: state, use: primary }
+    deployable api { platform: node  contexts: [Invoicing]  dataSources: [st]  port: 3000 }
   }
 `;
 
 async function routes(): Promise<string> {
-  return generateHono(await parseValid(SRC)).get("http/invoice.routes.ts")!;
+  return (await generateSystemFiles(SRC)).get("api/http/invoice.routes.ts")!;
 }
 
 describe("hono routes — audited lifecycle actions", () => {
@@ -81,8 +97,8 @@ describe("hono routes — audited lifecycle actions", () => {
   });
 
   it("emits the audit_records table when ONLY lifecycle actions are audited", async () => {
-    const files = generateHono(await parseValid(SRC));
-    const schema = files.get("db/schema.ts")!;
+    const files = await generateSystemFiles(SRC);
+    const schema = files.get("api/db/schema.ts")!;
     expect(schema).toContain('pgTable("audit_records"');
   });
 

@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from "vitest";
 import { generateHono } from "../../_helpers/generate.js";
-import { parseString } from "../../_helpers/parse.js";
+import { parseValid } from "../../_helpers/parse.js";
 
 const SRC = `
   context Shipping {
@@ -48,8 +48,7 @@ const SRC = `
 
 describe("typescript generator — outer binding mutated inside a for-each persists", () => {
   it("saves the loop-local `o` per iteration AND the outer `acct` at exit", async () => {
-    const { model, errors } = await parseString(SRC);
-    expect(errors).toEqual([]);
+    const model = await parseValid(SRC);
     const wf = generateHono(model).get("http/workflows.ts")!;
     expect(wf).toBeDefined();
     // The loop-local order still saves per iteration (inside the loop body).

@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from "vitest";
 import { generateHono } from "../../_helpers/generate.js";
-import { parseString } from "../../_helpers/parse.js";
+import { parseValid } from "../../_helpers/parse.js";
 
 const SRC = `
   context Sales {
@@ -26,8 +26,7 @@ const SRC = `
 
 describe("typescript generator — reified criteria (find)", () => {
   it("a single-criterion find calls the reified predicate fn", async () => {
-    const { model, errors } = await parseString(SRC);
-    expect(errors).toEqual([]);
+    const model = await parseValid(SRC);
     const repo = generateHono(model).get("db/repositories/customer-repository.ts")!;
 
     // Parameterless + parameterised single-criterion finds reify.
@@ -43,7 +42,7 @@ describe("typescript generator — reified criteria (find)", () => {
   });
 
   it("a criterion shared by a find and a retrieval emits exactly one fn", async () => {
-    const { model } = await parseString(SRC);
+    const model = await parseValid(SRC);
     const repo = generateHono(model).get("db/repositories/customer-repository.ts")!;
     // `InRegion` is used by find `inRegion` and retrieval `ByRegion` — one fn.
     const decls = repo.match(/const inRegionCriterion = /g) ?? [];

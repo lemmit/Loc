@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from "vitest";
 import { generateHono } from "../../_helpers/generate.js";
-import { parseString } from "../../_helpers/parse.js";
+import { parseValid } from "../../_helpers/parse.js";
 
 const SRC = `
   context Sales {
@@ -21,8 +21,7 @@ const SRC = `
 
 describe("typescript generator — criterion", () => {
   it("lowers a criterion-driven find to the same Drizzle where as the inline find", async () => {
-    const { model, errors } = await parseString(SRC);
-    expect(errors).toEqual([]);
+    const model = await parseValid(SRC);
     const files = generateHono(model);
     const repo = files.get("db/repositories/customer-repository.ts")!;
     const expected =

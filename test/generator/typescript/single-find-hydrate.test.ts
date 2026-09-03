@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from "vitest";
 import { generateHono } from "../../_helpers/generate.js";
-import { parseString } from "../../_helpers/parse.js";
+import { parseValid } from "../../_helpers/parse.js";
 
 const SRC = `
   context Inventory {
@@ -27,8 +27,7 @@ const SRC = `
 
 describe("typescript generator — single-result find hydrates in place", () => {
   it("does NOT re-fetch via findById; hydrates from the selected row", async () => {
-    const { model, errors } = await parseString(SRC);
-    expect(errors).toEqual([]);
+    const model = await parseValid(SRC);
     const files = generateHono(model);
 
     const warehouses = files.get("db/repositories/warehouse-repository.ts")!;

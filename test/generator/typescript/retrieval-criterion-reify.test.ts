@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from "vitest";
 import { generateHono, generateSystemFiles } from "../../_helpers/generate.js";
-import { parseString } from "../../_helpers/parse.js";
+import { parseValid } from "../../_helpers/parse.js";
 
 const SRC = `
   context Sales {
@@ -20,8 +20,7 @@ const SRC = `
 
 describe("typescript generator — reified criteria (retrieval)", () => {
   it("emits a module-level criterion fn the run method calls", async () => {
-    const { model, errors } = await parseString(SRC);
-    expect(errors).toEqual([]);
+    const model = await parseValid(SRC);
     const repo = generateHono(model).get("db/repositories/customer-repository.ts")!;
     // The predicate is reified once, outside the class.
     expect(repo).toMatch(
