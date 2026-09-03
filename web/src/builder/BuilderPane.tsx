@@ -3,6 +3,7 @@ import { Badge, Box, Button, Checkbox, Divider, Group, Popover, Select, Stack, T
 import { AstUtils } from "langium";
 import { NO_PAGES, SCAFFOLD } from "../layout/vocabulary";
 import { listScaffoldedPages, mayHaveScaffoldedPages, unfoldScaffoldedPage, type ScaffoldedPage } from "./page/scaffold";
+import { IconX } from "./icons";
 import type { SerializedNodes } from "@craftjs/core";
 import type { LayoutCtx } from "../layout/ctx";
 import type { BodyProp, Component, EnumDecl, Expression, Page } from "../../../src/language/generated/ast.js";
@@ -750,8 +751,8 @@ function DeleteButton({ spec, testid, onConfirm }: { spec: ConfirmSpec; testid: 
       testids={{ base: testid }}
       size="compact-xs"
       trigger={(arm) => (
-        <Button size="compact-xs" variant="subtle" color="red" data-testid={testid} aria-label={spec.consequence} onClick={arm}>
-          ×
+        <Button size="compact-xs" variant="subtle" color="red" data-testid={testid} aria-label={spec.consequence} title={spec.consequence} onClick={arm}>
+          <IconX />
         </Button>
       )}
     />
