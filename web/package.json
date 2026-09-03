@@ -47,6 +47,7 @@
     "@isomorphic-git/lightning-fs": "^4.6.2",
     "@mantine/core": "^7.13.0",
     "@mantine/hooks": "^7.13.0",
+    "@mantine/spotlight": "^7.17.8",
     "@xyflow/react": "^12.10.2",
     "buffer": "^6.0.3",
     "dompurify": "^3.4.12",
