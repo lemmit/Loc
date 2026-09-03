@@ -13,6 +13,7 @@
 
 import type { GenerateReport, ValidateReport } from "../../../src/api/index.js";
 import { callTool } from "../../../src/tools/index.js";
+import type { TurnExtras } from "./turn.js";
 
 /** The model the scripted agent "authors" from the prompt.  Validated + full-
  *  system-generated in CI (`agent-demo.test.ts`) so the demo can't rot into a
@@ -79,6 +80,11 @@ export interface AgentMessage {
   toolCalls?: AgentToolCall[];
   /** True while the agent is still producing this turn. */
   pending?: boolean;
+  /** Playground-side attachments for the turn this bubble closes — the plan
+   *  awaiting approval, the receipt, the commit, the loop guard's stop card
+   *  (M-T8.19).  Grafted on at render time by `attachTurnExtras`, never folded
+   *  out of the transcript. */
+  extras?: TurnExtras;
 }
 
 /** Mutations the driver performs on the outside world. */

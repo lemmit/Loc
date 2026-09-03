@@ -6,12 +6,37 @@
 /** Coarse classification of a workspace commit by its message.  The git
  *  store writes `autosave workspace` (debounced edits), `regenerate`
  *  (intentional generate), and `import legacy workspace` (first boot);
- *  everything that isn't an autosave is a user-meaningful "milestone". */
-export type CommitKind = "milestone" | "autosave";
+ *  everything that isn't an autosave is a user-meaningful "milestone".
+ *
+ *  M-T8.19 slice 4 adds two NAMED authors on top of that: an agent turn
+ *  commits `agent: <first line of the ask>` and a visual Apply commits
+ *  `builder: <what was applied>`, so the timeline says who moved the model
+ *  rather than showing a wall of identical autosaves. */
+export type CommitKind = "milestone" | "autosave" | "agent" | "builder";
 
 export function classifyCommit(message: string): CommitKind {
-  return message.trim().toLowerCase().startsWith("autosave") ? "autosave" : "milestone";
+  const m = message.trim().toLowerCase();
+  if (m.startsWith("autosave")) return "autosave";
+  if (m.startsWith("agent:")) return "agent";
+  if (m.startsWith("builder:")) return "builder";
+  return "milestone";
 }
+
+/** Badge text + tint for each kind — one place, so the History rows and any
+ *  later timeline view cannot disagree about what a commit is called. */
+export const COMMIT_KIND_LABEL: Record<CommitKind, string> = {
+  autosave: "autosave",
+  milestone: "milestone",
+  agent: "agent",
+  builder: "builder",
+};
+
+export const COMMIT_KIND_COLOR: Record<CommitKind, string> = {
+  autosave: "gray",
+  milestone: "blue",
+  agent: "grape",
+  builder: "teal",
+};
 
 /** Short, human relative time from a commit's epoch-**seconds** timestamp.
  *  `now` is injectable for testing. */

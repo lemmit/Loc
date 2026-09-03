@@ -55,12 +55,24 @@ export interface ToolSpec {
   input_schema: Record<string, unknown>;
 }
 
+/** Token accounting for one model call, when the provider reports it.  The
+ *  field names are provider-neutral; the OpenAI-shaped transport maps
+ *  `usage.prompt_tokens` / `usage.completion_tokens` onto them. */
+export interface TokenUsage {
+  input: number;
+  output: number;
+}
+
 /** One assistant turn from the model. */
 export interface Completion {
   content: ContentBlock[];
   /** `"tool_use"` means the model wants tools run and the loop continues;
    *  anything else (`"end_turn"`, `"max_tokens"`, …) ends the loop. */
   stop_reason: string;
+  /** What this call cost, when the provider says.  Optional because not every
+   *  compatible endpoint reports it (and a streamed response only does when
+   *  `stream_options.include_usage` is honoured). */
+  usage?: TokenUsage;
 }
 
 /** The injected LLM call — the ONLY transport-specific dependency.  Given the
@@ -140,6 +152,10 @@ export interface RunAgentResult {
   messages: Message[];
   steps: number;
   stoppedBy: "end_turn" | "max_steps";
+  /** Tokens summed over every model call this run made, or `undefined` when
+   *  no call reported any — the per-turn cost the playground's receipt shows
+   *  (research §4 #12: make the cost of a turn visible). */
+  usage?: TokenUsage;
 }
 
 /** Drive the catalog-backed agent loop to completion: ask the model, run any
@@ -150,21 +166,28 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
   const { complete, messages, system, onMessage, onTextDelta } = opts;
   const maxSteps = opts.maxSteps ?? 12;
   const tools = toolSpecs();
+  let usage: TokenUsage | undefined;
 
   for (let step = 1; step <= maxSteps; step++) {
     const completion = await complete({ messages, tools, system, onTextDelta });
+    if (completion.usage) {
+      usage = {
+        input: (usage?.input ?? 0) + completion.usage.input,
+        output: (usage?.output ?? 0) + completion.usage.output,
+      };
+    }
     const assistant: Message = { role: "assistant", content: completion.content };
     messages.push(assistant);
     onMessage?.(assistant);
 
     const toolResults = await dispatchToolUses(completion.content);
     if (toolResults.length === 0) {
-      return { messages, steps: step, stoppedBy: "end_turn" };
+      return { messages, steps: step, stoppedBy: "end_turn", usage };
     }
     const toolTurn: Message = { role: "user", content: toolResults };
     messages.push(toolTurn);
     onMessage?.(toolTurn);
   }
 
-  return { messages, steps: maxSteps, stoppedBy: "max_steps" };
+  return { messages, steps: maxSteps, stoppedBy: "max_steps", usage };
 }

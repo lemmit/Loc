@@ -74,6 +74,10 @@ test("a Problems row with a fix-hint provider offers Fix, and applying it clears
     /language-reference\/04-type-system\.html#x-id--cross-aggregate-references$/,
   );
 
+  // The deterministic patch says what it costs: nothing (M-T8.19 slice 5 /
+  // research §4 #12 — the answer to "credits burned on fix loops").
+  await expect(row.getByTestId("problem-fix-free")).toHaveText("free");
+
   await row.getByTestId("problem-fix").click();
 
   // The fix landed in the source and the LSP re-validated it clean.

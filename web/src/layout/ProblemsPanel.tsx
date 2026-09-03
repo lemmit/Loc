@@ -6,7 +6,7 @@ import { modelUriFor } from "../lsp/workspace-lsp-sync";
 import type { Diagnostic } from "../lsp/protocol";
 import type { LayoutCtx } from "./ctx";
 import { inDocumentOrder, toEditorRange } from "./problem-nav";
-import { PROBLEMS } from "./vocabulary";
+import { FREE_ACTION, PROBLEMS } from "./vocabulary";
 
 // The Problems stream as a teaching surface (M-T8.18 slice 1, audit H7).
 //
@@ -188,13 +188,28 @@ function ProblemRow({
           </Tooltip>
         )}
         {fix && (
-          <Tooltip label={fix.title} withArrow openDelay={400}>
+          // M-T8.19 slice 5 / research §4 #12.  The dominant complaint across
+          // every AI builder is credits burned on fix loops, and the honest
+          // answer here is that THIS fix costs nothing: it is a deterministic
+          // compiler patch, not a model call.  Say so on the control.
+          <Tooltip
+            label={`${fix.title} — ${FREE_ACTION.hint}`}
+            withArrow
+            openDelay={400}
+            multiline
+            w={280}
+          >
             <Button
               size="compact-xs"
               variant="light"
               onClick={() => onFix(fix)}
               data-testid="problem-fix"
-              title={PROBLEMS.fixHint}
+              title={`${PROBLEMS.fixHint} ${FREE_ACTION.hint}`}
+              rightSection={
+                <Badge size="xs" variant="light" color="green" data-testid="problem-fix-free">
+                  {FREE_ACTION.badge}
+                </Badge>
+              }
             >
               {PROBLEMS.fix}
             </Button>

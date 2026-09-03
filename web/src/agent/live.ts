@@ -16,6 +16,7 @@ import {
   type ContentBlock,
   type Message,
   runAgent,
+  type TokenUsage,
 } from "../../../src/tools/index.js";
 import type { AgentMessage, AgentToolCall, ToolStatus } from "./demo.js";
 
@@ -176,6 +177,21 @@ export interface LiveAgentDeps {
   setMessages: (msgs: AgentMessage[]) => void;
   /** Reflect the agent's newest `.ddd` source into the editor + LSP. */
   applySource: (ddd: string) => void;
+  /** The PLAN GATE (M-T8.19 slice 2).  When supplied, the turn writes NOTHING
+   *  while it runs: the newest `.ddd` the agent produced is held back until
+   *  the settle, then handed to this hook, which returns the text to actually
+   *  write (possibly with lines the user removed from the plan patched out) or
+   *  `null` to write nothing at all.  Absent → today's behaviour, where each
+   *  new source is reflected into the editor as it appears. */
+  gateSource?: (candidate: string, base: string) => Promise<string | null>;
+  /** Called once, with the text that was actually written, AFTER `applySource`
+   *  and BEFORE the generate (M-T8.19 slice 4).  The host takes its labelled
+   *  checkpoint here; awaiting it is what keeps the turn's commit from being
+   *  swallowed by the regenerate commit that follows. */
+  onWrote?: (written: string) => Promise<void> | void;
+  /** What the turn cost, when the provider reported it (M-T8.19 slice 3 —
+   *  the receipt's token line).  Not called when nothing was reported. */
+  onUsage?: (usage: TokenUsage) => void;
   /** Kick a real playground generate once the turn settles. */
   triggerGenerate: () => void;
   /** Cooperative cancellation. */
@@ -229,10 +245,15 @@ export async function runLiveAgent(deps: LiveAgentDeps): Promise<Message[]> {
   // Show the user's bubble immediately (before the model responds).
   render(true, "");
 
+  const gate = deps.gateSource;
   let lastSource: string | null = latestSourceFrom(history);
+  // The source THIS turn produced, as distinct from whatever the conversation
+  // already carried — a follow-up that only reads the model must not re-gate
+  // (or re-generate) the previous turn's write.
+  let produced: string | null = null;
   let streaming = "";
 
-  await runAgent({
+  const run = await runAgent({
     complete,
     messages,
     system,
@@ -247,21 +268,43 @@ export async function runLiveAgent(deps: LiveAgentDeps): Promise<Message[]> {
       streaming = "";
       render(true, "");
 
-      // Reflect the newest source into the editor as soon as it appears.
+      // Reflect the newest source into the editor as soon as it appears —
+      // unless a plan gate is installed, in which case nothing is written
+      // until the user has approved the delta.
       const src = latestSourceFrom(messages);
       if (src && src !== lastSource) {
         lastSource = src;
-        applySource(src);
+        produced = src;
+        if (!gate) applySource(src);
       }
     },
   });
 
+  if (run.usage) deps.onUsage?.(run.usage);
+
   if (signal?.cancelled) return messages;
 
-  // Settle: final render (not pending) + a real generate if the agent produced
-  // a model.
+  // Settle: final render (not pending), then the write.  Without a gate the
+  // source is already in the editor and only the generate is left; with one,
+  // the gate decides whether — and exactly what — to write.
   render(false, "");
-  if (lastSource) triggerGenerate();
+  if (!gate) {
+    if (produced) await deps.onWrote?.(produced);
+    if (lastSource) triggerGenerate();
+    return messages;
+  }
+  if (produced) {
+    const approved = await gate(produced, currentSource);
+    if (signal?.cancelled) return messages;
+    if (approved !== null) {
+      applySource(approved);
+      // The checkpoint is taken BEFORE the generate, so the turn's commit
+      // carries the source change under its own label instead of being
+      // swallowed by the regenerate commit that follows it.
+      await deps.onWrote?.(approved);
+      triggerGenerate();
+    }
+  }
 
   return messages;
 }

@@ -11,7 +11,9 @@
 
 import type { MutableRefObject, ReactNode } from "react";
 import type { AgentMessage } from "../agent/demo";
+import type { StuckSignal } from "../agent/loop-guard";
 import type { AgentSettings } from "../agent/provider";
+import type { TurnCheckpoint } from "../agent/turn";
 import type { EditorHandle, EditorRange } from "../editor/editor-handle";
 import type { LoomLspClient } from "../lsp/client";
 import type { LoomBuildClient } from "../build/client";
@@ -139,7 +141,7 @@ export type DockTab =
 
 /** The desktop centre area's active document (lifted from DesktopShell in
  *  M-T8.18 so the palette and the panes' *Go to line N* can switch it). */
-export type CenterView = "source" | "secondary" | "builder" | "model" | "requirements";
+export type CenterView = "source" | "secondary" | "builder" | "model" | "requirements" | "chat";
 
 /** The desktop Explorer's switcher: your files, the generated tree, or the
  *  examples pane (M-T8.18). */
@@ -178,6 +180,14 @@ export interface LayoutCtx {
   problemAnnouncement: string;
   /** Open the Agent tab with `text` in the composer ("" just focuses it). */
   askAgent: (text: string) => void;
+  /** Focus the Chat surface — the centre tab on desktop, the full-screen
+   *  agent pane on mobile (M-T8.19 slice 1).  The dock's Agent tab and the
+   *  palette are both shortcuts to this. */
+  openChat: () => void;
+  /** Desktop only: render Chat and Source side by side.  Defaults on while a
+   *  turn is in flight, so the source streams next to the transcript. */
+  chatSplit: boolean;
+  setChatSplit: (v: boolean) => void;
   agentPrompt: AgentPromptRequest | null;
   consumeAgentPrompt: () => void;
   /** First-run card: shown until dismissed, on a workspace never edited
@@ -274,7 +284,7 @@ export interface LayoutCtx {
    *  ("editor") from edits applied by the visual Builder ("builder"); the
    *  latter are pushed back into the Monaco model + LSP so all surfaces stay
    *  in sync.  Omitted origin is treated as external (Builder-like). */
-  onSourceChange: (text: string, origin?: "editor" | "builder") => void;
+  onSourceChange: (text: string, origin?: "editor" | "builder", label?: string) => void;
   /** Counter incremented on every editor-originated source change (i.e.
    *  the user typing in Monaco).  Drives the page-builder's debounced
    *  live re-seed; builder-originated edits do **not** bump this, so the
@@ -443,6 +453,35 @@ export interface LayoutCtx {
   sendAgentMessage: (text: string) => void;
   /** Clear the live chat (display + the carried transcript). */
   clearAgentChat: () => void;
+  /** Plan-first mode (M-T8.19 slice 2).  While on, a turn returns a
+   *  model-node delta the user approves before any `.ddd` is written — for
+   *  the first turn of a conversation and for any structural turn; a
+   *  members-only follow-up writes straight through.  Off restores the
+   *  M-T8.3 behaviour of streaming the agent's source into the editor. */
+  agentPlanMode: boolean;
+  setAgentPlanMode: (v: boolean) => void;
+  /** Approve the pending plan, writing the candidate minus the node
+   *  addresses in `excluded` (honoured as real `remove` model patches). */
+  approveAgentPlan: (excluded: string[]) => void;
+  /** Reject the pending plan — nothing is written, and the refusal rides the
+   *  next prompt so the model knows what was refused. */
+  rejectAgentPlan: (excluded: string[]) => void;
+  /** Restore the workspace to a turn's commit (M-T8.19 slice 4).  The restore
+   *  is itself committed, so it is undoable — the Cursor lesson from the
+   *  research §2.4 — and `point` names what it lands on. */
+  restoreAgentCheckpoint: (oid: string, point: string) => void;
+  /** One-line outcome of the last Restore from a chat message, or null. */
+  agentRestoreNote: string | null;
+  dismissAgentRestoreNote: () => void;
+  /** The loop guard's stop signal (M-T8.19 slice 5) — three consecutive fix
+   *  turns left the same diagnostic code on the same node.  While set, a send
+   *  is refused: another fix turn is what burns credits for nothing.  Cleared
+   *  by any of the exit ramps on the "I'm stuck" card. */
+  agentStuck: StuckSignal | null;
+  dismissAgentStuck: () => void;
+  /** The newest agent turn whose write validated clean — where *Restore last
+   *  green* goes.  Null until a turn produces one. */
+  agentLastGreen: TurnCheckpoint | null;
 
   // Actions
   runGenerate: () => void;

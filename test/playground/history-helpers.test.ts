@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  COMMIT_KIND_COLOR,
+  COMMIT_KIND_LABEL,
   classifyCommit,
   formatRelativeTime,
   shortOid,
@@ -12,6 +14,24 @@ describe("history-format helpers", () => {
     expect(classifyCommit("regenerate")).toBe("milestone");
     expect(classifyCommit("import legacy workspace")).toBe("milestone");
     expect(classifyCommit("anything else")).toBe("milestone");
+  });
+
+  // M-T8.19 slice 4 — a turn and a visual Apply are NAMED authors, so the
+  // timeline says who moved the model instead of a wall of autosaves.
+  it("classifyCommit names agent turns and builder applies", () => {
+    expect(classifyCommit("agent: Add a Ticket aggregate")).toBe("agent");
+    expect(classifyCommit("builder: page Board body")).toBe("builder");
+    expect(classifyCommit("Agent: capitalised still counts")).toBe("agent");
+    // A restore commit is a milestone, not an agent turn — it did not come
+    // from a model call.
+    expect(classifyCommit("restore to the end of turn 2")).toBe("milestone");
+  });
+
+  it("every kind has a label and a colour", () => {
+    for (const kind of ["autosave", "milestone", "agent", "builder"] as const) {
+      expect(COMMIT_KIND_LABEL[kind]).toBeTruthy();
+      expect(COMMIT_KIND_COLOR[kind]).toBeTruthy();
+    }
   });
 
   it("formatRelativeTime renders coarse buckets from epoch seconds", () => {

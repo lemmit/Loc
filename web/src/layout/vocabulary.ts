@@ -44,6 +44,7 @@ export const PANE = {
   preview: "Preview",
   output: "Output",
   agent: "Agent",
+  chat: "Chat",
   runtime: "Runtime",
   tests: "Tests",
   migrations: "Migrations",
@@ -439,4 +440,123 @@ export const DETAIL_LEVEL_HINT: Record<DetailLevel, string> = {
 export const USED_BY = {
   label: "Used by",
   none: "Nothing references this construct.",
+} as const;
+
+// ---------------------------------------------------------------------------
+// M-T8.19 — the agent loop as plan → receipt → checkpoint.
+// ---------------------------------------------------------------------------
+
+/** The chat surface itself — the centre tab, its Split companion, and the
+ *  composer chrome.  `PANE.chat` is the tab's own name; everything the chat
+ *  says about ITSELF lives here. */
+export const CHAT = {
+  /** The Split toggle: chat beside the source it is editing. */
+  split: "Split",
+  splitHint: `Show ${PANE.chat} and ${PANE.source} side by side. On by default while the agent is working.`,
+  /** The dock shortcut's tooltip — the Agent dock tab is now a jump. */
+  dockShortcut: `Open ${PANE.chat} in the centre`,
+  clear: "Clear",
+  send: "Send",
+  demo: "Run demo",
+  replayDemo: "Replay demo",
+} as const;
+
+/** The plan step (research §4 #3): a model-node delta the user approves
+ *  before any `.ddd` is written. */
+export const PLAN = {
+  title: "Plan",
+  /** The one-line subtitle under the title. */
+  subtitle: "The declarations this turn would change. Nothing is written until you approve.",
+  /** The toggle in the composer row. */
+  toggle: "Plan first",
+  toggleHint:
+    "Return a model-node delta to approve before the turn writes .ddd. On for the first turn of a conversation and for structural turns.",
+  approve: "Approve",
+  approveHint: "Write the approved declarations to the source.",
+  reject: "Reject",
+  rejectHint: "Write nothing. The agent is told the plan was rejected.",
+  /** Per-row exclude / restore. */
+  exclude: "Remove from plan",
+  include: "Put back in the plan",
+  /** A deletion cannot be excluded on its own — the whole plan has to go. */
+  notExcludable: "A removal can only be rejected as a whole — use Reject.",
+  /** Row verbs, by change kind. */
+  verb: { add: "Add", change: "Change", remove: "Remove" },
+  empty: "No model changes — this turn only read the model.",
+  /** Shown after Approve when some lines were removed. */
+  partial: (n: number): string => `${countOf(n, "declaration")} left out of the write.`,
+  rejected: "Plan rejected — nothing was written.",
+  /** Fed back to the agent as the next user turn after a rejection. */
+  rejectionNote: (names: string[]): string =>
+    names.length > 0
+      ? `I rejected that plan. Do not add: ${names.join(", ")}. Propose a smaller change.`
+      : "I rejected that plan. Propose a smaller change.",
+} as const;
+
+/** The per-turn receipt (research §4 #4, #12). */
+export const RECEIPT = {
+  title: "Receipt",
+  /** Collapsible `.ddd` diff. */
+  diff: "Source diff",
+  noDiff: "No source change.",
+  /** `validatorDelta(2, 0)` → "2 errors → 0". */
+  validatorDelta: (before: number, after: number): string =>
+    `${countOf(before, "error")} → ${after}`,
+  files: "Generated files",
+  filesNone: "No generated files yet.",
+  /** `+3 −0 ~7`. */
+  fileDelta: (added: number, removed: number, changed: number): string =>
+    `+${added} −${removed} ~${changed}`,
+  tokens: "Tokens",
+  /** `tokenLine(1200, 340)` → "1,200 in · 340 out". */
+  tokenLine: (input: number, output: number): string =>
+    `${input.toLocaleString()} in · ${output.toLocaleString()} out`,
+  toolCalls: "Tool calls",
+  showPaths: "Show paths",
+  hidePaths: "Hide paths",
+  showDiff: "Show diff",
+  hideDiff: "Hide diff",
+} as const;
+
+/** Turn ↔ commit (research §4 #5, §2.4's Cursor lesson: a restore that is
+ *  itself undoable, and copy that says WHICH point it restores to). */
+export const CHECKPOINT = {
+  /** Commit label prefixes.  `agentLabel("Add a Task aggregate")` →
+   *  "agent: Add a Task aggregate". */
+  agentLabel: (firstLine: string): string => `agent: ${firstLine}`,
+  builderLabel: (what: string): string => `builder: ${what}`,
+  restore: "Restore",
+  /** The tooltip / confirm line — names the point AND says it is undoable. */
+  restoreHint: (point: string): string =>
+    `Restore the workspace to ${point}. The restore is itself recorded as a new commit, so you can undo it.`,
+  /** `endOfTurn(2)` → "the end of turn 2". */
+  endOfTurn: (n: number): string => `the end of turn ${n}`,
+  restored: (point: string): string => `Restored to ${point}.`,
+  restoreFailed: "Restore failed",
+} as const;
+
+/** Loop detection (research §4 #13) and the free-tier labelling of the
+ *  deterministic Fix actions (§4 #12). */
+export const STUCK = {
+  title: "I'm stuck",
+  /** `body("loom.unknown-type", "aggregate Sales.Order.total", 3)`. */
+  body: (code: string, node: string, turns: number): string =>
+    `${turns} turns in a row left ${code} on ${node}. Another fix turn is likely to repeat it, so I stopped.`,
+  restoreGreen: "Restore last green",
+  restoreGreenHint: "Go back to the last commit whose source validated clean.",
+  noGreen: "No clean commit in this conversation yet.",
+  narrow: "Narrow the ask",
+  narrowHint: "Start a fresh, smaller request in the composer.",
+  /** The composer prefill the *Narrow the ask* button writes. */
+  narrowPrompt: (code: string, node: string): string =>
+    `Only fix ${code} on ${node}. Change nothing else.`,
+  openProblem: "Open the problem",
+  openProblemHint: `Jump to the row in ${PANE.output} → ${STREAM.problems}.`,
+} as const;
+
+/** The Problems row's *Fix* is a deterministic code action, not a model call
+ *  — the audit's "visible cost" answer (§4 #12): say so. */
+export const FREE_ACTION = {
+  badge: "free",
+  hint: "Deterministic compiler patch — no model call, no tokens.",
 } as const;

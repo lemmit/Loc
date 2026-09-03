@@ -12,6 +12,7 @@ export {
   type RunAgentResult,
   runAgent,
   type TextBlock,
+  type TokenUsage,
   type ToolResultBlock,
   type ToolSpec,
   type ToolUseBlock,
