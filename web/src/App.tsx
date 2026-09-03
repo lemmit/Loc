@@ -86,6 +86,7 @@ import {
 } from "./util/share";
 import { fnv1a32 } from "./util/hash";
 import { downloadBytes, makeZip } from "./util/zip";
+import { buildExportReadme, EXPORT_README_PATH } from "./util/export-readme";
 import { usePersistedState } from "./util/usePersistedState";
 // M-T8.18 — the palette, the shortcut sheet, app-level hotkeys, F8.
 import { CommandPalette, openPalette } from "./layout/CommandPalette";
@@ -1827,6 +1828,22 @@ export default function App(): JSX.Element {
     const base =
       workspace.activeName.trim().replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") ||
       "loom-project";
+    // A README at the archive root (M-T8.23 slice 3).  The ZIP is the bridge
+    // out of the browser for every target the playground cannot boot, and it
+    // used to ship a tree of projects plus a compose file with nothing saying
+    // what to do with them.  Derived from the tree itself, so it can't name a
+    // service or a port the emitted compose file doesn't have.  Never
+    // overwrites a README the generator itself emitted at the root.
+    if (!entries.some((e) => e.path === EXPORT_README_PATH)) {
+      entries.unshift({
+        path: EXPORT_README_PATH,
+        content: buildExportReadme({
+          name: base,
+          paths: entries.map((e) => e.path),
+          compose: entries.find((e) => e.path === "docker-compose.yml")?.content ?? null,
+        }),
+      });
+    }
     downloadBytes(makeZip(entries), `${base}.zip`);
   }
 

@@ -24,7 +24,7 @@ import { PaneErrorBoundary } from "../PaneErrorBoundary";
 import { ExamplesPane } from "./ExamplesPane";
 import { FirstRunCard } from "./FirstRunCard";
 import { type CenterView, type ExplorerMode, modeLabel, type LayoutCtx } from "./ctx";
-import { nextStep, nextStepMid, PANE, STAGE } from "./vocabulary";
+import { EXPORT, nextStep, nextStepMid, PANE, STAGE } from "./vocabulary";
 
 // The active non-source document in the center area — a file opened
 // from either Explorer view.  `source` (main.ddd) is the other tab.
@@ -201,6 +201,7 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
                             leftSection={<span aria-hidden>↓</span>}
                             onClick={() => ctx.runDownloadZip()}
                             data-testid="download-zip"
+                            title={EXPORT.hint}
                           >
                             Download .zip
                           </Button>

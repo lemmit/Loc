@@ -4,7 +4,7 @@ import { FileTree } from "../preview/FileTree";
 import { PlainFileViewer } from "../preview/PlainFileViewer";
 import { LazyFileViewer } from "./lazy-panels";
 import type { LayoutCtx } from "./ctx";
-import { nextStepMid } from "./vocabulary";
+import { EXPORT, nextStepMid } from "./vocabulary";
 
 interface Props {
   ctx: LayoutCtx;
@@ -114,6 +114,7 @@ export function FilesPane({ ctx }: Props): JSX.Element {
               onClick={() => runDownloadZip()}
               style={{ flexShrink: 0 }}
               data-testid="download-zip-mobile"
+              title={EXPORT.hint}
             >
               .zip
             </Button>
