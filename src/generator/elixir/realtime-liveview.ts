@@ -17,14 +17,16 @@
 // it cannot alter choreography delivery (the message shape + topic semantics
 // the existing tests pin are untouched).
 //
-// The toast message expression is the validator-bounded v1 subset
+// The toast message expression is the validator-bounded subset
 // (`loom.ui-handler-statement-unknown` admits only `toast(<expr>)`): literals, the
-// event binding, single-level member access off it, and operators.  Anything
-// deeper fails loud here rather than emitting broken Elixir — the Elixir twin
-// of `renderMessageExpr` in `src/generator/_frontend/realtime.ts`.
+// event binding, MULTI-LEVEL member access off it, and operators.  Anything
+// outside that fails loud here rather than emitting broken Elixir — the Elixir
+// twin of `renderMessageExpr` in `src/generator/_frontend/realtime.ts`, and the
+// defensive backstop behind `loom.toast-message-unsupported`.
 
 import type { ExprIR } from "../../ir/types/loom-ir.js";
 import { elixirString, snake } from "../../util/naming.js";
+import { toastMemberPath } from "../_frontend/realtime.js";
 
 /** The PubSub topic every domain `emit` broadcasts on.  A realtime LiveView
  *  subscribes to it; the choreography path uses direct `Dispatcher.dispatch/1`
@@ -51,11 +53,17 @@ export function exprUsesBind(e: ExprIR, bind: string): boolean {
   }
 }
 
-/** Render the v1 toast message-expression subset to Elixir — the twin of the
+/** Render the toast message-expression subset to Elixir — the twin of the
  *  frontends' `renderMessageExpr` (`_frontend/realtime.ts`).  `bind` reads as
  *  the captured broadcast struct; member access off it (`e.orderId`) becomes
  *  `to_string(e.order_id)` so a non-string struct field concatenates / renders
- *  as flash copy cleanly. */
+ *  as flash copy cleanly.
+ *
+ *  NULLABLE LINKS.  A struct has no `Access` implementation, so `e.order.id`
+ *  cannot use `get_in`, and `nil.id` RAISES.  Each hop past the first is
+ *  therefore guarded with `&&` — `to_string(e.order && e.order.id)` — which
+ *  short-circuits to `nil`, and `to_string(nil)` is `""`.  Same observable
+ *  answer as the JS `?.` + `?? ""` chain and Feliz's `toastField`. */
 export function renderMessageExprElixir(e: ExprIR, bind: string): string {
   const bindVar = snake(bind);
   const go = (x: ExprIR): string => {
@@ -71,14 +79,24 @@ export function renderMessageExprElixir(e: ExprIR, bind: string): string {
           `realtime handle_info: unsupported name '${x.name}' in toast message (only the event binding '${bind}' is in scope).`,
         );
       case "member": {
-        if (x.receiver.kind !== "ref" || x.receiver.name !== bind) {
+        const path = toastMemberPath(x, bind);
+        if (!path) {
           throw new Error(
-            "realtime handle_info: toast messages support single-level member access off the event binding only.",
+            "realtime handle_info: toast messages support member access off the event binding only.",
           );
         }
         // Event struct fields are snake_case; wrap in to_string so a non-string
-        // field renders / concatenates as flash copy.
-        return `to_string(${bindVar}.${snake(x.member)})`;
+        // field renders / concatenates as flash copy.  `bindVar` is always
+        // bound, so only the hops PAST the first need the `&&` nil guard —
+        // depth 1 stays the bare `to_string(e.order_id)`.
+        const prefixes = path.map(
+          (_, i) =>
+            `${bindVar}${path
+              .slice(0, i + 1)
+              .map((m) => `.${snake(m)}`)
+              .join("")}`,
+        );
+        return `to_string(${prefixes.join(" && ")})`;
       }
       case "paren":
         return `(${go(x.inner)})`;

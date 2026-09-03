@@ -50,6 +50,7 @@ on:
       # AND vanilla/ — not just vanilla/ + index.ts (audit A6.1: this was
       # the narrowest backend gate, blind to its own render-expr/heex code).
       - 'src/generator/elixir/**'
+      - 'src/generator/_frontend/**'
       # Shared expression-renderer seam every domain-logic backend consumes.
       - 'src/generator/_expr/**'
       - 'src/platform/elixir.ts'
@@ -72,6 +73,7 @@ on:
       - 'src/system/**'
       - 'src/util/**'
       - 'src/generator/elixir/**'
+      - 'src/generator/_frontend/**'
       - 'src/generator/_expr/**'
       - 'src/platform/elixir.ts'
       - 'test/e2e/fixtures/elixir-vanilla-build/**'

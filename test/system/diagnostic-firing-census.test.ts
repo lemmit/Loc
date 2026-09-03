@@ -1038,10 +1038,13 @@ system P {
   deployable app { platform: angular targets: api ui: WebApp { C: api } port: 3001 }
 }`,
 
-  // A `toast(<expr>)` outside the v1 message subset every realtime renderer
-  // implements — two-level member access off the event binding.  Without the
-  // gate this aborts `ddd generate system` with a raw Error from
-  // `renderMessageExpr` / `renderFsToastMessage` / `renderMessageExprElixir`.
+  // A `toast(<expr>)` outside the message subset every realtime renderer
+  // implements — a CONVERSION call.  (A member CHAIN off the binding —
+  // `e.order.id` — used to sit here; it renders on all four renderers now, so
+  // the fixture moved to a shape that is still refused.)  Without the gate this
+  // aborts `ddd generate system` with a raw Error from `renderMessageExpr` /
+  // `renderFsToastMessage` / `renderMessageExprElixir` /
+  // `renderDartToastMessage`.
   "loom.toast-message-unsupported": `
 system P {
   subdomain D { context C {
@@ -1053,7 +1056,7 @@ system P {
   ui WebApp {
     api C: Api
     channel Live: C.Lifecycle
-    on Live.OrderPlaced(e) { toast(e.order.id) }
+    on Live.OrderPlaced(e) { toast(string(e.at)) }
     page Home { route: "/" body: Stack { Heading { "home" } } }
   }
   storage pg { type: postgres }

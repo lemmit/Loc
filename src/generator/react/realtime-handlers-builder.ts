@@ -12,10 +12,10 @@
 // hook-based toast additionally ships a `realtime-toast-setup` line
 // rendered inside the component body.
 //
-// The message expression is the validator-bounded v1 subset
+// The message expression is the validator-bounded subset
 // (`loom.ui-handler-statement-unknown` admits only `toast(<expr>)`): literals,
-// the event binding, single-level member access off it, and operators.
-// Anything deeper fails loud here rather than emitting broken TSX.
+// the event binding, MULTI-LEVEL member access off it, and operators.
+// Anything outside that fails loud here rather than emitting broken TSX.
 
 import type { UiIR } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";

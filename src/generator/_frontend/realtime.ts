@@ -14,10 +14,12 @@
 //     is framework-shaped (react's renderless `useEffect` component
 //     vs svelte's `$effect` script) and stays per-frontend.
 //
-// The message expression is the validator-bounded v1 subset
+// The message expression is the validator-bounded subset
 // (`loom.ui-handler-statement-unknown` admits only `toast(<expr>)`): literals,
-// the event binding, single-level member access off it, and operators.
-// Anything deeper fails loud here rather than emitting broken markup.
+// the event binding, MULTI-LEVEL member access off it, and operators.
+// Anything outside that fails loud here rather than emitting broken markup —
+// the throw is the defensive backstop behind `loom.toast-message-unsupported`,
+// which rejects the same shapes with a source location one phase earlier.
 
 import type { ExprIR, UiIR, UiNotificationIR } from "../../ir/types/loom-ir.js";
 import type { RealtimeStreamCredential } from "../../ir/util/realtime-rooms.js";
@@ -149,9 +151,33 @@ export function toastImports(pack: LoadedPack): string[] {
   return specs.map((s) => `import { ${s.named.join(", ")} } from ${JSON.stringify(s.from)};`);
 }
 
-/** Render the v1 message-expression subset to JS.  `bind` reads as the
- *  raw wire event; member access off it is `String(...)`-wrapped so the
- *  `Record<string, unknown>` field concatenates cleanly. */
+/** The field names of a member chain rooted at the handler's event binding,
+ *  outermost LAST — `e.order.id` with `bind === "e"` gives `["order", "id"]`.
+ *  `undefined` when the chain does not bottom out at a bare `bind` reference
+ *  (`currentUser.email`, `(e).id`, `f(x).y`), which is outside the subset.
+ *
+ *  THE one definition of "a toast member chain": all four realtime renderers
+ *  call it, so the shape they accept cannot drift apart per target.  The
+ *  validator gate (`toastMessageProblem`, `src/ir/validate/checks/ui-checks.ts`)
+ *  mirrors it in the `ir/` layer, which cannot import from `generator/`. */
+export function toastMemberPath(e: ExprIR, bind: string): string[] | undefined {
+  const path: string[] = [];
+  let cur: ExprIR = e;
+  while (cur.kind === "member") {
+    path.unshift(cur.member);
+    cur = cur.receiver;
+  }
+  return cur.kind === "ref" && cur.name === bind ? path : undefined;
+}
+
+/** Render the message-expression subset to JS.  `bind` reads as the raw wire
+ *  event; member access off it is `String(...)`-wrapped so the
+ *  `Record<string, unknown>` field concatenates cleanly.
+ *
+ *  NULLABLE LINKS.  Every hop past the first is null-aware (`?.`) and the whole
+ *  chain falls back to `""`, so a missing link anywhere renders as the EMPTY
+ *  STRING rather than throwing or leaking `"undefined"` into toast copy.  That
+ *  is the cross-target contract the other three renderers match. */
 function renderMessageExpr(e: ExprIR, bind: string): string {
   switch (e.kind) {
     case "literal":
@@ -162,14 +188,17 @@ function renderMessageExpr(e: ExprIR, bind: string): string {
         `RealtimeHandlers: unsupported name '${e.name}' in toast message (only the event binding '${bind}' is in scope).`,
       );
     case "member": {
-      if (e.receiver.kind !== "ref" || e.receiver.name !== bind) {
+      const path = toastMemberPath(e, bind);
+      if (!path) {
         throw new Error(
-          "RealtimeHandlers: toast messages support single-level member access off the event binding only.",
+          "RealtimeHandlers: toast messages support member access off the event binding only.",
         );
       }
       // The wire event is `{ type: string } & Record<string, unknown>` —
-      // String()-wrap so the field concatenates / interpolates cleanly.
-      return `String(event.${e.member} ?? "")`;
+      // String()-wrap so the field concatenates / interpolates cleanly.  `event`
+      // itself is always defined, so only the hops PAST the first need `?.`.
+      const chain = path.map((m, i) => (i === 0 ? `.${m}` : `?.${m}`)).join("");
+      return `String(event${chain} ?? "")`;
     }
     case "paren":
       return `(${renderMessageExpr(e.inner, bind)})`;

@@ -85,10 +85,16 @@ describe("flutter realtime — the subscription", () => {
     expect(dart).toContain("_subscription?.cancel();");
   });
 
-  it("toasts the v1 message subset, reading the payload defensively", async () => {
+  it("toasts the message subset, reading the payload defensively", async () => {
     const dart = (await gen()).get("web_app/lib/realtime.dart")!;
     expect(dart).toContain("case 'OrderPlaced':");
-    expect(dart).toContain("_toast('Order ' + '${payload['order']}' + ' placed');");
+    // This was `'${payload['order']}'` until the subset grew MULTI-LEVEL member
+    // access (2026-09-02).  A chain needs the null-aware index (`?[]`) — a plain
+    // `[]` on a null link is a NoSuchMethodError — and the `?? ''` fallback came
+    // with it at every depth, deliberately: bare interpolation of a missing key
+    // printed the literal text "null" into user-visible toast copy, where the JS
+    // and LiveView renderers both printed "".  All four now answer "".
+    expect(dart).toContain("_toast('Order ' + '${payload['order'] ?? ''}' + ' placed');");
     // An undecodable frame degrades to an empty map — it never tears the
     // subscription down.
     expect(dart).toContain("Map<String, dynamic> payload = const <String, dynamic>{};");

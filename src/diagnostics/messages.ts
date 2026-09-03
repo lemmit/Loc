@@ -2524,14 +2524,16 @@ export const DIAGNOSTIC_MESSAGES = {
     `(React / Vue / Svelte all do).`,
   "loom.toast-message-unsupported": (p: { where: unknown; kind: unknown; detail: unknown }) =>
     `the \`toast(…)\` message ${p.detail}.  Every realtime renderer implements the ` +
-    `same v1 message subset — a literal, the handler's event binding, a SINGLE-LEVEL member ` +
-    `access off that binding, parentheses, and binary operators between those — and THROWS on ` +
-    `anything else (\`unsupported expression kind '${p.kind}'\`): ` +
+    `same message subset — a literal, the handler's event binding, a member access CHAIN of ` +
+    `any depth off that binding, parentheses, and binary operators between those — and THROWS ` +
+    `on anything else (\`unsupported expression kind '${p.kind}'\`): ` +
     `src/generator/_frontend/realtime.ts (React/Vue/Svelte/Angular), ` +
     `src/generator/feliz/realtime.ts (Feliz), src/generator/elixir/realtime-liveview.ts ` +
-    `(Phoenix LiveView).  So this \`.ddd\` validates and then CRASHES codegen.  Build the ` +
-    `message from a literal and \`<bind>.<field>\` parts (\`toast("Order " + e.order + ` +
-    `" placed")\`); compute anything richer server-side and carry it on the event.`,
+    `(Phoenix LiveView), src/generator/flutter/realtime.ts (Flutter).  So this \`.ddd\` ` +
+    `validates and then CRASHES codegen.  Build the message from a literal and ` +
+    `\`<bind>.<field>…\` parts (\`toast("Order " + e.order.id + " placed")\`); compute anything ` +
+    `richer — a conversion, a method call, a conditional — server-side and carry it on the ` +
+    `event.`,
 
   // ----------------------------------------------------------------------
   // src/ir/validate/checks/tenancy-checks.ts
