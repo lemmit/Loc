@@ -561,7 +561,7 @@ export function generateVueForContexts(
     ui,
     pageCtx,
     authUi,
-    deriveNavSections(defaultPages, pageCtx),
+    deriveNavSections(defaultPages, pageCtx, authUi),
   );
   const navSections: Array<{
     label: string;
@@ -685,7 +685,7 @@ export function generateVueForContexts(
   // `import "./globals.css"`.  `vite/client` declares the `*.css`
   // side-effect module (mirrors the React generator).
   out.set("src/vite-env.d.ts", '/// <reference types="vite/client" />\n');
-  out.set("index.html", renderShell(pack, "index-html", prepareIndexHtmlVM(deployable, ui)));
+  out.set("index.html", renderShell(pack, "index-html", prepareIndexHtmlVM(sys, deployable, ui)));
   out.set("Dockerfile", renderShell(pack, "dockerfile", {}));
   out.set(".dockerignore", renderShell(pack, "dockerignore", {}));
   out.set("certs/.gitkeep", "");
@@ -937,14 +937,19 @@ function deriveNavSections(
 // ---------------------------------------------------------------------------
 // index.html metadata — same projection rule as the React generator:
 // the route-`/` page (or the first page) supplies static SEO metadata;
-// the deployable name is the title fallback.
+// the SYSTEM name is the title fallback.
 // ---------------------------------------------------------------------------
 
-function prepareIndexHtmlVM(deployable: DeployableIR, ui: UiIR): Record<string, unknown> {
+function prepareIndexHtmlVM(
+  sys: SystemIR,
+  deployable: DeployableIR,
+  ui: UiIR,
+): Record<string, unknown> {
   const page = ui.pages.find((p) => p.route === "/") ?? ui.pages[0];
   const metadata = page?.metadata;
   return {
-    title: staticTitleOf(page) ?? deployable.name,
+    // System name before deployable name — see the react twin (finding E7).
+    title: staticTitleOf(page) ?? humanize(sys.name) ?? deployable.name,
     description: metadata?.description,
     ogImage: metadata?.ogImage,
     canonical: metadata?.canonical,

@@ -39,53 +39,6 @@ export interface ExtraPageRoute {
   route: string;
 }
 
-/** The sidebar this shell renders with no menu input of its own: one
- *  section per construct kind, in aggregate/workflow declaration order.
- *  Exported so the react generator can hand it to `deriveSidebarFromUi`
- *  as the base the ui's own custom pages MERGE into (M-FT.6) — the
- *  preparer keeps using it directly for callers that pass no override. */
-export function defaultNavSections(
-  aggregates: AggregateIR[],
-  workflows: WorkflowIR[],
-): NavSectionVM[] {
-  const sections: NavSectionVM[] = [];
-  sections.push({
-    label: "Aggregates",
-    entries: aggregates.map((a) => {
-      const slug = snake(plural(a.name));
-      const entry: NavEntryVM = {
-        to: `/${slug}`,
-        label: humanize(plural(a.name)),
-        testId: `nav-${slug}`,
-        activeArgs: JSON.stringify(`/${slug}`),
-      };
-      return entry;
-    }),
-  });
-  if (workflows.length > 0) {
-    const entries: NavEntryVM[] = [];
-    // Index link first, exact-match so /workflows/<slug> children
-    // don't shadow the parent.
-    entries.push({
-      to: "/workflows",
-      label: "All workflows",
-      testId: "nav-workflows",
-      activeArgs: `"/workflows", { exact: true }`,
-    });
-    for (const wf of workflows) {
-      const slug = snake(wf.name);
-      entries.push({
-        to: `/workflows/${slug}`,
-        label: humanize(wf.name),
-        testId: `nav-workflow-${slug}`,
-        activeArgs: JSON.stringify(`/workflows/${slug}`),
-      });
-    }
-    sections.push({ label: "Workflows", entries });
-  }
-  return sections;
-}
-
 /** The sidebar this shell renders with no menu input of its own: one section
  *  per construct kind, in aggregate/workflow declaration order.  Exported so
  *  the react generator can hand it to `deriveSidebarFromUi` as the base the

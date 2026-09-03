@@ -338,7 +338,13 @@ export function generateSvelteForContexts(
     ui,
     pageCtx,
     authUi,
-    defaultNavSections(scaffoldedAggregates, scaffoldedWorkflows, hasWorkflowsIndex),
+    defaultNavSections(
+      scaffoldedAggregates,
+      scaffoldedWorkflows,
+      hasWorkflowsIndex,
+      ui.pages,
+      authUi,
+    ),
   );
   const navSections =
     sidebarOverride?.map((s) => ({

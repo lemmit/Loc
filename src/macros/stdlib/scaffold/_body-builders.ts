@@ -186,42 +186,41 @@ export function scaffoldHome(
      *  depends on it, and an undeclared field would drop silently. */
     moneyFields?: readonly string[];
   }[] = [],
+  /** The sidebar's own entries, so the landing page is a LAUNCHER for the
+   *  links the shell actually renders (finding C4).  Before this, Home
+   *  described the model in metamodel vocabulary — "2 aggregates", "Manage
+   *  records of each kind from the sidebar" — which names nothing a user of
+   *  the app can look for and goes stale against the sidebar it describes.
+   *  Empty ⇒ the summary cards are skipped rather than described in the
+   *  abstract. */
+  nav: {
+    aggregates?: readonly { label: string; route: string }[];
+    hasWorkflows?: boolean;
+  } = {},
 ): Expression {
   const cards: Array<{ value: Expression }> = [];
-  if (counts.aggregates > 0) {
-    cards.push({
-      value: callExpr("Card", [
-        {
-          value: callExpr("Heading", [
-            { value: stringLit(pluralizeCount(counts.aggregates, "aggregate", "aggregates")) },
-            { name: "level", value: intLit(4) },
-          ]),
-        },
-        {
-          value: callExpr("Text", [
-            { value: stringLit("Manage records of each kind from the sidebar.") },
-          ]),
-        },
-      ]),
-    });
+  /** One launcher card: the sidebar's own label, plus the link it points at. */
+  const launcher = (label: string, linkText: string, route: string): { value: Expression } => ({
+    value: callExpr("Card", [
+      {
+        value: callExpr("Heading", [
+          { value: stringLit(label) },
+          { name: "level", value: intLit(4) },
+        ]),
+      },
+      {
+        value: callExpr("Anchor", [
+          { value: stringLit(linkText) },
+          { name: "to", value: stringLit(route) },
+        ]),
+      },
+    ]),
+  });
+  for (const agg of nav.aggregates ?? []) {
+    cards.push(launcher(agg.label, `Open ${agg.label.toLowerCase()} →`, agg.route));
   }
-  if (counts.workflows > 0) {
-    cards.push({
-      value: callExpr("Card", [
-        {
-          value: callExpr("Heading", [
-            { value: stringLit(pluralizeCount(counts.workflows, "workflow", "workflows")) },
-            { name: "level", value: intLit(4) },
-          ]),
-        },
-        {
-          value: callExpr("Anchor", [
-            { value: stringLit("Open workflows →") },
-            { name: "to", value: stringLit("/workflows") },
-          ]),
-        },
-      ]),
-    });
+  if (counts.workflows > 0 && (nav.hasWorkflows ?? true)) {
+    cards.push(launcher("Workflows", "Open workflows →", "/workflows"));
   }
   const children: Array<{ name?: string; value: Expression }> = [
     {
@@ -233,7 +232,11 @@ export function scaffoldHome(
     {
       value: callExpr("Text", [
         {
-          value: stringLit("Pick a section from the sidebar to start, or jump straight in below."),
+          value: stringLit(
+            cards.length > 0
+              ? "Pick a section from the sidebar to start, or jump straight in below."
+              : "Pick a section from the sidebar to start.",
+          ),
         },
       ]),
     },
@@ -339,11 +342,6 @@ export function scaffoldWorkflowsIndex(workflows: readonly Workflow[]): Expressi
     { value: callExpr("Stack", cards) },
     { name: "testid", value: stringLit("workflows-index") },
   ]);
-}
-
-/** `${n} ${singular|plural}` — a pluralised count label. */
-function pluralizeCount(n: number, singular: string, plural: string): string {
-  return `${n} ${n === 1 ? singular : plural}`;
 }
 
 /** `scaffoldInstanceList` — scaffolds an observable workflow's running-instances

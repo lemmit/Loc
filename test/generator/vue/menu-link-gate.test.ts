@@ -60,10 +60,19 @@ describe("vue menu-link gate", () => {
     expect(shell.match(/const currentUser = /g)?.length ?? 0).toBe(1);
   });
 
-  it("binds no session user when no link is gated (scaffold default sidebar)", async () => {
+  it("gates the same link when the sidebar is the MERGED default (no menu block)", async () => {
+    // With no `ui.menu` block the shell's scaffold grouping is merged with the
+    // ui's own pages (M-FT.6), so `Secret` — a hand-written page with a
+    // `requires` gate and no `menu { … }` of its own — finally has a sidebar
+    // link.  It must be gated exactly as the menu-declared one above: before
+    // the merge it had no link at all, which is why this case asserted that
+    // nothing was gated.
     const shell = find(await generateSystemFiles(SYS({ authUi: true, menu: false })), "/App.vue");
-    expect(shell).not.toContain("useSession");
-    expect(shell).not.toContain("v-if='(");
+    expect(shell).toContain('to="/secret"');
+    expect(shell).toContain(`v-if='(currentUser.role === "agent")'`);
+    // …and only that link: the scaffolded Ticket links and Public are ungated.
+    expect(shell.match(/v-if='\(/g)?.length ?? 0).toBe(1);
+    expect(shell.match(/const currentUser = /g)?.length ?? 0).toBe(1);
   });
 
   it("rejects a gated link without auth: ui (the silent drop is closed)", async () => {

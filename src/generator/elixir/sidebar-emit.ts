@@ -82,8 +82,7 @@ export function renderSidebarComponent(args: RenderSidebarComponentArgs): string
   // already claims (M-FT.6 / finding C1) — before, a single page-level
   // `menu { … }` block replaced the whole sidebar.
   const defaults = buildDefaultSections(ui);
-  const navSections: NavSectionVM[] =
-    deriveSidebarFromUi(ui, nameCtx, false, defaults) ?? defaults;
+  const navSections: NavSectionVM[] = deriveSidebarFromUi(ui, nameCtx, false, defaults) ?? defaults;
 
   // Per-entry currentUser-only gate, keyed by route.  Only populated when the
   // deployable has auth (so `@current_user` exists in the layout/sidebar

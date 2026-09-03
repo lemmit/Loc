@@ -943,6 +943,8 @@ export const DIAGNOSTIC_MESSAGES = {
     `Duplicate action '${p.name}' on ${p.surface}; action names must be unique on a page/component.`,
   "loom.ui-channel-not-broadcast": (p: { name: unknown; chName: unknown; delivery: unknown }) =>
     `ui '${p.name}' subscribes to channel '${p.chName}', but its delivery is '${p.delivery}'.  Only 'delivery: broadcast' channels are UI-observable; 'queue' is work distribution.`,
+  "loom.menu-link-unresolved": (p: { name: unknown; uiName: unknown; linkable: unknown }) =>
+    `menu link '${p.name}' does not name a page of ui '${p.uiName}'.  Linkable pages: ${p.linkable}.  Scaffolded pages are named by ROLE inside a per-aggregate area, so link them area-qualified (e.g. 'link Orders.List'); a workflow's form page is '<Workflow>Workflow'.`,
   "loom.extern-function-shadows-stdlib": (p: { name: unknown }) =>
     `extern function '${p.name}' shadows a walker-stdlib primitive.  Pick a different name.`,
   "loom.store-lifetime-invalid": (p: {

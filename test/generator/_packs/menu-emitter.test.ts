@@ -1,9 +1,5 @@
 // menu emitter.
 //
-// M-FT.6 (claim stub): the no-`ui.menu` case must MERGE the caller's default
-// sections with every custom page's `menu { … }` metadata — a custom page
-// carrying `menu { section: "Work" }` must not erase the scaffold's own links.
-//
 // Tests the explicit-menu-block path: when a `ui` declares
 // `menu { section "S" { link Page, link "L" -> "url" } }`, the
 // derived `NavSectionVM[]` must match the user's exact layout,
@@ -205,6 +201,143 @@ describe("menu emitter", () => {
     `);
     const sidebar = deriveSidebarFromUi(uiOf(loom, "B"), nameCtxOf(loom))!;
     expect(sidebar[0]!.entries).toEqual([]);
+  });
+
+  // --- M-FT.6: a page-level `menu { … }` is ADDITIVE, never a replacement ----
+  describe("no ui.menu — the caller's defaults merge with the ui's own pages", () => {
+    /** A scaffolded ui with one hand-written page carrying `menu { … }`. */
+    const scaffoldPlusCustom = `
+      system S {
+        subdomain M {
+          context C {
+            aggregate Order { x: int }
+            repository Orders for Order { }
+          }
+        }
+        ui WebApp with scaffold(aggregates: [Order]) {
+          page Board {
+            route: "/board"
+            title: "Board"
+            menu { section: "Work", label: "Board", order: 1 }
+            body: Stack { Heading { "Board" } }
+          }
+        }
+      }
+    `;
+    /** What the react/vue/svelte app-shells hand in as their own grouping. */
+    const DEFAULTS = [
+      {
+        label: "Aggregates",
+        entries: [
+          { to: "/orders", label: "Orders", testId: "nav-orders", activeArgs: '"/orders"' },
+        ],
+      },
+    ];
+
+    it("keeps the default sections AND adds the custom page's section", async () => {
+      const loom = await buildLoom(scaffoldPlusCustom);
+      const sidebar = deriveSidebarFromUi(uiOf(loom, "WebApp"), nameCtxOf(loom), false, DEFAULTS)!;
+      // Before M-FT.6 this was `[["Work", ["/board"]]]` — the scaffolded
+      // "Aggregates" section was dropped whole by the page-level `menu` block.
+      expect(sidebar.map((s) => [s.label, s.entries.map((e) => e.to)])).toEqual([
+        ["Aggregates", ["/orders"]],
+        ["Work", ["/board"]],
+      ]);
+    });
+
+    it("gives a custom page with NO menu block a link of its own", async () => {
+      const loom = await buildLoom(`
+        system S {
+          subdomain M {
+            context C {
+              aggregate Order { x: int }
+              repository Orders for Order { }
+            }
+          }
+          ui WebApp with scaffold(aggregates: [Order]) {
+            page Board { route: "/board", body: Stack { Heading { "Board" } } }
+          }
+        }
+      `);
+      const sidebar = deriveSidebarFromUi(uiOf(loom, "WebApp"), nameCtxOf(loom), false, DEFAULTS)!;
+      expect(sidebar.map((s) => [s.label, s.entries.map((e) => e.to)])).toEqual([
+        ["Aggregates", ["/orders"]],
+        ["Pages", ["/board"]],
+      ]);
+    });
+
+    it("merges into a same-named default section instead of duplicating it", async () => {
+      const loom = await buildLoom(`
+        system S {
+          subdomain M {
+            context C {
+              aggregate Order { x: int }
+              repository Orders for Order { }
+            }
+          }
+          ui WebApp with scaffold(aggregates: [Order]) {
+            page Board {
+              route: "/board"
+              menu { section: "Aggregates", label: "Board" }
+              body: Stack { Heading { "Board" } }
+            }
+          }
+        }
+      `);
+      const sidebar = deriveSidebarFromUi(uiOf(loom, "WebApp"), nameCtxOf(loom), false, DEFAULTS)!;
+      expect(sidebar).toHaveLength(1);
+      expect(sidebar[0]!.entries.map((e) => e.to)).toEqual(["/orders", "/board"]);
+    });
+
+    it("drops the default entry a page claims, so no route is listed twice", async () => {
+      // The angular / phoenix shells default to one link per routed page, so
+      // the page the merge adds is already in their defaults.
+      const loom = await buildLoom(scaffoldPlusCustom);
+      const sidebar = deriveSidebarFromUi(uiOf(loom, "WebApp"), nameCtxOf(loom), false, [
+        {
+          label: "S",
+          entries: [
+            { to: "/orders", label: "Orders", testId: "nav-orders", activeArgs: '"/orders"' },
+            { to: "/board", label: "Board", testId: "nav-board", activeArgs: '"/board"' },
+          ],
+        },
+      ])!;
+      expect(sidebar.map((s) => [s.label, s.entries.map((e) => e.to)])).toEqual([
+        ["S", ["/orders"]],
+        ["Work", ["/board"]],
+      ]);
+    });
+
+    it("an explicit ui-level menu block still REPLACES the defaults", async () => {
+      const loom = await buildLoom(`
+        system S {
+          subdomain M {
+            context C {
+              aggregate Order { x: int }
+              repository Orders for Order { }
+            }
+          }
+          ui WebApp with scaffold(aggregates: [Order]) {
+            menu { section "Only" { link Orders.List } }
+          }
+        }
+      `);
+      const sidebar = deriveSidebarFromUi(uiOf(loom, "WebApp"), nameCtxOf(loom), false, DEFAULTS)!;
+      expect(sidebar.map((s) => s.label)).toEqual(["Only"]);
+    });
+
+    it("orders a section's entries by `menu { order: N }`", async () => {
+      const loom = await buildLoom(`
+        system S {
+          ui WebApp {
+            page B { route: "/b", menu { section: "Work", order: 2 }, body: Stack { } }
+            page A { route: "/a", menu { section: "Work", order: 1 }, body: Stack { } }
+          }
+        }
+      `);
+      const sidebar = deriveSidebarFromUi(uiOf(loom, "WebApp"), nameCtxOf(loom))!;
+      expect(sidebar[0]!.entries.map((e) => e.to)).toEqual(["/a", "/b"]);
+    });
   });
 
   it("byte-equivalence: when ui has no menu block, AppShell falls back to hardcoded grouping", async () => {

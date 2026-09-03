@@ -16,7 +16,7 @@ import { classifyPage, type PageNameCtx } from "../../ir/util/page-kind.js";
 import { contextsHaveProvenancedField } from "../../ir/util/prov-id.js";
 import { realtimeStreamCredential } from "../../ir/util/realtime-rooms.js";
 import { API_BASE_PATH } from "../../util/api-base.js";
-import { lowerFirst, snake } from "../../util/naming.js";
+import { humanize, lowerFirst, snake } from "../../util/naming.js";
 import { buildApiModule } from "../_frontend/api-module.js";
 import { AUTH_GATE_TSX, AUTH_SESSION_TS } from "../_frontend/auth-ui.js";
 import { renderI18nModule, renderLocaleCatalog } from "../_frontend/i18n-runtime.js";
@@ -48,7 +48,6 @@ import {
 } from "./emit-templates.js";
 import { prepareNamedLayouts } from "./layouts-emitter.js";
 import { deriveSidebarFromUi } from "./menu-emitter.js";
-import { defaultNavSections } from "./templating/preparers/app-shell.js";
 import {
   deriveExtraRoutesFromUi,
   emitPageObjectsForUi,
@@ -57,6 +56,7 @@ import {
 } from "./pages-emitter.js";
 import { buildRealtimeHandlers } from "./realtime-handlers-builder.js";
 import { renderZustandStoreModule } from "./store-builder.js";
+import { defaultNavSections } from "./templating/preparers/app-shell.js";
 import { renderAppShell, renderMain, renderShellFile, renderTheme } from "./templating/render.js";
 
 // ---------------------------------------------------------------------------
@@ -434,6 +434,8 @@ export function generateReactForContexts(
     defaultNavSections(
       scaffoldedAggregates.map((a) => a.agg),
       scaffoldedWorkflows.map((w) => w.wf),
+      ui.pages,
+      authUi,
     ),
   );
 
@@ -585,17 +587,13 @@ interface IndexHtmlVM {
   favicon?: string;
 }
 
-function prepareIndexHtmlVM(
-  // Reserved for a future "system-level title fallback" when no page
-  // declares a static title (the system name becomes the html title).
-  // Today the deployable-name fallback below is enough; underscore-
-  // prefix signals intentional unused.
-  _sys: SystemIR,
-  deployable: DeployableIR,
-  ui: UiIR,
-): IndexHtmlVM {
+function prepareIndexHtmlVM(sys: SystemIR, deployable: DeployableIR, ui: UiIR): IndexHtmlVM {
   const page = pickMetadataPage(ui.pages);
-  const title = staticTitleOf(page) ?? deployable.name;
+  // Fallback order: the landing page's own static `title:`, then the SYSTEM
+  // name, then the deployable's.  The deployable name is an infrastructure
+  // identifier (`webApp`) — it named the browser tab of every scaffolded app,
+  // which is the one string a user sees before any of their own (finding E7).
+  const title = staticTitleOf(page) ?? humanize(sys.name) ?? deployable.name;
   const metadata = page?.metadata;
   return {
     title,
@@ -611,7 +609,7 @@ function prepareIndexHtmlVM(
  *  cold); otherwise the first declared page is the natural pick (the
  *  scaffold-synthesised `Home` page lives there for scaffolded
  *  UIs).  Returns undefined when the ui has no pages — index.html
- *  then falls back to deployable-name title with no meta tags. */
+ *  then falls back to the system-name title with no meta tags. */
 function pickMetadataPage(pages: PageIR[]): PageIR | undefined {
   return pages.find((p) => p.route === "/") ?? pages[0];
 }
@@ -619,7 +617,7 @@ function pickMetadataPage(pages: PageIR[]): PageIR | undefined {
 /** Extract a string title from a page's title expression, when the
  *  expression is a plain string literal.  Pages that interpolate
  *  state/params into their title (e.g. `title: "Order " + id`) get
- *  no static title — the shell falls back to the deployable name. */
+ *  no static title — the shell falls back to the system name. */
 function staticTitleOf(page: PageIR | undefined): string | undefined {
   if (!page) return undefined;
   const t = page.title;

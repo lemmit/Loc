@@ -10,11 +10,19 @@ export default function Home() {
       <Text>{t("page.Home.text.je8653", "Pick a section from the sidebar to start, or jump straight in below.")}</Text>
       <Stack>
         <Card withBorder padding="md">
-          <Title order={4}>{t("page.Home.heading.xv173e", "3 aggregates")}</Title>
-          <Text>{t("page.Home.text.wpy903", "Manage records of each kind from the sidebar.")}</Text>
+          <Title order={4}>{t("page.Home.heading.kdfstp", "Products")}</Title>
+          <Anchor component={RouterLink} to="/products">{t("page.Home.anchor.zzscfl", "Open products →")}</Anchor>
         </Card>
         <Card withBorder padding="md">
-          <Title order={4}>{t("page.Home.heading.ltp7vl", "1 workflow")}</Title>
+          <Title order={4}>{t("page.Home.heading.xf3i18", "Orders")}</Title>
+          <Anchor component={RouterLink} to="/orders">{t("page.Home.anchor.9q5sic", "Open orders →")}</Anchor>
+        </Card>
+        <Card withBorder padding="md">
+          <Title order={4}>{t("page.Home.heading.vweyym", "Customers")}</Title>
+          <Anchor component={RouterLink} to="/customers">{t("page.Home.anchor.ovrhvu", "Open customers →")}</Anchor>
+        </Card>
+        <Card withBorder padding="md">
+          <Title order={4}>{t("page.Home.heading.qrue75", "Workflows")}</Title>
           <Anchor component={RouterLink} to="/workflows">{t("page.Home.anchor.l9bem9", "Open workflows →")}</Anchor>
         </Card>
       </Stack>

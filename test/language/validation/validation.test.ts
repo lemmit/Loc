@@ -797,6 +797,35 @@ describe("validation", () => {
       );
     });
 
+    it("an unresolved menu link lists the ui's linkable page names", async () => {
+      // The linker's own "Could not resolve reference to Page named 'X'" does
+      // not say what IS linkable, and the scaffolded pages a menu most wants to
+      // link are named by ROLE inside a per-aggregate area — so the name the
+      // author reaches for (`CloseAll`, the workflow's own name) never resolves
+      // and nothing points at `Orders.List` / `CloseAllWorkflow` (finding C2).
+      const { errors } = await parse(`
+        system S {
+          subdomain M {
+            context C {
+              aggregate Order { x: int }
+              repository Orders for Order { }
+              workflow closeAll { create() { } }
+            }
+          }
+          api Ops from M
+          ui Web with scaffold(subdomains: [M]) {
+            api Sales: Ops
+            menu { section "Main" { link CloseAll } }
+          }
+        }
+      `);
+      const listing = errors.find((e) => /menu link 'CloseAll' does not name a page/.test(e));
+      expect(listing).toBeDefined();
+      // The two spellings that DO resolve must both be offered.
+      expect(listing).toMatch(/'Orders\.List'/);
+      expect(listing).toMatch(/'CloseAllWorkflow'/);
+    });
+
     it("rejects unknown menu-link property names", async () => {
       const { errors } = await parse(`
         system S {

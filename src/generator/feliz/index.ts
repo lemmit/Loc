@@ -35,7 +35,7 @@ import {
 } from "../../ir/util/realtime-rooms.js";
 import { DAISYUI_THEMES } from "../../util/builtin-formats.js";
 import { lines } from "../../util/code-builder.js";
-import { lowerFirst, upperFirst } from "../../util/naming.js";
+import { humanize, lowerFirst, upperFirst } from "../../util/naming.js";
 import {
   E2E_FIXTURES_TS,
   E2E_PACKAGE_JSON,
@@ -1893,12 +1893,12 @@ EXPOSE 3000
 CMD ["nginx", "-g", "daemon off;"]
 `;
 
-const INDEX_HTML = (theme: string): string => `<!doctype html>
+const INDEX_HTML = (theme: string, title: string): string => `<!doctype html>
 <html lang="en" data-theme="${theme}">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Loom · Feliz</title>
+    <title>${title}</title>
     <!-- Vite runs Tailwind (+ daisyUI) PostCSS over this at build; the daisyUI
          component classes the pack emits resolve here. -->
     <link rel="stylesheet" href="./styles.css" />
@@ -1993,7 +1993,7 @@ export function generateFelizForContexts(
     PACKAGE_JSON(`${deployable.name}-feliz`, uiUsesDataGrid(ui), felizI18nEnabled(ui)),
   );
   out.set("vite.config.js", renderViteConfig(basePath));
-  out.set("index.html", INDEX_HTML(theme));
+  out.set("index.html", INDEX_HTML(theme, humanize(sys.name)));
   out.set("styles.css", STYLES_CSS);
   out.set("tailwind.config.js", TAILWIND_CONFIG(theme));
   out.set("postcss.config.js", POSTCSS_CONFIG);

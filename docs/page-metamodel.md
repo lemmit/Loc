@@ -958,10 +958,26 @@ Pages carry `menu { … }` metadata; sidebar is derived. Optional `ui`-level
    (defaults: aggregates → "Aggregates", workflows → "Workflows")
 2. Apply explicit `page X` overrides (by name)
 3. If `ui` has a `menu { … }` block:
-       sidebar = that block, resolved against the page registry
+       sidebar = that block, resolved against the page registry   (REPLACES)
    else:
-       sidebar = pages grouped by `menu.section`, sorted by `menu.label`
+       sidebar = the scaffold defaults, MERGED with this ui's own pages:
+         - a page's `menu { section: "X" }` appends into section "X"
+           (creating it after the defaults when it is new),
+         - a page with no `menu` block at all appends to a "Pages" section,
+         - within a section, entries sort by `menu { order: N }`, then by
+           declaration order,
+         - a default entry whose route a page already claims is dropped, so a
+           page is never listed twice,
+         - `menu { hidden: true }` (what the scaffold puts on `New` / `Detail`)
+           keeps a page out entirely.
 ```
+
+An explicit `ui`-level `menu { … }` block is the only **replacement**: it is the
+author's exact layout, so nothing is merged into it.  A *page*-level
+`menu { … }` block is always **additive** — writing one on a hand-written page
+adds its link, it never takes the scaffolded links away.  (Before M-FT.6 a
+single page-level `menu` block replaced the whole sidebar, so one custom page
+erased every scaffolded link; omitting the block left that page with no link.)
 
 ### Explicit form
 
@@ -986,11 +1002,14 @@ ambiguous across aggregates.  Disambiguate with the **area-qualified** form
 to a shared registry. The `menu` block is the explicit composition operator
 over that registry.
 
+A `link` that names no page of the ui is an error (`loom.menu-link-unresolved`)
+that lists every linkable name — bare and area-qualified — rather than leaving
+you to guess at the role-scoped scaffold names.
+
 Per-link auth: a `link Orders.List` inherits the underlying page's `requires`
-clause.  The React page guard (above) already renders `<Forbidden/>` on a gated
-page; conditionally **hiding** the matching menu link (so it never shows for a
-caller who can't reach it) is the next slice — today the link still renders and
-the destination page guards itself.
+clause.  On an `auth: ui` frontend the shell hides the link when the gate fails
+(the nav-side mirror of the page guard's `<Forbidden/>`); the default
+(non-menu-derived) entries inherit the gate of the page they link to as well.
 
 ---
 

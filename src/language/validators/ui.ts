@@ -1,6 +1,6 @@
 // UI / page / menu / theme / helper-import / api-body-ref checks.
 
-import { AstUtils, type ValidationAcceptor } from "langium";
+import { type AstNode, AstUtils, type ValidationAcceptor } from "langium";
 import { diagMessage } from "../../diagnostics/messages.js";
 import type {
   ActionDecl,
@@ -24,9 +24,11 @@ import type {
 import {
   isActionDecl,
   isAggregate,
+  isArea,
   isComponent,
   isMemberSuffix,
   isNameRef,
+  isPage,
   isPostfixChain,
 } from "../generated/ast.js";
 import { isWalkerPrimitive } from "../walker-stdlib.js";
@@ -542,14 +544,49 @@ export function checkPage(p: Page, ui: Ui, accept: ValidationAcceptor): void {
   }
 }
 
-export function checkMenuBlock(block: MenuBlock, _ui: Ui, accept: ValidationAcceptor): void {
+/** Every page name a `menu { … }` link may spell, in the order the scope
+ *  provider offers them: a page's bare name, plus its area-qualified dotted
+ *  name when it lives inside one (`Orders.List`).  Mirrors the `MenuLink.page`
+ *  branch of `DddScopeProvider.getScope` — the two must agree, or the error
+ *  lists names that do not link. */
+function linkablePageNames(ui: Ui): string[] {
+  const names: string[] = [];
+  const collect = (members: readonly AstNode[], areaPath: readonly string[]): void => {
+    for (const m of members) {
+      if (isPage(m)) {
+        names.push(m.name);
+        if (areaPath.length > 0) names.push(`${areaPath.join(".")}.${m.name}`);
+      } else if (isArea(m)) {
+        collect(m.members, [...areaPath, m.name]);
+      }
+    }
+  };
+  collect(ui.members, []);
+  return names;
+}
+
+export function checkMenuBlock(block: MenuBlock, ui: Ui, accept: ValidationAcceptor): void {
   // Rule 8 — every page-link in a menu block must reference a page.
-  // The grammar's `[Page:ID]` cross-reference resolves through the
-  // default scope provider, already scoped to the surrounding ui, so
-  // the linker reports unresolved refs natively ("Could not resolve
-  // reference to Page named 'X'") — no custom validator message needed.
+  // The linker already reports an unresolved cross-reference, but its message
+  // ("Could not resolve reference to Page named 'CloseProject'") does not say
+  // what IS linkable — and the scaffolded pages a menu most wants to link are
+  // named by ROLE inside a per-aggregate area (`Orders.List`), so the name the
+  // author reaches for is almost never the one that resolves (finding C2).
+  // This check names the alternatives.
+  const linkable = linkablePageNames(ui);
   for (const section of block.sections) {
     for (const link of section.links) {
+      if (link.page && !link.page.ref) {
+        accept(
+          "error",
+          diagMessage("loom.menu-link-unresolved", {
+            name: link.page.$refText,
+            uiName: ui.name,
+            linkable: linkable.length > 0 ? linkable.map((n) => `'${n}'`).join(", ") : "none",
+          }),
+          { node: link, property: "page", code: "loom.menu-link-unresolved" },
+        );
+      }
       // MenuLinkProp key names — only `label` / `order` recognised.
       const allowedLinkKeys = new Set(["label", "order"]);
       for (const prop of link.props ?? []) {
