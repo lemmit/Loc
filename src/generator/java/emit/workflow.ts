@@ -36,6 +36,7 @@ import {
   referencedValueObjects,
   wireJavaType,
   wireToDomain,
+  wireToDomainGuards,
 } from "./wire.js";
 import { setterName } from "./workflow-state.js";
 
@@ -426,6 +427,7 @@ function workflowVoMappers(
   ctx: EnrichedBoundedContextIR,
   workflows: readonly WorkflowIR[],
   imports: Set<string>,
+  basePkg: string,
 ): string[] {
   const voLookup = new Map(ctx.valueObjects.map((v) => [v.name, v.fields] as const));
   const collect = (t: TypeIR, into: Set<string>): void => {
@@ -448,9 +450,12 @@ function workflowVoMappers(
   return [...voNames].sort().flatMap((vo) => {
     const fields: readonly FieldIR[] = voLookup.get(vo) ?? [];
     const args = fields
-      .map((f) => wireToDomain(effType(f.type, !!f.optional), `request.${f.name}()`))
+      .map((f) => wireToDomain(effType(f.type, !!f.optional), `request.${f.name}()`, `/${f.name}`))
       .join(", ");
-    for (const f of fields) collectWireToDomainImports(f.type, imports);
+    for (const f of fields) {
+      collectWireToDomainImports(f.type, imports);
+      if (wireToDomainGuards(f.type)) imports.add(`${basePkg}.domain.common.WireFormatException`);
+    }
     return [
       `    private static ${vo} to${vo}(${vo}Request request) {`,
       `        return new ${vo}(${args});`,
@@ -670,7 +675,9 @@ export function renderJavaWorkflows(
     }
     const paramLets = wf.params.map((p) => {
       collectWireToDomainImports(p.type, imports);
-      return `            var ${p.name} = ${wireToDomain(p.type, `request.${p.name}()`)};`;
+      if (wireToDomainGuards(p.type))
+        imports.add(`${wctx.basePkg}.domain.common.WireFormatException`);
+      return `            var ${p.name} = ${wireToDomain(p.type, `request.${p.name}()`, `/${p.name}`)};`;
     });
     // Chunked (one lines-array per top-level statement) rather than the
     // pre-flattened `renderWorkflowStmts` — byte-identical either way
@@ -756,7 +763,7 @@ export function renderJavaWorkflows(
   // `to<Vo>(...)` mappers for VO-typed params (parity with the per-aggregate
   // service).  Their `<Vo>Request` parameter type lives in an aggregate's
   // application package → import it the same way the Request DTO does.
-  const voMappers = workflowVoMappers(ctx, cmdWorkflows, imports);
+  const voMappers = workflowVoMappers(ctx, cmdWorkflows, imports, wctx.basePkg);
   while (voMappers[voMappers.length - 1] === "") voMappers.pop();
   const voReqNames = new Set<string>();
   for (const wf of cmdWorkflows) {

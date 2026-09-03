@@ -96,7 +96,7 @@ system Reg {
     const v = [...files.entries()].find(([k]) => /CreateAccountValidator\.java$/.test(k))![1];
     expect(v).toMatch(/private static final Pattern MATCHES_PATTERN_0 = Pattern\.compile\(/);
     expect(v).toContain(
-      'if (!(MATCHES_PATTERN_0.matcher(slug).find())) errors.rejectValue("slug", "loom.invariant"',
+      'if (!(slug == null || MATCHES_PATTERN_0.matcher(slug).find())) errors.rejectValue("slug", "loom.invariant"',
     );
   });
 });

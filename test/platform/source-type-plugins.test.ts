@@ -10,7 +10,11 @@ import {
   configSchemaFor,
   sourceTypeFor,
   supportsSurfaceKind,
+  unregisterSourceType,
 } from "../../src/util/source-types.js";
+
+/** Every sourceType name this suite can register, removed after each test. */
+const REGISTERED_BY_THIS_SUITE = ["clickhouseCloud"];
 
 let dir: string;
 
@@ -25,6 +29,13 @@ beforeEach(() => {
 });
 afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
+  // The registry is module-GLOBAL, so a descriptor registered here outlives the
+  // test file and leaks into every other suite sharing the worker: without this
+  // `source-types.test.ts` sees `clickhouseCloud` among the 'state' stores and
+  // fails its matrix-equivalence check. It surfaced only when an unrelated new
+  // test file changed how vitest distributed files across workers — the leak
+  // was always there, the co-location was not.
+  for (const name of REGISTERED_BY_THIS_SUITE) unregisterSourceType(name);
 });
 
 describe("sourceType plugin discovery", () => {

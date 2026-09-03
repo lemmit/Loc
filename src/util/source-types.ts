@@ -129,6 +129,15 @@ export function registerSourceType(descriptor: SourceTypeDescriptor): void {
   REGISTRY.set(descriptor.name, descriptor);
 }
 
+/** Remove a registered sourceType. Exists for the plugin-discovery tests: the
+ *  registry is module-global, so a test that registers an out-of-tree
+ *  descriptor and does not remove it leaks into every OTHER test that runs in
+ *  the same worker — `sourceTypesForSurfaceKind('state')` then answers with a
+ *  vendor store no fixture declared. Returns whether anything was removed. */
+export function unregisterSourceType(name: string): boolean {
+  return REGISTRY.delete(name);
+}
+
 /** Look up a sourceType descriptor by name (= `StorageKind`). */
 export function sourceTypeFor(name: string): SourceTypeDescriptor | undefined {
   return REGISTRY.get(name);

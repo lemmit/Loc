@@ -92,7 +92,6 @@
     {
       "id": "W24",
       "findings": [
-        "F19",
         "F20"
       ],
       "check": "not_a_server_error",
@@ -101,12 +100,11 @@
         "dotnet"
       ],
       "kind": "bug",
-      "reason": "F19 + F20 — two write-path escapes on .NET, deliberately covered by ONE discovery-wide rule until each lands: (F19) a `date-time` string the contract declares but the wire layer does not parse reaches `DateTime.Parse` in the domain layer and throws `FormatException` → 500 (`placedAt: \"\"`); (F20) a NUL character inside a declared `string` reaches Postgres, which rejects it with `CharacterNotInRepertoireError` (22021) → 500 (`email: \"\\u0000\"`). Both are the F7 family — declared-but-unenforced — and both need the same fix shape, a wire-boundary validator that refuses what the published schema forbids. Broad on purpose, as W1/W5 were for the node discovery pass: narrowing it before either root cause lands would just split one unfixed defect across three rules."
+      "reason": "F20 — a NUL character inside a declared `string` reaches Postgres, which rejects it with `CharacterNotInRepertoireError (22021)`, and the driver's error escapes as a 500. NUL is a legal JSON string character and an illegal Postgres `text` byte, so nothing on the write path refuses it. NARROWED 2026-09-03: this rule also carried F19 (a declared `date-time` the wire layer did not parse reaching `DateTime.Parse` in the domain). F19 is FIXED on .NET — measured on a booted app, `placedAt: \"\"` and `placedAt: \"not-a-date\"` both answer 422 through the WireFormatException arm (M-T6.48), not 500 — so the rule now claims only the NUL half. That half reproduces on java too and is a storage-layer refusal rather than a parse, which is why it is its own slice."
     },
     {
       "id": "W25",
       "findings": [
-        "F19",
         "F20"
       ],
       "check": "status_code_conformance",
@@ -115,7 +113,7 @@
         "dotnet"
       ],
       "kind": "bug",
-      "reason": "The consequence half of W24: 500 is not a declared response on any route. Clears with W24."
+      "reason": "The consequence half of W24: 500 is not a declared response on any route, so F20's NUL escape also trips status_code_conformance. Clears with W24. Narrowed with it on 2026-09-03 — F19 no longer reproduces on .NET."
     },
     {
       "id": "W26",
@@ -144,34 +142,6 @@
       "intermittent": true,
       "intermittentReason": "Whether the empty-string create is REACHED depends on whether the same generated body also carries the NUL byte of F20, which 500s first and is itself data-dependent — two runs of the same pinned seed produced the write half on one and only the read half (W28) on the other. Absence is therefore not evidence of a fix; it graduates with F21.",
       "reason": "F21's WRITE half, RE-DIAGNOSED (2026-09-03) — the original reason said `name` publishes `minLength: 1` in the request schema and .NET enforces it in neither. Measured on a booted app, both halves of that are wrong: `CreateCustomerRequest` publishes NO length bound at all (the request DTO already carries `AllowEmptyStrings = true`), and the bound the model DOES declare (`invariant email.length > 0`) IS enforced — `{\"name\":\"n\",\"email\":\"\"}` answers 422 with `pointer: /email` from FluentValidation. `{\"name\":\"\",\"email\":\"x\"}` answering 201 is CORRECT: `name` carries no invariant. So whatever this rule is absorbing on `POST /api/customers`, it is not an unenforced `minLength`. The READ half (W28) was a real contract violation and is FIXED; this rule stays only because the leg cannot be run here to say what it is now catching, and retiring a rule on a guess is how W31 came back. Re-triage against a nightly before touching it."
-    },
-    {
-      "id": "W29",
-      "findings": [
-        "F23",
-        "F19"
-      ],
-      "check": "not_a_server_error",
-      "operations": "^POST /api/",
-      "backends": [
-        "java"
-      ],
-      "kind": "bug",
-      "reason": "F23 + F19 on java — a required body field that arrives as JSON `null` is not rejected at the wire boundary and reaches the invariant code, which dereferences it (`Cannot invoke \"String.codePoints()\" because \"sku\" is null`, `\"amount\" is null`, `\"qty\" is null`) → NullPointerException → 500; and the same route family throws `DateTimeParseException: Text '' could not be parsed` for a malformed declared `date-time`, which is F19's shape on the JVM. Both are the declared-but-unenforced family and both are fixed by the same missing thing: a wire validator that refuses what the published schema forbids before the domain layer sees it. Discovery-wide on purpose, like W24."
-    },
-    {
-      "id": "W30",
-      "findings": [
-        "F23",
-        "F19"
-      ],
-      "check": "status_code_conformance",
-      "operations": "^POST /api/",
-      "backends": [
-        "java"
-      ],
-      "kind": "bug",
-      "reason": "The consequence half of W29: 500 is not a declared response on any route. Clears with W29."
     },
     {
       "id": "W35",

@@ -82,7 +82,7 @@ describe("java generator — event sourcing", () => {
   it("the create surface rides the create action's params (the command shape)", async () => {
     const files_ = await files();
     const req = files_.get(`${ROOT}/features/accounts/CreateAccountRequest.java`)!;
-    expect(req).toContain("public record CreateAccountRequest(String owner) {");
+    expect(req).toContain("public record CreateAccountRequest(@NotNull String owner) {");
     const svc = files_.get(`${ROOT}/features/accounts/AccountService.java`)!;
     expect(svc).toContain("var aggregate = Account.create(owner);");
     const c = files_.get(`${ROOT}/features/accounts/AccountsController.java`)!;
