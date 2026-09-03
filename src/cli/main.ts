@@ -31,7 +31,7 @@ import {
   MigrationSqlScopeError,
 } from "../system/migrations-builder.js";
 import { fsSnapshotStore, SnapshotReadError } from "../system/snapshot.js";
-import { annotateTrace, type SourceMap } from "../trace/index.js";
+import { annotateTrace, type SourceMap, traceCoverage } from "../trace/index.js";
 import { isScaffoldOnce } from "../util/scaffold-once.js";
 import {
   renderVerdictGraph,
@@ -50,6 +50,8 @@ import {
 import {
   DESIGN_PACKS,
   type DesignPack,
+  designPacksForFormat,
+  packFormatOf,
   renderLoomignore,
   renderReadme,
   renderStarter,
@@ -283,7 +285,10 @@ async function runPatch(file: string, patchesFile: string, options: { json?: boo
   const parsed = JSON.parse(raw) as ModelPatch[] | { patches: ModelPatch[] };
   const patches = Array.isArray(parsed) ? parsed : parsed.patches;
 
-  const result = await applyPatches(source, patches);
+  // Both output modes own stdout byte-for-byte — the JSON PatchResult, and
+  // the patched source `ddd patch … > m2.ddd` redirects — so the parse runs
+  // under the stray-stdout guard either way (see `withJsonStdout`).
+  const result = await withJsonStdout(() => applyPatches(source, patches));
   if (options.json) {
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   } else if (result.ok) {
@@ -309,13 +314,48 @@ function readSource(file: string): { absolute: string; source: string } {
 }
 
 /**
+ * Run `work` with everything it writes to STDOUT diverted to stderr, and
+ * return its result — the guard that keeps a `--json` verb's stdout a single
+ * parseable document.
+ *
+ * A machine-readable stream is a contract with a consumer that will
+ * `JSON.parse` it, and that contract is only as strong as the noisiest thing
+ * in the process.  It was broken by a source containing `money(`: Chevrotain's
+ * ALL(*) lookahead reports the (known, documented — see `MoneyLit` /
+ * `PrimitiveConversion` in `ddd.langium`) prefix ambiguity through
+ * `console.log`, LAZILY, on the first input that reaches that alternation —
+ * so `generate system --json` printed four lines of grammar advice ahead of
+ * the payload and `jq` refused the output.  Nothing in the JSON verbs
+ * themselves was wrong, which is the point: the fix has to hold for whatever
+ * a dependency decides to print next, not just for this one warning.
+ *
+ * The diverted text is not swallowed — it lands on stderr, where a human
+ * still sees it and `2>/dev/null` still silences it.
+ */
+async function withJsonStdout<T>(work: () => Promise<T>): Promise<T> {
+  const original = process.stdout.write.bind(process.stdout);
+  const divert = ((chunk: unknown, encoding?: unknown, callback?: unknown) =>
+    (process.stderr.write as (...a: unknown[]) => boolean)(
+      chunk,
+      encoding,
+      callback,
+    )) as typeof process.stdout.write;
+  process.stdout.write = divert;
+  try {
+    return await work();
+  } finally {
+    process.stdout.write = original;
+  }
+}
+
+/**
  * `ddd parse --json` — the structured-diagnostics contract
  * (docs/old/proposals/ai-diagnostics-contract.md).  Thin wrapper over the toolkit
  * `validate()`: prints the `ValidateReport` to stdout, exits 1 when not `ok`.
  */
 async function runParseJson(file: string): Promise<void> {
   const { absolute, source } = readSource(file);
-  const report = await validate(source, { path: absolute });
+  const report = await withJsonStdout(() => validate(source, { path: absolute }));
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
   if (!report.ok) process.exit(1);
 }
@@ -328,7 +368,7 @@ async function runParseJson(file: string): Promise<void> {
  */
 async function runGenerateJson(file: string): Promise<void> {
   const { absolute, source } = readSource(file);
-  const report = await generateModel(source, { path: absolute });
+  const report = await withJsonStdout(() => generateModel(source, { path: absolute }));
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
   if (!report.ok) process.exit(1);
 }
@@ -682,18 +722,24 @@ function gitCommitHash(): string | undefined {
  * `dotnet ef migrations add`: run it deliberately when rules change so the
  * deployed runtime's trace records can be explained against a captured
  * version of the code.
+ *
+ * Multi-file aware — `parseProject`, the same import-graph walk `generate
+ * system` and `parse` do.  On the single-document `parseFile` this verb
+ * reported a model split across `import "./shared.ddd"` as broken (a page
+ * body naming a component declared in the sibling file resolved to
+ * nothing), so a project that GENERATES could not be snapshotted.
  */
 async function runSnapshot(
   file: string,
   outDir: string,
   options: { dryRun?: boolean } = {},
 ): Promise<RunResult> {
-  const result = await parseFile(file);
+  const result = await parseProject(file);
   if (result.errorCount > 0) {
     printDiagnostics(result);
     process.exit(1);
   }
-  const loom = enrichLoomModel(lowerModel(result.model));
+  const loom = result.loom;
   const loomDiags = validateLoomModel(loom);
   const loomErrors = loomDiags.filter((d) => d.severity === "error");
   if (loomErrors.length > 0) {
@@ -777,8 +823,14 @@ async function runNew(name: string, options: NewOptions): Promise<void> {
   if (!DESIGN_PACKS.includes(design)) {
     fail(`unknown --design "${options.design}". Valid: ${DESIGN_PACKS.join(" | ")}.`);
   }
-  if (design === "coreComponents" && platform !== "elixir") {
-    fail("--design coreComponents requires --platform elixir (it is the Phoenix LiveView UI).");
+  // A HEEx pack renders Phoenix LiveView markup, so it can only mount on the
+  // elixir backend.  Keyed on the pack's format, not on one pack's name —
+  // `daisyui` is as much a LiveView pack as `coreComponents`.
+  if (packFormatOf(design) === "heex" && platform !== "elixir") {
+    fail(
+      `--design ${design} requires --platform elixir (it is a Phoenix LiveView pack). ` +
+        `For ${platform}, pick one of: ${DESIGN_PACKS.filter((d) => packFormatOf(d) !== "heex").join(" | ")}.`,
+    );
   }
 
   const outDir = path.resolve(options.out ?? name);
@@ -843,7 +895,12 @@ interface VerifyOptions {
 }
 
 /** `ddd verify` — join a test-results file onto the requirements graph,
- *  emit the verification artifacts, and gate the exit code. */
+ *  emit the verification artifacts, and gate the exit code.
+ *
+ *  Multi-file aware for the same reason `runSnapshot` is: a requirements
+ *  graph split across `import "./shared.ddd"` has to be READ the way
+ *  `generate system` reads it, or the verb rejects a model that generates
+ *  fine. */
 async function runVerify(file: string, options: VerifyOptions): Promise<void> {
   // Validate `--min` up front: `Number("90%")` / `Number("abc")` is NaN and
   // `actual < NaN` is always false, so a typo'd threshold would silently pass
@@ -859,12 +916,12 @@ async function runVerify(file: string, options: VerifyOptions): Promise<void> {
     }
   }
 
-  const result = await parseFile(file);
+  const result = await parseProject(file);
   if (result.errorCount > 0) {
     printDiagnostics(result);
     process.exit(2);
   }
-  const loom = enrichLoomModel(lowerModel(result.model));
+  const loom = result.loom;
   const loomDiags = validateLoomModel(loom);
   const loomErrors = loomDiags.filter((d) => d.severity === "error");
   if (loomErrors.length > 0) {
@@ -917,11 +974,19 @@ async function runVerify(file: string, options: VerifyOptions): Promise<void> {
   fs.writeFileSync(path.join(outDir, "verification.mmd"), renderVerdictGraph(loom, verification));
 
   const s = verification.summary;
-  console.log(
+  // Under `--json` the human summary goes to stderr: stdout then carries the
+  // verification document and nothing else, so `ddd verify --json | jq` works
+  // the way `parse --json` / `generate system --json` do.  Without `--json`
+  // the summary IS the output and stays on stdout.
+  const summaryLine =
     `Verified ${s.verified}/${s.total} requirements ` +
-      `(${s.failing} failing, ${s.unverified} unverified, ${s.untested} untested).`,
-  );
-  if (options.json) console.log(renderVerificationJson(verification));
+    `(${s.failing} failing, ${s.unverified} unverified, ${s.untested} untested).`;
+  if (options.json) {
+    console.error(summaryLine);
+    console.log(renderVerificationJson(verification));
+  } else {
+    console.log(summaryLine);
+  }
 
   // Gate.
   let failed = s.failing > 0;
@@ -997,6 +1062,55 @@ async function runTrace(file: string, options: TraceOptions): Promise<void> {
     }
   };
   console.log(annotateTrace(logText, map, readSource));
+  reportTraceCoverage(logText, map, mapPath);
+}
+
+/** Say what the annotation run actually did — on stderr, so the annotated log
+ *  stays pipeable.
+ *
+ *  `annotateTrace` echoes an unresolvable frame unchanged, which made a total
+ *  miss look like a successful no-op: a production stack whose every frame is
+ *  `dist/index.js` came back byte-identical with no count, no reason and no
+ *  next step.  The command HAS all three — it parsed the frames, it knows what
+ *  the map covers, and it knows a bundle path can't match a generated source
+ *  path. */
+function reportTraceCoverage(logText: string, map: SourceMap, mapPath: string): void {
+  const cov = traceCoverage(logText, map);
+  const covered = Object.keys(map.files);
+  if (cov.frames === 0) {
+    console.error(
+      "ddd trace: no stack frames recognized in this log (supported dialects: V8/Node, " +
+        ".NET, Java, Python, Elixir) — nothing to annotate.",
+    );
+    return;
+  }
+  if (cov.resolved > 0) {
+    console.error(`ddd trace: annotated ${cov.resolved} of ${cov.frames} stack frame(s).`);
+    return;
+  }
+
+  const lines = [`ddd trace: no frame matched the sourcemap (0 of ${cov.frames} stack frame(s)).`];
+  if (cov.unknownFiles.length > 0) {
+    lines.push(`  frame files: ${cov.unknownFiles.slice(0, 4).join(", ")}`);
+  }
+  if (cov.lineMisses > 0) {
+    lines.push(
+      `  ${cov.lineMisses} frame(s) named a mapped file but no region covered their line — ` +
+        "the map is likely older than the output; re-run `generate system … --sourcemap`.",
+    );
+  }
+  lines.push(
+    `  ${mapPath} covers ${covered.length} generated file(s)` +
+      (covered.length > 0 ? `, e.g. ${covered.slice(0, 3).join(", ")}` : ""),
+  );
+  lines.push(
+    "  A BUNDLED frame (dist/…, *.min.js, a single-file build) names the bundle, not the " +
+      "generated file the map is keyed by. Run the process from the generated sources, or " +
+      "resolve the bundle's own source map first (`node --enable-source-maps`), then re-run " +
+      "`ddd trace`. If the log is from a different project tree, point at its map with --map " +
+      "or -o.",
+  );
+  console.error(lines.join("\n"));
 }
 
 interface BreakpointOptions {
@@ -1275,20 +1389,38 @@ program
   .description(
     "Scaffold a starter .ddd project (main.ddd + README + .loomignore), validated before writing. Pick the backend with --platform and the frontend with --design.",
   )
+  .option("--platform <platform>", `backend: ${STARTER_PLATFORMS.join(" | ")} (default: node)`)
   .option(
-    "--platform <platform>",
-    "backend: node | dotnet | elixir | java | python (default: node)",
+    "--template <template>",
+    `starter model: ${STARTER_TEMPLATES.join(" | ")} (default: crud)`,
   )
-  .option("--template <template>", "starter model: blank | crud (default: crud)")
-  .option(
-    "--design <pack>",
-    "frontend: mantine | shadcn | mui | chakra (React), shadcnSvelte | flowbite (Svelte), or coreComponents (Phoenix LiveView)",
-  )
+  .option("--design <pack>", designHelp())
   .option("-o, --out <dir>", "output directory (default: ./<name>)")
   .option("--force", "scaffold into an existing, non-empty directory")
   .action(async (name: string, options: NewOptions) => {
     await runNew(name, options);
   });
+
+/** The `--design` help line, DERIVED from the pack registry.
+ *
+ *  It was a prose list, and it named seven of the thirteen registered pack
+ *  families — so `--design vuetify` worked while `--help` said no such pack
+ *  existed, and the three Angular packs were invisible.  Deriving it means
+ *  `--help` cannot disagree with what `--design` accepts. */
+function designHelp(): string {
+  const groups: [string, readonly DesignPack[]][] = [
+    ["React", designPacksForFormat("tsx")],
+    ["Vue", designPacksForFormat("vue")],
+    ["Svelte", designPacksForFormat("svelte")],
+    ["Angular", designPacksForFormat("angular")],
+    ["Phoenix LiveView, --platform elixir", designPacksForFormat("heex")],
+  ];
+  const rendered = groups
+    .filter(([, packs]) => packs.length > 0)
+    .map(([label, packs]) => `${packs.join(" | ")} (${label})`)
+    .join("; ");
+  return `frontend design pack — ${rendered} (default: mantine, or coreComponents on elixir)`;
+}
 
 const i18n = program
   .command("i18n")
@@ -1301,7 +1433,7 @@ i18n
   .description(
     "Write the fresh source catalog to <out>/.loom/messages.en.json (phases ①–⑥, no codegen).",
   )
-  .option("-o, --out <dir>", "output directory (default: ./out)")
+  .option("-o, --out <dir>", "output directory (default: the .ddd file's dir)")
   .action(async (file: string, options: { out?: string }) => {
     await runI18nExtract(file, options);
   });
@@ -1309,7 +1441,7 @@ i18n
 i18n
   .command("init <file> <locale>")
   .description("Scaffold locales/<locale>.json (all keys as TODO) and the source lock if absent.")
-  .option("--dir <dir>", "translator tree root (default: ./locales)")
+  .option("--dir <dir>", "translator tree root (default: <.ddd file's dir>/locales)")
   .action(async (file: string, locale: string, options: { dir?: string }) => {
     await runI18nInit(file, locale, options);
   });
@@ -1319,7 +1451,7 @@ i18n
   .description(
     "Three-way merge (lock=BASE, locale=OURS, fresh extraction=THEIRS) for every locale; bump the lock.",
   )
-  .option("--dir <dir>", "translator tree root (default: ./locales)")
+  .option("--dir <dir>", "translator tree root (default: <.ddd file's dir>/locales)")
   .option("--locale <locale>", "sync only this locale")
   .option("--keep-stale", "keep source-deleted keys under `_stale.<key>` instead of dropping them")
   .action(async (file: string, options: { dir?: string; locale?: string; keepStale?: boolean }) => {
@@ -1329,7 +1461,7 @@ i18n
 i18n
   .command("status <file>")
   .description("Report what `sync` would do; exit non-zero if any locale has pending changes.")
-  .option("--dir <dir>", "translator tree root (default: ./locales)")
+  .option("--dir <dir>", "translator tree root (default: <.ddd file's dir>/locales)")
   .option("--locale <locale>", "check only this locale")
   .action(async (file: string, options: { dir?: string; locale?: string }) => {
     await runI18nStatus(file, options);
@@ -1338,7 +1470,7 @@ i18n
 i18n
   .command("check <file>")
   .description("CI gate: report TODO markers, unresolved conflicts, and missing keys per locale.")
-  .option("--dir <dir>", "translator tree root (default: ./locales)")
+  .option("--dir <dir>", "translator tree root (default: <.ddd file's dir>/locales)")
   .option("--locale <locale>", "check only this locale")
   .option("--strict", "exit non-zero if any finding is present")
   .action(async (file: string, options: { dir?: string; locale?: string; strict?: boolean }) => {
@@ -1350,7 +1482,7 @@ i18n
   .description(
     "Delete keys the source no longer emits from every locale file (off by default; run deliberately).",
   )
-  .option("--dir <dir>", "translator tree root (default: ./locales)")
+  .option("--dir <dir>", "translator tree root (default: <.ddd file's dir>/locales)")
   .option("--locale <locale>", "prune only this locale")
   .action(async (file: string, options: { dir?: string; locale?: string }) => {
     await runI18nPrune(file, options);

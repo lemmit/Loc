@@ -42,8 +42,18 @@ interface LocaleFilter {
   locale?: string;
 }
 
-function localesDir(options: DirOption): string {
-  return path.resolve(options.dir ?? "locales");
+/** Where the translator tree lives for a given model.
+ *
+ *  An explicit `--dir` wins; otherwise it is `locales/` NEXT TO THE `.ddd`
+ *  FILE, not next to the shell's cwd.  Every `ddd i18n` subcommand is
+ *  addressed by a model path, and resolving one of its two directories
+ *  against the model and the other against the cwd is how `extract` came to
+ *  write `./out/.loom/messages.en.json` for a project generated in place
+ *  while its siblings read `./locales` — the same command line meaning two
+ *  different projects depending on where it was typed. */
+function localesDir(file: string, options: DirOption): string {
+  if (options.dir !== undefined) return path.resolve(options.dir);
+  return path.join(path.dirname(path.resolve(file)), "locales");
 }
 
 function readCatalog(file: string): Catalog {
@@ -70,10 +80,17 @@ function discoverLocales(dir: string, filter?: string): { locale: string; file: 
   return out.sort((a, b) => a.locale.localeCompare(b.locale));
 }
 
-/** `ddd i18n extract <file> [-o out]` — write the fresh source catalog. */
+/** `ddd i18n extract <file> [-o out]` — write the fresh source catalog.
+ *
+ *  `--out` defaults to the `.ddd` file's own directory (so the catalog lands
+ *  in the project's `.loom/`, alongside every other `.loom/` artifact), not
+ *  to `./out` — see `localesDir` for why the cwd is the wrong anchor here. */
 export async function runI18nExtract(file: string, options: { out?: string }): Promise<void> {
   const source = await extractCatalog(file);
-  const out = path.resolve(options.out ?? "out");
+  const out =
+    options.out !== undefined
+      ? path.resolve(options.out)
+      : path.dirname(path.resolve(file));
   const target = path.join(out, EXTRACT_REL);
   writeJson(target, source);
   console.log(
@@ -84,7 +101,7 @@ export async function runI18nExtract(file: string, options: { out?: string }): P
 /** `ddd i18n init <file> <locale>` — scaffold a locale file + the lock. */
 export async function runI18nInit(file: string, locale: string, options: DirOption): Promise<void> {
   const source = await extractCatalog(file);
-  const dir = localesDir(options);
+  const dir = localesDir(file, options);
   const lockFile = path.join(dir, LOCK_REL);
   const localeFile = path.join(dir, `${locale}.json`);
 
@@ -120,7 +137,7 @@ export async function runI18nSync(
   options: DirOption & LocaleFilter & { keepStale?: boolean },
 ): Promise<void> {
   const theirs = await extractCatalog(file);
-  const dir = localesDir(options);
+  const dir = localesDir(file, options);
   const lockFile = path.join(dir, LOCK_REL);
   const base = readCatalog(lockFile);
 
@@ -157,7 +174,7 @@ export async function runI18nStatus(
   options: DirOption & LocaleFilter,
 ): Promise<void> {
   const theirs = await extractCatalog(file);
-  const dir = localesDir(options);
+  const dir = localesDir(file, options);
   const base = readCatalog(path.join(dir, LOCK_REL));
   const locales = discoverLocales(dir, options.locale);
 
@@ -186,7 +203,7 @@ export async function runI18nCheck(
   options: DirOption & LocaleFilter & { strict?: boolean },
 ): Promise<void> {
   const source = await extractCatalog(file);
-  const dir = localesDir(options);
+  const dir = localesDir(file, options);
   const locales = discoverLocales(dir, options.locale);
 
   if (locales.length === 0) {
@@ -228,7 +245,7 @@ export async function runI18nCheck(
  *  default; run deliberately). */
 export async function runI18nPrune(file: string, options: DirOption & LocaleFilter): Promise<void> {
   const source = await extractCatalog(file);
-  const dir = localesDir(options);
+  const dir = localesDir(file, options);
   const locales = discoverLocales(dir, options.locale);
 
   for (const { locale, file: localeFile } of locales) {

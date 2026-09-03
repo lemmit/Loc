@@ -119,6 +119,11 @@ export function translateBreakpoint(
     region: WireRegion;
     spanWidth: number;
     order: number;
+    /** True when the region's origin STRICTLY ENCLOSES the requested line —
+     *  it starts before the line and ends after it, so it maps the enclosing
+     *  DECLARATION (the aggregate, the whole file's reason to exist), not this
+     *  line.  See the enclosing-fallback rule below. */
+    enclosing: boolean;
   }
 
   const candidates: Candidate[] = [];
@@ -137,15 +142,31 @@ export function translateBreakpoint(
         region,
         spanWidth: source.span.end - source.span.start,
         order: order++,
+        enclosing: source.span.start < lineStart && source.span.end > lineEnd,
       });
     }
   }
 
-  candidates.sort((a, b) => a.spanWidth - b.spanWidth || a.order - b.order);
+  // Enclosing-fallback rule: when some region maps the requested line ITSELF,
+  // the regions that merely CONTAIN it are dropped.
+  //
+  // A statement line inside an operation overlaps its operation, its
+  // aggregate, and every whole-file region those aggregates produced — so
+  // `status := Resolved` answered with the real `domain/issue.ts:108:11` plus
+  // `issue.test.ts:1`, `issue.ts:1`, `issue.routes.ts:1`: three file-header
+  // lines that arm a breakpoint on an import statement.  They are not wrong
+  // (the aggregate really did produce those files) and they are not answers
+  // to the question asked.  A line that carries no fine region of its own —
+  // an `aggregate Order {` header, a plain property — keeps every match, so
+  // the coarse mapping is still reachable where it IS the answer.
+  const lineLocal = candidates.filter((c) => !c.enclosing);
+  const kept = lineLocal.length > 0 ? lineLocal : candidates;
+
+  kept.sort((a, b) => a.spanWidth - b.spanWidth || a.order - b.order);
 
   const seen = new Set<string>();
   const out: BreakpointTarget[] = [];
-  for (const c of candidates) {
+  for (const c of kept) {
     const key = `${c.file}:${c.line}:${c.column ?? ""}`;
     if (seen.has(key)) continue; // already kept the narrowest-span survivor
     seen.add(key);

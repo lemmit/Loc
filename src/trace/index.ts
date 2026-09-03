@@ -6,7 +6,7 @@
 // lives in `src/cli/main.ts`.
 // ---------------------------------------------------------------------------
 
-export { annotateTrace, LineIndex } from "./annotate.js";
+export { annotateTrace, LineIndex, type TraceCoverage, traceCoverage } from "./annotate.js";
 export type { ParsedFrame } from "./frames.js";
 export { parseFrames } from "./frames.js";
 export type { Resolution, SourceMap, WireOriginRef, WireRegion } from "./resolve.js";
