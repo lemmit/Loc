@@ -13,7 +13,17 @@ import {
   Text,
 } from "@mantine/core";
 import type { LayoutCtx } from "./ctx";
-import { nextStep, nextStepMid, PANE } from "./vocabulary";
+import {
+  nextStep,
+  nextStepMid,
+  PANE,
+  seeStream,
+  STREAM,
+  TEST_DISCOVERY,
+  VERDICT_LABEL,
+  VERDICT_LEGEND,
+} from "./vocabulary";
+import { OutputStreamLink } from "./OutputStreamLink";
 import { TsTransformClient } from "../testing/transform-client";
 import { findApiTestFile, loadApiTests } from "../testing/run-api-tests";
 import { findUiTestFile, loadUiSuite, uiSuiteFiles } from "../testing/run-ui-tests";
@@ -116,7 +126,11 @@ export function TestsBody({
   const [apiCases, setApiCases] = useState<TestCase[] | null>(null);
   const [uiCases, setUiCases] = useState<UiTestCase[] | null>(null);
   const [discovering, setDiscovering] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // `kind` picks the one line of interpretation above the raw text (audit
+  // M19): a discovery failure is almost always the generated project's
+  // dependencies not being resolvable from the browser; a run failure is a
+  // harness / runtime error and points at the runtime logs.
+  const [error, setError] = useState<{ kind: "discovery" | "run"; message: string } | null>(null);
   const { testResults: results, setTestResults: setResults } = ctx;
 
   // Drop stale results when the generated output actually changes (a
@@ -197,7 +211,9 @@ export function TestsBody({
         setUiCases(ui);
         setApiCases(api);
       } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+        if (!cancelled) {
+          setError({ kind: "discovery", message: e instanceof Error ? e.message : String(e) });
+        }
       } finally {
         if (!cancelled) setDiscovering(false);
       }
@@ -223,7 +239,7 @@ export function TestsBody({
     try {
       await fn();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError({ kind: "run", message: e instanceof Error ? e.message : String(e) });
     } finally {
       setRunning(null);
     }
@@ -283,11 +299,7 @@ export function TestsBody({
           </Text>
         </Group>
       )}
-      {error && (
-        <Code block c="red" m="sm" style={{ whiteSpace: "pre-wrap", fontSize: 11 }} data-testid="test-error">
-          {error}
-        </Code>
-      )}
+      {error && <TestError error={error} ctx={ctx} />}
       {hasProofs && (
         <Group px="sm" py={6} justify="flex-end">
           <Button
@@ -443,10 +455,18 @@ function RequirementsRollup({
         style={{ paddingLeft: depth * 16 }}
         data-testid={`req-${r.id}`}
       >
-        <Badge size="xs" color={VERDICT_COLOR[verdict]} variant="light" data-testid={`req-verdict-${r.id}`}>
-          {verdict}
+        <Badge
+          size="xs"
+          color={VERDICT_COLOR[verdict]}
+          variant="light"
+          style={{ flexShrink: 0 }}
+          title={VERDICT_LEGEND}
+          data-testid={`req-verdict-${r.id}`}
+          data-verdict={verdict}
+        >
+          {VERDICT_LABEL[verdict]}
         </Badge>
-        <Text size="sm" fw={500}>{r.id}</Text>
+        <Text size="sm" fw={500} style={{ flexShrink: 0 }}>{r.id}</Text>
         <Text size="sm" c="dimmed" truncate>{r.title}</Text>
       </Group>
     );
@@ -470,17 +490,67 @@ function RequirementsRollup({
 
   return (
     <Box pb="sm" data-testid="requirements-rollup">
-      <Group gap="xs" py={6} justify="space-between">
-        <Text size="sm" fw={600}>Requirements</Text>
-        <Group gap={6}>
-          <Badge size="xs" color="green" variant="light">{s.verified} verified</Badge>
-          {s.failing > 0 && <Badge size="xs" color="red" variant="light">{s.failing} failing</Badge>}
-          {s.unverified > 0 && <Badge size="xs" color="yellow" variant="light">{s.unverified} unverified</Badge>}
-          {s.untested > 0 && <Badge size="xs" color="gray" variant="light">{s.untested} untested</Badge>}
+      <Group gap="xs" py={6} justify="space-between" wrap="wrap">
+        <Text size="sm" fw={600}>{PANE.requirements}</Text>
+        {/* Badges wrap onto a second line in a narrow dock instead of
+            clipping (audit M9). */}
+        <Group gap={6} wrap="wrap">
+          <Badge size="xs" color="green" variant="light">{s.verified} {VERDICT_LABEL.VERIFIED.toLowerCase()}</Badge>
+          {s.failing > 0 && <Badge size="xs" color="red" variant="light">{s.failing} {VERDICT_LABEL.FAILING.toLowerCase()}</Badge>}
+          {s.unverified > 0 && <Badge size="xs" color="yellow" variant="light">{s.unverified} {VERDICT_LABEL.UNVERIFIED.toLowerCase()}</Badge>}
+          {s.untested > 0 && <Badge size="xs" color="gray" variant="light">{s.untested} {VERDICT_LABEL.UNTESTED.toLowerCase()}</Badge>}
         </Group>
       </Group>
+      {/* One legend line, once, above the list — the verdicts are the IR's
+          enum and read as jargon without it (audit M9). */}
+      <Text size="xs" c="dimmed" mb={6} data-testid="verdict-legend">
+        {VERDICT_LEGEND}
+      </Text>
       <Stack gap={4}>{roots.flatMap((r) => renderReq(r.id, 0))}</Stack>
     </Box>
+  );
+}
+
+// A raw transform / import / harness error with one line of interpretation
+// above it and the raw text folded (audit M19).  The sandbox's canonical
+// discovery failure is `Failed to resolve module specifier "uuidv7"` — the
+// generated suite imports a dependency the browser cannot resolve until the
+// project's deps are installed by Bundle (or the registry is reachable) —
+// which reads as a bug rather than a precondition without the line.
+function TestError({
+  error,
+  ctx,
+}: {
+  error: { kind: "discovery" | "run"; message: string };
+  ctx: LayoutCtx;
+}): JSX.Element {
+  const [open, setOpen] = useState(error.kind === "run");
+  return (
+    <Stack gap={4} m="sm" data-testid="test-error-block">
+      <Group gap={6} wrap="wrap" align="baseline">
+        <Text size="xs" c="red" data-testid="test-error-hint" style={{ flex: 1, minWidth: 200 }}>
+          {error.kind === "discovery"
+            ? TEST_DISCOVERY.errorHint(ctx.isDesktop)
+            : "The run stopped before it produced results — a harness or runtime error, not a failing assertion."}
+        </Text>
+        {error.kind === "run" && <OutputStreamLink ctx={ctx} stream="backend" label={seeStream(STREAM.runtimeLogs)} />}
+        <Button
+          size="compact-xs"
+          variant="subtle"
+          color="gray"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          data-testid="test-error-toggle"
+        >
+          {open ? TEST_DISCOVERY.hideRaw : TEST_DISCOVERY.showRaw}
+        </Button>
+      </Group>
+      {open && (
+        <Code block c="red" style={{ whiteSpace: "pre-wrap", fontSize: 11 }} data-testid="test-error">
+          {error.message}
+        </Code>
+      )}
+    </Stack>
   );
 }
 
