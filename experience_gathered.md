@@ -5549,3 +5549,46 @@ Three things worth keeping:
    from the base ref, so the selection only bites once the config change
    itself has merged. A static reverse-import scanner (seconds, not 90 s)
    would lift the first cost but not the registry-hub one.
+
+## 95. A pinned gap's reason must name the LAYER that blocks it — mine named a backend the feature never calls (2026-09-02)
+
+`KNOWN_HEEX_GAPS.DataGrid` was the last entry in the HEEx parity pin, and its
+reason ended with a concrete, checkable blocker: *"needs backend support for
+multi-column ORDER BY, which `list/4`'s single sort/dir pair does not have."*
+Every clause of that sentence is individually true — `list/4` really does take
+one `sort`/`dir` pair (`elixir/vanilla/repository-emit.ts`) — and the sentence
+as a whole is false, because **`DataGrid` never calls `list/4`, or any server
+read, on any of the five targets that ship it.** It grids the array it was
+handed: `getSortedRowModel` / `getFilteredRowModel` / `getPaginationRowModel`
+over `data: rows`, with `pageSize:` a *client* page size. The pin had reached
+for the nearest plausible-sounding limit one layer down and welded it to a
+decision it had no bearing on.
+
+The cost of that shape is specific: a blocker names a **drain path**. Anyone
+picking this up would have gone and threaded a multi-column `ORDER BY` through
+the Elixir paged read — real work, correctly executed, on a layer that was never
+in the way — and only then discovered the actual objection. This is §90's
+failure ("verifying a mechanism exists is not verifying it reaches the thing you
+named") pointed at prose instead of a gate.
+
+Three habits fall out.
+
+- **When a pin names a blocker in another layer, trace the call.** Not "is
+  `list/4` single-sort?" (yes) but "does this feature reach `list/4` at all?"
+  (no). One grep for `manualSorting|serverPaged` in the grid's own emitter
+  answered it. The plausible half of a compound claim is what makes the whole
+  thing survive review.
+- **Say whether the missing thing is DERIVABLE or a BEHAVIOURAL CONTRACT.**
+  `Chart`'s pin died because its subject was derivable — an SVG polyline from
+  numbers is arithmetic, one right answer, so "LiveView can't" was just wrong.
+  `DataGrid`'s survives because its subject is a *library's semantics* —
+  multi-sort tie-breaks, `includesString`, pagination edges — where a feasible
+  re-implementation is a **fork**, which is worse than an honest gap. Those two
+  live one line apart in the same file and read identically ("target X has no
+  analogue"); only naming the category tells them apart, and it is the category,
+  not the target, that decides whether to drain or settle.
+- **Feasibility is not the question a refusal answers.** The corrected reason is
+  *harder* on the target than the false one was: HEEx **can** do this (the rows
+  are already in a socket assign; column visibility touches no row model at
+  all), and it is declined anyway. A pin that argues impossibility invites
+  exactly one rebuttal — a proof of possibility — and then has nothing left.

@@ -150,9 +150,16 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
     kind: "gap",
     site: "src/ir/validate/checks/system-checks.ts:353",
     what:
-      "`DataGrid` (a TanStack row model) outside DATA_GRID_FRAMEWORKS — phoenixLiveView is the " +
-      "open leg; flutter is a settled never (native build, no JS runtime — D-DATAGRID-TARGETS)",
+      "`DataGrid` (a TanStack row model) outside DATA_GRID_FRAMEWORKS.  LATENT seam for a NEW " +
+      "frontend: both non-members are settled nevers under D-DATAGRID-TARGETS' one rule (ships " +
+      "iff it can run TanStack itself) — flutter because its native build has no JS runtime, " +
+      "phoenixLiveView because both roads open to it (a hand-rolled Elixir row model, or a " +
+      "phx-hook island LiveView must not patch) FORK the semantics the renderDataGridChild seam " +
+      "shares.  It was carried as 'the open leg' until the pin was re-examined; the blocker that " +
+      "framing rested on (multi-column ORDER BY in `list/4`) was never on DataGrid's path — it " +
+      "drives no server read on any target",
     mission: "M-T1.1",
+    verified: true,
   },
   {
     code: "loom.heex-component-host-state-unsupported",

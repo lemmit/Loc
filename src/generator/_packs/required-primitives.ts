@@ -256,8 +256,13 @@ const TSX_FORM: readonly string[] = [
 // into exactly the formats that ship a `renderDataGridChild` seam: the four JSX
 // ones plus `feliz`, whose procedural pack renders the same TanStack instance —
 // Fable compiles F# to JavaScript, so it binds `@tanstack/table-core` directly
-// instead of re-implementing a row model.  HEEx is out for a third reason: a
-// CLIENT row model has no LiveView analogue, so `Table` is server-driven there.
+// instead of re-implementing a row model.  HEEx is out for the SAME reason as
+// Flutter, not a third one: it could only re-implement the row model (in Elixir
+// over the socket assign, or behind a `phx-hook` island LiveView must not
+// patch), which forks the semantics the seam shares.  `Table` is server-driven
+// there instead.  ("A client row model has no LiveView analogue" is what this
+// comment used to say; it described the mechanism, not the objection — see
+// D-DATAGRID-TARGETS § Correction.)
 // Flutter and HEEx stay honest gaps, rejected by
 // `loom.datagrid-unsupported-target` rather than rendering a blank page region.
 const DATA_GRID_PRIMITIVES: readonly string[] = ["primitive-data-grid"];
