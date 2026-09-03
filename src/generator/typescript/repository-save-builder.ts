@@ -252,14 +252,24 @@ export function saveMethod(
     `    ${renderHonoStoreLogCall("repositorySave", `aggregate: "${agg.name}", id: aggregate.id as string`)}`,
     "",
     `    for (const event of dispatchAfterCommit) {`,
-    // `(event as object).constructor.name` is the emitted DomainEvent
-    // subclass name — reliable in TypeScript without depending on a
-    // per-event `type` discriminator field.  The `as object` cast
-    // handles the corner case where the aggregate declares no events:
-    // pullEvents returns `DomainEvent[]` typed as `never[]`, so
-    // `event.constructor` would fail tsc.  Field name is `event_type`
-    // (not `event`) so it doesn't collide with the envelope's `event` key.
-    `      ${renderHonoStoreLogCall("eventDispatched", `event_type: (event as object).constructor.name, aggregate: "${agg.name}", id: aggregate.id as string`)}`,
+    // Read the event's OWN `type` discriminator.  This was
+    // `(event as object).constructor.name`, on the stated premise that it
+    // "is the emitted DomainEvent subclass name".  It is not: `events.ts`
+    // emits every event as an INTERFACE carrying a literal `type`
+    // (`interface CrateReady { readonly type: "CrateReady"; … }`) and the
+    // aggregates raise plain object literals — so `constructor.name` was
+    // `"Object"` for EVERY event on EVERY node repository.  The dispatcher
+    // switched correctly on `event.type` the whole time; only the log line
+    // beside it lied.  No compile tier can catch this: the wrong value is
+    // still a string.  It surfaced the first time a workflow subscriber was
+    // driven at runtime.
+    //
+    // The cast survives for the corner case the old comment did get right:
+    // an aggregate declaring no events makes `pullEvents()` return
+    // `never[]`, so the loop variable is `never`.  Field name is
+    // `event_type` (not `event`) so it doesn't collide with the envelope's
+    // `event` key.
+    `      ${renderHonoStoreLogCall("eventDispatched", `event_type: (event as { type: string }).type, aggregate: "${agg.name}", id: aggregate.id as string`)}`,
     `      await this.events.dispatch(event);`,
     `    }`,
     `  }`,

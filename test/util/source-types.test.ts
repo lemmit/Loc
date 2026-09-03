@@ -28,15 +28,40 @@ const LEGACY: Record<DataSourceKind, string[]> = {
   eventLog: ["postgres", "mysql", "sqlite", "inMemory", "kafka"],
 };
 
+/**
+ * The stores the legacy matrix knew about.
+ *
+ * Every assertion below is scoped to these, because the registry is DESIGNED
+ * to be extended: `src/platform/source-type-plugins.ts` registers out-of-tree
+ * `sourceType`s from `packages/*` manifests into the same global registry, and
+ * `source-type-plugins.test.ts` registers `clickhouseCloud` there and never
+ * removes it.  Asserting global exact-equality therefore encoded "no plugin may
+ * ever exist", which is both wrong and order-dependent: under the fast tier's
+ * `isolate: false` the two files share a worker's module graph (vitest.config
+ * documents that hazard), so whether this file saw the extra store came down to
+ * scheduling — it passed alone and failed in the full run.
+ *
+ * The claim these tests actually want is narrower and stable: every store the
+ * legacy matrix covered is classified EXACTLY as it was.  A dropped or
+ * misclassified legacy store still fails; a newly registered plugin store no
+ * longer does.
+ */
+const LEGACY_STORES = new Set(Object.values(LEGACY).flat());
+
+/** The mailer stores this file seeds; same scoping rule as `LEGACY_STORES`. */
+const BUILTIN_MAILERS = new Set(["sendgrid", "ses", "smtp"]);
+
 describe("sourceType registry — matrix equivalence", () => {
   for (const kind of Object.keys(LEGACY) as DataSourceKind[]) {
     it(`sourceTypesForSurfaceKind('${kind}') matches the legacy matrix`, () => {
-      expect(sourceTypesForSurfaceKind(kind)).toEqual([...LEGACY[kind]].sort());
+      expect(sourceTypesForSurfaceKind(kind).filter((t) => LEGACY_STORES.has(t))).toEqual(
+        [...LEGACY[kind]].sort(),
+      );
     });
   }
 
   it("supportsSurfaceKind agrees with the legacy matrix across all known stores", () => {
-    for (const sourceType of registeredSourceTypes()) {
+    for (const sourceType of registeredSourceTypes().filter((t) => LEGACY_STORES.has(t))) {
       for (const kind of Object.keys(LEGACY) as DataSourceKind[]) {
         expect(supportsSurfaceKind(sourceType, kind)).toBe(LEGACY[kind].includes(sourceType));
       }
@@ -60,12 +85,18 @@ describe("sourceType registry — matrix equivalence", () => {
 
 describe("sourceType registry — knob classification", () => {
   it("isRelational matches the legacy RELATIONAL set", () => {
-    const relational = registeredSourceTypes().filter(isRelational).sort();
+    const relational = registeredSourceTypes()
+      .filter((t) => LEGACY_STORES.has(t))
+      .filter(isRelational)
+      .sort();
     expect(relational).toEqual(["inMemory", "mysql", "postgres", "sqlite"]);
   });
 
   it("isCacheStore matches the legacy CACHE_STORES set", () => {
-    const cache = registeredSourceTypes().filter(isCacheStore).sort();
+    const cache = registeredSourceTypes()
+      .filter((t) => LEGACY_STORES.has(t))
+      .filter(isCacheStore)
+      .sort();
     expect(cache).toEqual(["inMemory", "redis"]);
   });
 });
@@ -113,7 +144,13 @@ describe("sourceType registry — descriptors & lookups", () => {
     // store does not back mailer.
     expect(supportsSurfaceKind("smtp", "objectStore")).toBe(false);
     expect(supportsSurfaceKind("postgres", "mailer")).toBe(false);
-    expect(sourceTypesForSurfaceKind("mailer")).toEqual(["sendgrid", "ses", "smtp"]);
+    // Scoped like the matrix assertions: a plugin-registered mailer is legal,
+    // so pin that these three are the built-in ones rather than the only ones.
+    expect(sourceTypesForSurfaceKind("mailer").filter((t) => BUILTIN_MAILERS.has(t))).toEqual([
+      "sendgrid",
+      "ses",
+      "smtp",
+    ]);
   });
 
   it("registerSourceType adds a descriptor that resolves through the lookups", () => {

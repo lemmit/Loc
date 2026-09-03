@@ -250,7 +250,11 @@ describe("audited — TypeScript emission", () => {
     const routes = files.get("api/http/cart.routes.ts")!;
     // The save and the audit insert share one transaction (atomic).
     expect(routes).toContain("await db.transaction(async (tx) => {");
-    expect(routes).toContain("const repoTx = new CartRepository(tx, events);");
+    // The repo built on the route's `tx` takes the DEFERRING dispatcher, not
+    // the root one: dispatching inside the caller's open transaction
+    // deadlocks an in-process subscriber on a single-connection driver
+    // (see audited-route-dispatch.test.ts).
+    expect(routes).toContain("const repoTx = new CartRepository(tx, __deferred);");
     expect(routes).toContain("await repoTx.save(aggregate);");
     expect(routes).toContain("await tx.insert(schema.auditRecords).values({");
     expect(routes).toContain('operationId: "cancelCart",');

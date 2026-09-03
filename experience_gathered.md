@@ -5549,3 +5549,137 @@ Three things worth keeping:
    from the base ref, so the selection only bites once the config change
    itself has merged. A static reverse-import scanner (seconds, not 90 s)
    would lift the first cost but not the registry-hub one.
+
+## 95. A log line is a claim about the code, and nothing type-checks it (2026-09-01)
+
+Every node repository logged `"event_type":"Object"` on every domain event it
+dispatched. The emitter read `(event as object).constructor.name`, under a
+comment asserting that this "is the emitted DomainEvent subclass name —
+reliable in TypeScript without depending on a per-event `type` discriminator".
+
+Both halves of that sentence were false about the code sitting beside it.
+`events.ts` emits each event as an **interface** carrying exactly the
+discriminator the comment says not to depend on:
+
+```ts
+export interface CrateReady { readonly type: "CrateReady"; readonly crate: Ids.CrateId }
+```
+
+Aggregates raise plain object literals, so there is no subclass and
+`constructor.name` is `"Object"`. The dispatcher three lines below switched
+correctly on `event.type` the whole time — the code was right and the log
+about the code was wrong.
+
+**Why every gate was blind, and this is the transferable part: the wrong value
+was still a `string`.** `tsc` is satisfied, the corpus compile gates are
+satisfied, the wire goldens never see it (logs aren't wire), and no unit test
+asserted the field's *content*. A log line is an assertion about program state
+that the compiler cannot check and the test suite usually does not read. It
+surfaced only when a workflow subscriber was driven at runtime for the first
+time — the same "no runtime caller had ever been here" class as §90/§92, one
+layer over.
+
+Elixir had it right all along (`event_type: "OrderPlaced"`, a literal baked in
+at emit time), and .NET is right by accident of language — C# events really are
+classes, so `GetType().Name` is the event name. Node was the lone outlier, and
+a .NET comment cross-referenced the node form as "the same identity", so the
+wrong belief had already propagated into a second backend's documentation.
+
+Two rules out of it:
+
+- **When a log names a thing, assert the name in a test.** The new gate reads
+  the emitted source for `event_type: (event as { type: string }).type` and,
+  separately, pins that events are emitted as interfaces — the fact that makes
+  `constructor.name` wrong. Mutation-proved both in the generator (revert →
+  fail) and at runtime (`"Object"` → `"OrderPlaced"` on the behavioural leg).
+- **A comment that explains *why* a form was chosen is a claim, and claims
+  rot.** This one justified itself against an emitted shape that either changed
+  or never existed. When a comment argues for a technique, check it against the
+  emitter's actual output, not against the comment's own confidence.
+
+## 96. A deadlock leaves no evidence, so instrument for SILENCE — and the fix was already written down in the same repo (2026-09-03)
+
+`Crate.release` killed the node backend: the log stopped at `event_dispatched`,
+the process exited 99, and there was no error, no `request_end`, no stack. I
+guessed the cause twice — first "the guarded-create seam", disproved by one
+grep; then a transaction hypothesis I recorded honestly as *unconfirmed* with
+three experiments (§93's rule, finally applied instead of skipped).
+
+**Experiment one settled it in minutes, and the technique is the lesson.** A
+standalone driver that installed `unhandledRejection` and `uncaughtException`
+handlers *and an 8-second watchdog* answered the question no amount of log
+reading could: the handlers never fired and the watchdog did. **Not a throw — a
+deadlock.** A second probe (a `console.error` before the subscriber's first
+query) showed it entered and never returned from that query.
+
+That distinction is everything, and it is invisible from the outside: a crash
+and a hang produce the *same* trace — output that just stops. Nothing in the
+harness said "hung"; exit 99 came from the runner giving up. **When a process
+dies quietly, the first move is a watchdog, because silence is a symptom with
+two very different causes and the logs cannot tell you which.**
+
+**The cause.** An `audited` aggregate wraps its route in
+`db.transaction(async (tx) => …)` and hands the repository that `tx`. `save()`
+dispatches at the end of its own body — correct when it owns its handle, wrong
+here, because the ROUTE's transaction is still open. The in-process dispatcher
+closed over the ROOT `db`, so the subscriber queried the very connection the
+open transaction held. On the node leg's single PGlite connection that is a
+self-deadlock; on a pooled backend the same code silently reads pre-commit
+state instead, which is the more dangerous version because it looks like it
+works.
+
+**The fix was already in the repo, as prose.** The WORKFLOW routes carry a
+comment saying they wrap the body in a transaction and "dispatch events after
+the callback returns successfully (so rollbacks discard them)". The aggregate
+routes never learned it. `deferredDispatcher` buffers events raised inside a
+caller-owned transaction and flushes past the commit; rollback safety falls out,
+because `flush()` only runs on the success path.
+
+Two rules:
+
+- **When one route family documents an invariant, check the others obey it.** A
+  correct pattern living in one builder is not an invariant, it is a
+  coincidence, until something enforces it across the family. The new gate
+  asserts a repo constructed on `tx` never receives the root dispatcher.
+- **Assert the flush, not just the deferral.** A deferral that never flushes
+  swallows every event silently — strictly worse than the deadlock, which at
+  least announced itself by stopping.
+
+## 97. A test that asserts equality on a GLOBAL registry is order-dependent by construction (2026-09-03)
+
+Fixing the dispatch deadlock added one test file, and three assertions in an
+unrelated file — `test/util/source-types.test.ts` — started failing. They passed
+in isolation and in a two-file pairing; only the full run reproduced them. The
+clean-tree control run (stash, full tier, `0 failed`) is what proved the trigger
+was mine rather than pre-existing noise, and that control is the step worth
+copying: **before debugging a suspicious failure, establish whether it fails
+without your change at all.**
+
+The assertions read like this:
+
+```ts
+expect(sourceTypesForSurfaceKind(kind)).toEqual([...LEGACY[kind]].sort());
+const relational = registeredSourceTypes().filter(isRelational).sort();
+```
+
+`registeredSourceTypes()` is a **process-global, deliberately extensible**
+registry: `source-type-plugins.ts` registers out-of-tree `sourceType`s from
+`packages/*`, and `source-type-plugins.test.ts` registers `clickhouseCloud` into
+it and never removes it. So the assertion encoded *"no plugin may ever exist"* —
+false as a claim about the design, and true or false at runtime depending on
+which files shared a worker. `vitest.config.ts` runs the fast tier with
+`isolate: false` and says so in a comment: "a file that mutates module state can
+leak into the next file in that worker."
+
+**The fix is the assertion, not the isolation.** Scoping every comparison to the
+stores the legacy matrix actually covers keeps the real claim — *every legacy
+store is classified exactly as before*, so a dropped or misclassified one still
+fails — while a newly registered plugin store no longer can. Adding the file to
+an isolated vitest project would have silenced it too, but it would have
+preserved a wrong claim behind a scheduling guarantee.
+
+Two more assertions in the same file (`isCacheStore`, and the `mailer` list) had
+the identical latent shape and had simply never been unlucky. Fixed as well:
+when you find one order-dependent global assertion, **the others in that file
+are the same bug waiting for a different schedule**, and fixing only the ones
+that turned red today just resets the timer.

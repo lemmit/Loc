@@ -106,6 +106,13 @@
     },
     {
       "seq": 10,
+      "method": "POST",
+      "path": "/api/crates/{id}/release",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 11,
       "method": "GET",
       "path": "/api/crates",
       "status": 200,
@@ -114,26 +121,6 @@
           {
             "id": "<volatile:key>",
             "label": "C-1",
-            "version": 1
-          }
-        ],
-        "page": 1,
-        "pageSize": 20,
-        "total": 1,
-        "totalPages": 1
-      }
-    },
-    {
-      "seq": 11,
-      "method": "GET",
-      "path": "/api/shipments",
-      "status": 200,
-      "body": {
-        "items": [
-          {
-            "id": "<volatile:key>",
-            "quantity": 3,
-            "reference": "SH-1",
             "version": 2
           }
         ],
@@ -145,13 +132,39 @@
     },
     {
       "seq": 12,
+      "method": "GET",
+      "path": "/api/shipments",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "id": "<volatile:key>",
+            "quantity": 3,
+            "reference": "SH-1",
+            "version": 2
+          },
+          {
+            "id": "<volatile:key>",
+            "quantity": 0,
+            "reference": "auto",
+            "version": 1
+          }
+        ],
+        "page": 1,
+        "pageSize": 20,
+        "total": 2,
+        "totalPages": 1
+      }
+    },
+    {
+      "seq": 13,
       "method": "DELETE",
       "path": "/api/crates/{id}",
       "status": 204,
       "body": ""
     },
     {
-      "seq": 13,
+      "seq": 14,
       "method": "GET",
       "path": "/api/crates/{id}",
       "status": 404,
@@ -164,7 +177,7 @@
       }
     },
     {
-      "seq": 14,
+      "seq": 15,
       "method": "PATCH",
       "path": "/api/shipments",
       "status": 405,
@@ -177,7 +190,7 @@
       }
     },
     {
-      "seq": 15,
+      "seq": 16,
       "method": "GET",
       "path": "/__loom_no_such_path",
       "status": 404,
@@ -190,7 +203,7 @@
       }
     },
     {
-      "seq": 16,
+      "seq": 17,
       "method": "POST",
       "path": "/api/shipments",
       "status": 400,
@@ -203,7 +216,7 @@
       }
     },
     {
-      "seq": 17,
+      "seq": 18,
       "method": "GET",
       "path": "/api/auth/me",
       "status": 200,
@@ -213,7 +226,7 @@
       }
     },
     {
-      "seq": 18,
+      "seq": 19,
       "method": "POST",
       "path": "/api/crates",
       "status": 201,
@@ -222,7 +235,7 @@
       }
     },
     {
-      "seq": 19,
+      "seq": 20,
       "method": "DELETE",
       "path": "/api/crates/{id}",
       "status": 403,
@@ -235,7 +248,7 @@
       }
     },
     {
-      "seq": 20,
+      "seq": 21,
       "method": "DELETE",
       "path": "/api/crates/{id}",
       "status": 204,

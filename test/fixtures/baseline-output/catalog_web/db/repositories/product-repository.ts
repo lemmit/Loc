@@ -68,7 +68,7 @@ export class ProductRepository implements ProductRepositoryPort {
     requestLog().debug({ event: "repository_save", aggregate: "Product", id: aggregate.id as string });
 
     for (const event of dispatchAfterCommit) {
-      requestLog().info({ event: "event_dispatched", event_type: (event as object).constructor.name, aggregate: "Product", id: aggregate.id as string });
+      requestLog().info({ event: "event_dispatched", event_type: (event as { type: string }).type, aggregate: "Product", id: aggregate.id as string });
       await this.events.dispatch(event);
     }
   }

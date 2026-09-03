@@ -509,8 +509,11 @@ export function renderRepositoryImpl(
       "        foreach (var ev in __deferred)",
       "        {",
       // event_dispatched (info) per drained event.  `ev.GetType().Name`
-      // gives the concrete DomainEvent subclass name — same identity
-      // the Hono dispatcher emits via (event as object).constructor.name.
+      // gives the concrete DomainEvent subclass name, which on .NET IS the
+      // event identity — C# events are emitted as real classes.  (The Hono
+      // side used to be described as "the same identity via
+      // `constructor.name`"; it was not — TS emits events as interfaces, so
+      // that read `"Object"`. Hono now reads the `type` discriminator.)
       `            ${renderDotnetLogCall("eventDispatched", [
         { name: "event_type", valueExpr: "ev.GetType().Name" },
         { name: "aggregate", valueExpr: `"${agg.name}"` },

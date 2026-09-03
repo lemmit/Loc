@@ -247,7 +247,7 @@ export function buildEmbeddedRepositoryFile(
         ]),
     `    ${renderHonoStoreLogCall("repositorySave", `aggregate: "${agg.name}", id: aggregate.id as string`)}`,
     `    for (const event of aggregate.pullEvents()) {`,
-    `      ${renderHonoStoreLogCall("eventDispatched", `event_type: (event as object).constructor.name, aggregate: "${agg.name}", id: aggregate.id as string`)}`,
+    `      ${renderHonoStoreLogCall("eventDispatched", `event_type: (event as { type: string }).type, aggregate: "${agg.name}", id: aggregate.id as string`)}`,
     `      await this.events.dispatch(event);`,
     `    }`,
     `  }`,
