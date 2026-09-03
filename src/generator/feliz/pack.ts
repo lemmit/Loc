@@ -60,7 +60,21 @@ function asChild(text: string | undefined): string {
  *  a parenthesised expression.  Under i18n (M-T1.11) every user-visible literal
  *  slot arrives in this form (`Html.text (I18n.t "<key>" "<default>")`), so a
  *  slot that splices its value into an F# string literal must branch here or it
- *  emits the whole call as visible text. */
+ *  emits the whole call as visible text.
+ *
+ *  The two-branch prefix test is exhaustive because of an INVARIANT the target
+ *  upholds: every element the Feliz walk can produce starts with `Html.` or
+ *  `(`.  The pack's own renderers are all `Html.…`; `renderMatch` /
+ *  `renderMatchChild`, `renderConditionalChild`, `renderComment` and the
+ *  `React.fragment` guard paren-wrap already; and the two that used to come
+ *  back BARE — a user-component application (`Counter {| … |}`) and a
+ *  `Slot { }` read (`props.children`) — are paren-wrapped at their producers in
+ *  `feliz-target.ts`, precisely so this stays a fixed test rather than a
+ *  growing list of prefixes to guess at.  RAW text, by contrast, has been
+ *  through the target's `escapeText`, so it rides an F# `"…"` body safely.
+ *  Widening the predicate instead would be unsound in the other direction: a
+ *  cell reading `Order total` IS text, and no prefix tells it from an
+ *  application. */
 function isRenderedElement(s: string): boolean {
   return s.startsWith("Html.") || s.startsWith("(");
 }

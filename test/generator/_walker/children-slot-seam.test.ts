@@ -34,7 +34,12 @@ describe("every frontend spells its own children slot", () => {
     ["vue", vueTarget, "<slot />"],
     ["svelte", svelteTarget, "{@render children?.()}"],
     ["angular", angularTarget, "<ng-content></ng-content>"],
-    ["feliz", felizTarget, "props.children"],
+    // Paren-wrapped so `pack.ts`'s `isRenderedElement` prefix test stays sound:
+    // every element the Feliz walk produces starts with `Html.` or `(`, so a
+    // slot read landing in a text-OR-markup slot is never mistaken for raw text
+    // and wrapped as `Html.text "props.children"`.  (Flutter parenthesises its
+    // own slot read for the analogous reason.)
+    ["feliz", felizTarget, "(props.children)"],
     ["flutter", flutterTarget, "(child ?? const SizedBox.shrink())"],
   ];
 
