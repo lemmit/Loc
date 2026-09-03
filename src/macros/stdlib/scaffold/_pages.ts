@@ -281,7 +281,15 @@ export function homePage(
   return page({
     name: "Home",
     route: "/",
-    body: scaffoldHome(counts, kpis),
+    // The launcher cards mirror the sidebar the app-shell renders: one per
+    // scaffolded aggregate (its List route, under the label the sidebar uses),
+    // plus the workflows index when there is one (finding C4).
+    body: scaffoldHome(counts, kpis, {
+      aggregates: aggregates.map((agg) => ({
+        label: humanize(plural(agg.name)),
+        route: `/${snake(plural(agg.name))}`,
+      })),
+    }),
     menu: { hidden: boolLit(true) },
   });
 }

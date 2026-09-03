@@ -76,7 +76,13 @@ export function renderSidebarComponent(args: RenderSidebarComponentArgs): string
       ? `<%= pgettext(${elixirI18nString(key)}, ${elixirI18nString(label)}) %>`
       : escapeHeex(label);
 
-  const navSections: NavSectionVM[] = deriveSidebarFromUi(ui, nameCtx) ?? buildDefaultSections(ui);
+  // The Phoenix default is one link per routed page, so a custom page is
+  // already in it; the shared emitter MERGES its `menu { … }`-carrying pages
+  // into that default and drops the default copy of any route the merge
+  // already claims (M-FT.6 / finding C1) — before, a single page-level
+  // `menu { … }` block replaced the whole sidebar.
+  const defaults = buildDefaultSections(ui);
+  const navSections: NavSectionVM[] = deriveSidebarFromUi(ui, nameCtx, false, defaults) ?? defaults;
 
   // Per-entry currentUser-only gate, keyed by route.  Only populated when the
   // deployable has auth (so `@current_user` exists in the layout/sidebar

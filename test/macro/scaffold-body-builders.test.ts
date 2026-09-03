@@ -8,6 +8,7 @@ import {
   filterFindsForAggregate,
   filterStateFields,
   scaffoldDetails,
+  scaffoldHome,
   scaffoldInstanceDetails,
   scaffoldInstanceList,
   scaffoldList,
@@ -669,5 +670,45 @@ describe("scalarColumnsForAggregate — resolves columns from the aggregate AST"
       // default-on optimistic-concurrency token (M-T3.4)
       { name: "version", kind: { tag: "numeric" }, provenanced: false },
     ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// M-FT.6 / finding C4 — the scaffolded Home page is a LAUNCHER for the sidebar
+// it sits next to, not a description of the model in metamodel vocabulary.
+// ---------------------------------------------------------------------------
+describe("scaffoldHome", () => {
+  const nav = {
+    aggregates: [
+      { label: "Issues", route: "/issues" },
+      { label: "Projects", route: "/projects" },
+    ],
+  };
+
+  it("renders one launcher card per sidebar entry, linking its route", () => {
+    const body = flat(printExpr(scaffoldHome({ aggregates: 2, workflows: 1 }, [], nav)));
+    // The sidebar's own labels + routes — not "2 aggregates".
+    expect(body).toContain(
+      'Card(Heading("Issues", level: 4), Anchor("Open issues →", to: "/issues"))',
+    );
+    expect(body).toContain(
+      'Card(Heading("Projects", level: 4), Anchor("Open projects →", to: "/projects"))',
+    );
+    // The workflows index is one more sidebar entry, so one more card.
+    expect(body).toContain('Anchor("Open workflows →", to: "/workflows")');
+  });
+
+  it("never speaks the metamodel's vocabulary at the user", () => {
+    const body = printExpr(scaffoldHome({ aggregates: 2, workflows: 1 }, [], nav));
+    // "2 aggregates" / "1 workflow" named nothing a user of the app can look
+    // for; `aggregate` is a word from the modelling language, not the product.
+    expect(body).not.toMatch(/\d+ aggregates?/);
+    expect(body).not.toContain("Manage records of each kind");
+  });
+
+  it("drops the 'jump straight in below' promise when there is nothing below", () => {
+    const body = printExpr(scaffoldHome({ aggregates: 0, workflows: 0 }, [], {}));
+    expect(body).toContain('"Pick a section from the sidebar to start."');
+    expect(body).not.toContain("jump straight in below");
   });
 });

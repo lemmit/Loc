@@ -315,7 +315,6 @@ export function generateSvelteForContexts(
   // `requires` gate, so the app-shell can hide a forbidden page's link.
   const workflows = allWorkflows(contexts);
   const kindOf = (p: (typeof ui.pages)[number]) => classifyPage(p, pageCtx);
-  const sidebarOverride = deriveSidebarFromUi(ui, pageCtx, authUi);
   const scaffoldedAggregates = aggregates
     .filter(({ agg }) =>
       ui.pages.some((p) => {
@@ -333,6 +332,20 @@ export function generateSvelteForContexts(
     )
     .map((w) => w.wf);
   const hasWorkflowsIndex = ui.pages.some((p) => kindOf(p).kind === "workflows-index");
+  // With no explicit `ui.menu` block the ui's own custom pages MERGE into the
+  // default grouping instead of replacing it (M-FT.6 / finding C1).
+  const sidebarOverride = deriveSidebarFromUi(
+    ui,
+    pageCtx,
+    authUi,
+    defaultNavSections(
+      scaffoldedAggregates,
+      scaffoldedWorkflows,
+      hasWorkflowsIndex,
+      ui.pages,
+      authUi,
+    ),
+  );
   const navSections =
     sidebarOverride?.map((s) => ({
       label: s.label,
@@ -342,6 +355,7 @@ export function generateSvelteForContexts(
         label: e.label,
         labelKey: e.labelKey,
         testId: e.testId,
+        activeArgs: e.activeArgs,
         // Per-link gate condition (auth: ui) — the app-shell `{#if}`-hides a
         // forbidden page's link.  Absent ⇒ link always shown.
         requiresJs: e.requiresJs,

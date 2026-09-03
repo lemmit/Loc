@@ -33,7 +33,11 @@ import { renderGateExpr } from "../_frontend/gate-expr.js";
 // move alongside them).
 import { renderI18nModule, renderLocaleCatalog } from "../_frontend/i18n-runtime.js";
 import { LIB_SCHEMAS_PROV_TS, PROV_LINEAGE_SCHEMA_BLOCK } from "../_frontend/lib-schemas.js";
-import { deriveSidebarFromUi } from "../_frontend/menu-emitter.js";
+import {
+  deriveSidebarFromUi,
+  type NavEntryVM,
+  type NavSectionVM,
+} from "../_frontend/menu-emitter.js";
 import { MONEY_TEXT_SOURCE } from "../_frontend/money-format.js";
 import { VUE_NAV_LABELS, withNavLabelTokens } from "../_frontend/nav-labels.js";
 import { pageEmitPath } from "../_frontend/page-identity.js";
@@ -551,7 +555,14 @@ export function generateVueForContexts(
   // `deriveSidebarFromUi` render a `requiresJs` gate on any entry whose
   // linked page declares a `requires` clause, so the app-shell can hide a
   // forbidden page's nav link at runtime.
-  const sidebarOverride = deriveSidebarFromUi(ui, pageCtx, authUi);
+  // With no explicit `ui.menu` block the ui's own custom pages MERGE into the
+  // scaffold grouping instead of replacing it (M-FT.6 / finding C1).
+  const sidebarOverride = deriveSidebarFromUi(
+    ui,
+    pageCtx,
+    authUi,
+    deriveNavSections(defaultPages, pageCtx, authUi),
+  );
   const navSections: Array<{
     label: string;
     labelKey?: string;
@@ -674,7 +685,7 @@ export function generateVueForContexts(
   // `import "./globals.css"`.  `vite/client` declares the `*.css`
   // side-effect module (mirrors the React generator).
   out.set("src/vite-env.d.ts", '/// <reference types="vite/client" />\n');
-  out.set("index.html", renderShell(pack, "index-html", prepareIndexHtmlVM(deployable, ui)));
+  out.set("index.html", renderShell(pack, "index-html", prepareIndexHtmlVM(sys, deployable, ui)));
   out.set("Dockerfile", renderShell(pack, "dockerfile", {}));
   out.set(".dockerignore", renderShell(pack, "dockerignore", {}));
   out.set("certs/.gitkeep", "");
@@ -877,14 +888,6 @@ function renderNestedRouter(
 // arrive with the parity slice (`deriveSidebarFromUi` mirror).
 // ---------------------------------------------------------------------------
 
-interface NavEntryVM {
-  to: string;
-  label: string;
-  testId: string;
-  exact?: boolean;
-  requiresJs?: string;
-}
-
 function deriveNavSections(
   pages: PageIR[],
   nameCtx: PageNameCtx,
@@ -892,7 +895,7 @@ function deriveNavSections(
    *  gated entry can be `v-if`-hidden.  Without it every entry stays ungated
    *  (there is no `currentUser` to test), byte-identical. */
   authUi: boolean,
-): Array<{ label: string; entries: NavEntryVM[] }> {
+): NavSectionVM[] {
   const aggregates: NavEntryVM[] = [];
   const workflows: NavEntryVM[] = [];
   // A DEFAULT entry inherits the gate of the page it links to, exactly as the
@@ -912,6 +915,7 @@ function deriveNavSections(
         to: page.route,
         label,
         testId: `nav-${snake(plural(o.aggregateName))}`,
+        activeArgs: JSON.stringify(page.route),
         ...(requiresJs ? { requiresJs } : {}),
       });
     } else if (o.kind === "workflow-form") {
@@ -919,11 +923,12 @@ function deriveNavSections(
         to: page.route,
         label: humanize(o.workflowName),
         testId: `nav-wf-${snake(o.workflowName)}`,
+        activeArgs: JSON.stringify(page.route),
         ...(requiresJs ? { requiresJs } : {}),
       });
     }
   }
-  const sections: Array<{ label: string; entries: NavEntryVM[] }> = [];
+  const sections: NavSectionVM[] = [];
   if (aggregates.length > 0) sections.push({ label: "Aggregates", entries: aggregates });
   if (workflows.length > 0) sections.push({ label: "Workflows", entries: workflows });
   return sections;
@@ -932,14 +937,19 @@ function deriveNavSections(
 // ---------------------------------------------------------------------------
 // index.html metadata — same projection rule as the React generator:
 // the route-`/` page (or the first page) supplies static SEO metadata;
-// the deployable name is the title fallback.
+// the SYSTEM name is the title fallback.
 // ---------------------------------------------------------------------------
 
-function prepareIndexHtmlVM(deployable: DeployableIR, ui: UiIR): Record<string, unknown> {
+function prepareIndexHtmlVM(
+  sys: SystemIR,
+  deployable: DeployableIR,
+  ui: UiIR,
+): Record<string, unknown> {
   const page = ui.pages.find((p) => p.route === "/") ?? ui.pages[0];
   const metadata = page?.metadata;
   return {
-    title: staticTitleOf(page) ?? deployable.name,
+    // System name before deployable name — see the react twin (finding E7).
+    title: staticTitleOf(page) ?? humanize(sys.name) ?? deployable.name,
     description: metadata?.description,
     ogImage: metadata?.ogImage,
     canonical: metadata?.canonical,

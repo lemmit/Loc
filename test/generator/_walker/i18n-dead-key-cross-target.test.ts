@@ -218,6 +218,11 @@ describe("a label with no catalog key stays raw", () => {
     expect(appSource(files)).toContain('"Welcome aboard"');
     // …but no nav label binds a `menu.*` key, because none exists.
     expect(shell).not.toContain('t("menu.');
-    expect(shell).toContain('label="Aggregates"');
+    // The section this ui's own pages land in (M-FT.6 merges them into the
+    // shell's defaults; this ui scaffolds nothing, so the empty "Aggregates"
+    // heading it used to print over zero links is gone) and the page label
+    // itself are both emitter-DERIVED — raw attributes, no key.
+    expect(shell).toContain('label="Pages"');
+    expect(shell).toContain('label="DocList"');
   });
 });

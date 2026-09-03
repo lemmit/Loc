@@ -36,7 +36,7 @@ import type {
 import { backendServesRealtime } from "../../ir/util/channels.js";
 import { type PageNameCtx, pageEmitName } from "../../ir/util/page-kind.js";
 import { lines } from "../../util/code-builder.js";
-import { snake, upperFirst } from "../../util/naming.js";
+import { humanize, snake, upperFirst } from "../../util/naming.js";
 import { pageFileBase } from "../_frontend/page-identity.js";
 import { storeMemberLocal } from "../_walker/js-target-helpers.js";
 import type { ApiCallSite } from "../_walker/target.js";
@@ -102,7 +102,10 @@ export function generateFlutterForContexts(
   // in the app's own dependency graph) would make `flutter pub get` fail before
   // the app is even compiled.  See `package-name.ts`.
   const pkg = dartPackageName(deployable.name);
-  const title = upperFirst(deployable.uiName ?? deployable.name ?? sys.name);
+  // The `MaterialApp` title is what the browser tab (flutter web) and the OS
+  // task switcher show, so it must be the SYSTEM's name — `deployable.uiName`
+  // is an infrastructure identifier (`WebApp`), not a product name (E7).
+  const title = humanize(sys.name) || upperFirst(deployable.uiName ?? deployable.name);
 
   const ui = deployable.uiName ? sys.uis.find((u) => u.name === deployable.uiName) : undefined;
 
