@@ -132,8 +132,9 @@ system Acme {
   theme { primary: "#3b82f6", neutral: "#9ca3af" }
   user  { id: string, permissions: string[] }
 
-  ui SalesAdmin {
-    scaffold subdomains: [Sales]
+  ui SalesAdmin with scaffold(subdomains: [Sales]) {
+    framework: react
+    api Sales: SalesApi
     page OrderConsole(customerId: Customer id) { ... }
     menu { ... }
   }
@@ -146,16 +147,36 @@ system Acme {
 }
 ```
 
+A `ui` may equally be declared at the **file root**, outside any `system { … }`
+— it is a `ModelMember` as well as a `SystemMember` — so a `.ddd` file can be a
+pure UI library pulled in by `import`.
+
 The deployable references the ui via `ui: SalesAdmin`, mirroring how it
-already references hosted contexts. One ui can be served by multiple react
-deployables.
+already references hosted contexts.  Two binding forms parse:
+
+- **sugar** — `ui: SalesAdmin` (the ui's `api` handles bind to the deployable's
+  `targets`);
+- **compose** — `ui: SalesAdmin { Sales: api, Billing: billingApi }`, binding
+  each `api <name>:` handle to a named backend deployable, so one ui can be fed
+  by several backends.  `hosts: [A, B]` is the inverse spelling (a host naming
+  the uis it serves).
+
+One ui can be served by **many** frontend deployables at once — the same
+`ui SalesAdmin` mounts on react, vue, svelte, angular, feliz and flutter
+deployables, and on `platform: elixir` it renders as Phoenix LiveView
+(§16).  That is the point of the metamodel being framework-neutral.
 
 **Validator obligations**
 
-- Every `react` deployable **must** declare `ui: <Name>`. No implicit
-  default; the absence is a hard error.
+- Every **UI-mounting** deployable must declare `ui:` / `hosts:` — not just
+  react.  The absence is a hard error (`… deployable '<n>' must declare a 'ui:'
+  binding`).
 - `deployable.ui` must reference an existing `ui` block.
-- Only `react` deployables may set `ui:`.
+- Only a platform that mounts a UI may set `ui:` — a `platform: node` API
+  deployable may not (`loom.ui-binding-unmountable-platform`).
+- The host must be able to *run* the ui's framework: a `framework: phoenixLiveView`
+  ui only mounts on `platform: elixir`, and a JS-bundle framework only on a host
+  that serves bundles (`loom.ui-framework-unhostable`).
 - Every `scaffold` selector and every page-data binding inside the `ui` must
   resolve to a subdomain reachable through the deployable's `targets` chain.
 
@@ -168,32 +189,45 @@ metadata. Body is a single expression. Properties use Loom's existing
 colon-separator idiom (matches `Deployable`, `ThemeProp`, `EmitField`).
 
 ```ddd
-page OrderList {
-  route: "/orders"
-  body:  scaffoldList { of: Order }
-}
-
 page OrderDetail(id: Order id) {
   route: "/orders/:id"
-  body:  scaffoldDetails { of: Order }
+  title: "Order detail"
+  body: QueryView {
+    of: Sales.Order.byId(id),
+    single: true,
+    loading: Loader {},
+    empty: Empty { "Order not found" },
+    data: o => Stack { KeyValueRow { "Status", o.status } }
+  }
 }
 ```
 
-List/detail pages are normally produced wholesale by `scaffold(aggregates:
-[…])`; the `scaffoldList`/`scaffoldDetails` body sentinels above are the
-hand-writable form — useful when you want a list or detail *embedded* in a
-larger custom page body (a `Stack` alongside other components), or to declare
-a page the scaffold selector didn't cover. They expand at lowering time into
-the full Breadcrumbs · Toolbar · QueryView · Table tree.
+List/detail pages are normally produced wholesale by `with scaffold(aggregates:
+[…])` (§10).  **There is no `scaffoldList { … }` / `scaffoldDetails { … }` body
+sentinel** — earlier drafts of this doc described one, but the macro emits each
+page's *full* walker body up front (so `unfold` ejects real `.ddd`), and a page
+body naming `scaffoldList` is now a parse-level error:
+
+```ddd
+// ✗ error: Unknown builder type 'scaffoldList'.
+page OrderList { route: "/orders"  body: scaffoldList { of: Order } }
+```
+
+To embed a list in a larger custom body, compose `QueryView` + `Table` directly
+(§9.2), or scaffold the page and edit the unfolded source.
 
 | Property | Meaning |
 |---|---|
 | `route:` | Path-with-`:params`. Path params bind to typed parameters. |
 | `title:` | String expression, may interpolate page data. |
-| `requires` | Auth predicate — same syntax as on operations. On a React frontend with `auth: ui`, the page renders a client-side `<Forbidden/>` guard (evaluated against `useSession().user`) — the mirror of the backend's 403. Gates are `currentUser`-only (see [auth.md](auth.md)). |
-| `state { … }` | Reactive local fields (see §6). At most one, multiples merge. |
+| `requires` | Auth predicate — same syntax as on operations. On a frontend with `auth: ui`, the page renders a client-side `<Forbidden/>` guard (evaluated against the session user) — the mirror of the backend's 403. Gates are `currentUser`-only (see [auth.md](auth.md)). |
+| `state { … }` | Reactive local fields (see §6). Multiple blocks merge. |
+| `derived <n>: T = <expr>` | Named computed binding over params / state (§6). |
+| `action <n>(…) { … }` | Named effect handler — the only place effects may live (§8). |
 | `body:` | Single expression. May be a `match`, a ternary, a component invocation, anything. |
-| `menu { … }` | Per-page menu metadata (`section`, `label`, `order`, `hidden`). |
+| `layout:` | `default`, `none`, or the name of a system-level `layout <Name> { … }`. |
+| `menu { … }` | Per-page menu metadata (`section`, `label`, `order`, `hidden` — validated key set). |
+| `description:` / `ogImage:` / `canonical:` | Static SEO / social-graph metadata (string literals), projected into the generated `index.html` shell. |
 
 ---
 

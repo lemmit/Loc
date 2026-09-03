@@ -241,6 +241,8 @@ test("place and confirm an order through the UI", async ({ page }) => {
 });
 ```
 
+Assert against a **`getById`-bound** read, as above. A locator assertion taken straight off a `create` result (`let o = ui.orders.create({…})` … `expect(o.reference).toHaveText("…")`) parses and validates clean but currently **crashes `generate system`** (`expect requires a matcher …` out of `renderExpectStmt`) — re-open the row with `getById` first.
+
 `ui.workflows.<name>(…)` resolves through the generated workflow page object. The page objects (`web_app/e2e/pages/<agg>.ts`) are emitted from the same UI shape under [`src/generator/_frontend/`](../../src/generator/_frontend/) and shared across the frontends.
 
 ## Automatic api-vs-ui dispatch
