@@ -83,6 +83,46 @@ describe("java generator — seed runner", () => {
     expect(paths).toEqual([]);
   });
 
+  it("event-sourced: builds create(...) from the create action's OWN params, not every field (M-T6.52)", async () => {
+    // `owner` is the create action's ONLY param; `balance` is a real
+    // aggregate FIELD folded by the applier, not a create param.  The OLD
+    // emitter built this positional call from `forCreateInput(agg.fields)`
+    // (owner AND balance) against `create(String owner)` — javac "cannot be
+    // applied" (wrong argument count).
+    const src = `
+      system EsSeed {
+        subdomain Bank {
+          context Bank {
+            event Opened { account: Account id, owner: string }
+            aggregate Account persistedAs: eventLog {
+              owner: string
+              balance: int
+              create open(owner: string) { emit Opened { account: id, owner: owner } }
+              apply(e: Opened) { owner := e.owner  balance := 0 }
+            }
+            repository Accounts for Account { }
+            seed default { Account { owner: "seeded-alice" } }
+          }
+        }
+        storage primary { type: postgres }
+        resource bankLog { for: Bank, kind: eventLog, use: primary }
+        deployable api {
+          platform: java
+          contexts: [Bank]
+          dataSources: [bankLog]
+          port: 8080
+        }
+      }
+    `;
+    const files = await generateSystemFiles(src);
+    const s = files.get(
+      "api/src/main/java/com/loom/api/infrastructure/persistence/BankSeedRunner.java",
+    )!;
+    expect(s).toBeDefined();
+    expect(s).toContain('accountsRepository.save(Account.create("seeded-alice"));');
+    expect(s).not.toContain('Account.create("seeded-alice", null)');
+  });
+
   it("datetime seed literals parse to Instant at the create boundary", async () => {
     const src = `
       system Clock {

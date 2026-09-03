@@ -1,6 +1,4 @@
-import { forCreateInput } from "../../../ir/enrich/wire-projection.js";
 import type {
-  EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   ExprIR,
   SeedRowIR,
@@ -9,6 +7,13 @@ import type {
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, upperFirst } from "../../../util/naming.js";
 import { javaLogEvent } from "../../_obs/render-java.js";
+import {
+  type Entry,
+  groupByDataset,
+  type SeederAggregate,
+  seederAggregates,
+  usedAggregates,
+} from "../../_persistence/seed-datasets.js";
 import { renderSeedRowInsert } from "../../sql-pg.js";
 import { collectJavaExprImports, renderJavaExpr } from "../render-expr.js";
 
@@ -39,37 +44,32 @@ export interface SeedCtx {
   schemaOf: (aggName: string) => string | undefined;
 }
 
-interface Entry {
-  row: SeedRowIR;
-  raw: boolean;
-}
-
-interface Dataset {
-  name: string;
-  entries: Entry[];
-}
-
 export function renderJavaSeedRunner(ctx: EnrichedBoundedContextIR, sctx: SeedCtx): string | null {
   const datasets = groupByDataset(ctx);
   if (datasets.length === 0) return null;
-  const aggByName = new Map<string, EnrichedAggregateIR>(
-    ctx.aggregates.filter((a) => !a.isAbstract).map((a) => [a.name, a]),
-  );
+  // The shared seeder model (M-T6.52): which aggregates are seedable, and
+  // each one's ordered create-call parameters — the aggregate's full
+  // create-input set for a state aggregate, or the event-sourced `create`
+  // action's OWN declared params for an event-sourced one.  `renderArgs`
+  // used to build every call from `forCreateInput(agg.fields)` regardless
+  // of shape — on an event-sourced aggregate that is a param-count/name
+  // mismatch against the `create` factory's OWN params
+  // (`Account.create("seeded-alice", null)` against `create(String owner)`,
+  // javac "cannot be applied") — this is what fixes it.
+  const aggByName = seederAggregates(ctx);
 
   const imports = new Set<string>();
   const fnBlocks: string[] = [];
   const callLines: string[] = [];
-  const domainAggs = new Set<string>();
   for (const ds of datasets) {
     const entries = ds.entries.filter((e) => aggByName.has(e.row.aggregate));
     if (entries.length === 0) continue;
     fnBlocks.push(...renderDatasetFn(ds.name, entries, aggByName, sctx, imports));
     callLines.push(`        seed${upperFirst(ds.name)}(requested);`);
-    for (const e of entries) if (!e.raw) domainAggs.add(e.row.aggregate);
   }
   if (callLines.length === 0) return null;
 
-  const repoFields = [...domainAggs].sort();
+  const repoFields = usedAggregates(datasets, new Set(aggByName.keys()));
   const ctorParams = [
     "JdbcTemplate jdbc",
     ...repoFields.map((a) => `${a}Repository ${repoField(a)}`),
@@ -144,7 +144,7 @@ export function renderJavaSeedRunner(ctx: EnrichedBoundedContextIR, sctx: SeedCt
 function renderDatasetFn(
   dataset: string,
   entries: Entry[],
-  aggByName: Map<string, EnrichedAggregateIR>,
+  aggByName: Map<string, SeederAggregate>,
   sctx: SeedCtx,
   imports: Set<string>,
 ): string[] {
@@ -172,16 +172,24 @@ function renderDatasetFn(
   ];
 }
 
-/** Positional `create(…)` args — java's factory takes every create-input
- *  field in declaration order; rows omit trailing/middle fields → null. */
-function renderArgs(row: SeedRowIR, agg: EnrichedAggregateIR, imports: Set<string>): string {
+/** Positional `create(…)` args, over the shared seeder model's ordered
+ *  `createParams` (M-T6.52) — the aggregate's full create-input set for a
+ *  state aggregate, or the event-sourced `create` action's OWN declared
+ *  params for an event-sourced one.  Java's factory takes every one of
+ *  THOSE positionally; rows omit trailing/middle params → null.  This used
+ *  to always read `forCreateInput(agg.fields)` — every declared FIELD —
+ *  which on an event-sourced aggregate is a different, usually longer, list
+ *  than the `create` factory's own params: `Account.create("seeded-alice",
+ *  null)` positionally against `create(String owner)` (javac "cannot be
+ *  applied", the wrong-arg-count half of M-T6.52). */
+function renderArgs(row: SeedRowIR, agg: SeederAggregate, imports: Set<string>): string {
   const byName = new Map(row.fields.map((f) => [f.name, f.value]));
-  return forCreateInput(agg.fields)
-    .map((f) => {
-      const v = byName.get(f.name);
+  return agg.createParams
+    .map((p) => {
+      const v = byName.get(p.name);
       if (!v) return "null";
       collectJavaExprImports(v, imports);
-      return renderSeedValue(v, f.type, imports);
+      return renderSeedValue(v, p.type, imports);
     })
     .join(", ");
 }
@@ -201,19 +209,4 @@ function renderSeedValue(value: ExprIR, fieldType: TypeIR, imports: Set<string>)
 
 function repoField(agg: string): string {
   return `${lowerFirst(plural(agg))}Repository`;
-}
-
-function groupByDataset(ctx: EnrichedBoundedContextIR): Dataset[] {
-  const byName = new Map<string, Dataset>();
-  const order: string[] = [];
-  for (const seed of ctx.seeds ?? []) {
-    let ds = byName.get(seed.dataset);
-    if (!ds) {
-      ds = { name: seed.dataset, entries: [] };
-      byName.set(seed.dataset, ds);
-      order.push(seed.dataset);
-    }
-    for (const row of seed.rows) ds.entries.push({ row, raw: seed.path === "raw" });
-  }
-  return order.map((n) => byName.get(n)!);
 }
