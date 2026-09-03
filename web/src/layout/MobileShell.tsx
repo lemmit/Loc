@@ -11,6 +11,8 @@ import { MigrationsBody } from "./MigrationsPanel";
 import { ChatBody } from "./ChatPanel";
 import { OutputPanel, outputMark } from "./OutputPanel";
 import { PaneErrorBoundary } from "../PaneErrorBoundary";
+import { ExamplesSheet } from "./ExamplesPane";
+import { FirstRunCard } from "./FirstRunCard";
 import { devClaimsHeader, type LayoutCtx, type MobileCodeView, type MobileTab } from "./ctx";
 import {
   agentMark,
@@ -158,7 +160,10 @@ export function MobileShell({ ctx }: Props): JSX.Element {
         {/* Editor stays mounted (display toggle) so Monaco keeps its model +
             undo history; Builder/Model mount only while active so they
             re-parse the current source on each switch. */}
-        <Box style={{ flex: 1, minHeight: 0, display: codeView === "source" ? "flex" : "none" }}>
+        <Box style={{ flex: 1, minHeight: 0, display: codeView === "source" ? "flex" : "none", flexDirection: "column" }}>
+          {/* Stacked above the textarea, not over it — nothing is covered
+              on a phone (M-T8.18). */}
+          {ctx.firstRunVisible && <FirstRunCard ctx={ctx} />}
           <EditorPane ctx={ctx} />
         </Box>
         {codeView === "builder" && (
@@ -303,6 +308,7 @@ export function MobileShell({ ctx }: Props): JSX.Element {
         ))}
       </Stack>
     </Drawer>
+    <ExamplesSheet ctx={ctx} opened={ctx.examplesOpen} onClose={() => ctx.setExamplesOpen(false)} />
     </>
   );
 }

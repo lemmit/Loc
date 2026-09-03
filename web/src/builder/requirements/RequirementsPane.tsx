@@ -35,6 +35,8 @@ import { AstUtils, type AstNode } from "langium";
 import type { LayoutCtx } from "../../layout/ctx";
 import { spliceNodeIfParses } from "../edit-engine";
 import { RefusalLine } from "../refusal";
+import { ParseErrorState } from "../ParseErrorState";
+import { PARSE_ERROR } from "../../layout/vocabulary";
 import { usePaneHarness } from "../pane-harness";
 import { UndoRedo, paneUndoKeyHandler } from "../undo-redo";
 import { InlineConfirm, confirmSites } from "../../util/confirm";
@@ -323,13 +325,7 @@ export default function RequirementsPane({ ctx }: { ctx: LayoutCtx }): JSX.Eleme
   const [wizard, setWizard] = useState<null | "requirement" | "testCase" | "solution">(null);
 
   if (!harness.parseOk) {
-    return (
-      <Box p="md">
-        <Text size="sm" c="dimmed">
-          Source has syntax errors — fix them in the editor to see the requirements view.
-        </Text>
-      </Box>
-    );
+    return <ParseErrorState ctx={ctx} purpose={PARSE_ERROR.purpose.requirements} testid="requirements" />;
   }
   if (
     trace.requirements.length === 0 &&

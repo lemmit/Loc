@@ -16,6 +16,8 @@ export interface BuildDiagnostic {
   line?: number;
   column?: number;
   source?: string;
+  /** The stable `loom.*` code, when the diagnostic carries one. */
+  code?: string;
 }
 
 export interface VirtualFile {

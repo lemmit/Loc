@@ -34,6 +34,8 @@ import { enrichLoomModel } from "../../../../src/ir/enrich/enrichments.js";
 import { lowerModel } from "../../../../src/ir/lower/lower.js";
 import { usePaneHarness } from "../pane-harness";
 import { RefusalLine } from "../refusal";
+import { ParseErrorState } from "../ParseErrorState";
+import { PARSE_ERROR } from "../../layout/vocabulary";
 import { groupedLayout } from "../system/grouped-layout";
 import { buildLinkedModel } from "../system/linked-doc";
 import {
@@ -513,11 +515,7 @@ export default function OverviewCanvas({ ctx, onClose, onOpen }: {
     return (
       <Box style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
         {toolbar}
-        <Box p="md">
-          <Text size="sm" c="dimmed">
-            Source has syntax errors — fix them in the editor to use the model builder.
-          </Text>
-        </Box>
+        <ParseErrorState ctx={ctx} purpose={PARSE_ERROR.purpose.model} testid="overview" />
       </Box>
     );
   }
