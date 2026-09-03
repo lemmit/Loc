@@ -2,7 +2,14 @@
 
 *Plan: [`../improvement-waves-2026-09.md`](../improvement-waves-2026-09.md) §Wave 2 and §3a. Base: `main` @ `86c498d` (Wave 1 #2752 and the plan #2751 merged). One PR for the wave; packets work on `claude/wave-2-<packet>` sub-branches (git refuses `claude/wave-2/<packet>` while `claude/wave-2` exists) and are folded here by the coordinator. This file is the claim: any agent reading the PR list sees every packet, row and tree fence below. Hand-off notes are appended verbatim under §Hand-offs as packets land.*
 
-## Status: **folding — packets in progress** (2026-09-03)
+## Status: **six of seven folded; 2.6 in progress** (2026-09-03)
+
+### Coordinator gates on the folded tree (2.1–2.5 + 2.7, `be5fb596a`)
+
+- `npx tsc -b` clean · `npm run lint` clean.
+- Full fast suite: **1835 files / 20344 tests passed**, 87 files and 968 tests skipped, no failures.
+- **Composed byte-identical check** — the one no packet can run alone, since two byte-identical refactors can compose into a non-identical one. Every corpus / example / web-example entry point generated at the fold base (`ee8c2f0ec`) and at the folded tip; of the 55 that generate under `generate system` (the other 73 are `__PLATFORM__` templates the corpus harness substitutes, and they fail identically on both sides), **exactly six files differ, all of them packet 2.7's declared `M-T1.8` work**: `App.fs` (Feliz `safeView` + `Program.withErrorHandler`), `main.dart` (`ErrorWidget.builder` + `runZonedGuarded`), and on both elixir systems a new `error_html.ex` plus the `config.exs` `html:` format line. The five seam refactors composed to **zero** emitted-byte change.
+- Two known non-determinisms were normalised rather than waved through: the per-run `SECRET_KEY_BASE` in elixir compose files, and the source `.ddd` path inside .NET `#line` directives (it names the generating checkout, so a base-worktree run differs from a main-worktree run by construction).
 
 **Model note:** the plan assigned Opus to 2.1–2.5 and 2.7. Every Opus launch on 2026-09-03 13:45–14:25 UTC died on a server-side overload (three rounds, six agents, no commits lost — the worktrees were auto-cleaned unchanged), so all six packets were relaunched on **Sonnet** with the same briefs. The gates do not change with the model; the coordinator's fold checks are the same.
 
