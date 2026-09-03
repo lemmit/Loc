@@ -61,10 +61,10 @@ import {
 } from "../../ir/util/projection-read.js";
 import { intrinsicFor, intrinsicKey } from "../../util/intrinsics.js";
 import { elixirString, humanize, snake, upperFirst } from "../../util/naming.js";
-import { PROVENANCE_VALUE_FIELD } from "../../util/provenance-carrier.js";
 import { DURATION_UNIT_MS, type DurationUnit } from "../../util/temporal.js";
 import { USER_VISIBLE_SLOTS } from "../../util/user-visible-slots.js";
 import { tryRenderGate } from "../_frontend/gate-expr.js";
+import { PROVENANCE_VALUE_FIELD, provenancedFieldNames } from "../_payload/provenanced-wire.js";
 import { icuFromConcat, messageKey } from "../_walker/i18n-extract.js";
 import { WALKER_PRIMITIVES } from "../_walker/registry.js";
 import { heexTarget, renderHeexStoreActionCall, renderHeexStoreFieldRead } from "./heex-target.js";
@@ -847,33 +847,12 @@ function renderMember(expr: Extract<ExprIR, { kind: "member" }>, ctx: WalkContex
   if (
     expr.member === PROVENANCE_VALUE_FIELD &&
     expr.receiver.kind === "member" &&
-    provenancedFieldNames(ctx).has(expr.receiver.member)
+    provenancedFieldNames(ctx.aggregatesByName).has(expr.receiver.member)
   ) {
     return renderExpr(expr.receiver, ctx);
   }
   return `${renderExpr(expr.receiver, ctx)}.${snake(expr.member)}`;
 }
-
-/** Every `provenanced` field NAME declared by an aggregate (or entity part) in
- *  scope.  A page body carries unresolved receiver types (`walker-core.ts`
- *  documents the same limitation for the JSX walkers), so the carrier hop is
- *  recognised by field NAME rather than by type.  The residual ambiguity — a
- *  value object that happens to declare a field with the same name AS WELL AS a
- *  sub-field literally called `value` — is narrow, and the mis-render it would
- *  cause is a dropped `.value`, not a wrong value. */
-function provenancedFieldNames(ctx: WalkContext): ReadonlySet<string> {
-  const cached = provNamesCache.get(ctx.aggregatesByName);
-  if (cached) return cached;
-  const names = new Set<string>();
-  for (const agg of ctx.aggregatesByName.values()) {
-    for (const f of agg.fields) if (f.provenanced) names.add(f.name);
-    for (const p of agg.parts) for (const f of p.fields) if (f.provenanced) names.add(f.name);
-  }
-  provNamesCache.set(ctx.aggregatesByName, names);
-  return names;
-}
-
-const provNamesCache = new WeakMap<ReadonlyMap<string, AggregateIR>, ReadonlySet<string>>();
 
 /** JS-frontend collection ops that aren't in the shared `isCollectionOp`
  *  catalogue (`src/util/collection-ops.ts`) but DO render verbatim on the
@@ -1557,17 +1536,15 @@ export interface PrimitiveSpec {
    *  that renders several roots (a `Table` plus its pager) would occupy two
    *  grid cells instead of one. */
   childWrapper?: string;
-  /** Markup emitted INSIDE the tag, before / after the rendered children.
-   *
-   *  The seam a primitive uses to place its own decoration in the children
-   *  slot rather than as an attribute — `Button`'s `icon:` glyph is the one
-   *  case: the JSX packs render it as a `<span class="loom-icon">` sibling of
-   *  the label, and a Phoenix function component's inner block accepts exactly
-   *  that, where a NEW attribute on `<.button>` would be an undeclared attr
-   *  (i.e. a `--warnings-as-errors` build failure).  Suppresses the
-   *  self-closing form, since the tag then has content. */
-  leadingChildren?: string;
-  trailingChildren?: string;
+  /** Ready-made markup spliced into the inner block BEFORE / AFTER the
+   *  rendered children — the seam for a slot that is markup rather than an
+   *  attribute.  `Button`'s `icon:` is the case that needs it: the glyph is an
+   *  inline `<span>` inside the button, and it cannot be an attribute because
+   *  `<.button>` declares none (an undeclared attr on a Phoenix function
+   *  component is a `mix compile --warnings-as-errors` failure).  Computed by
+   *  the primitive's own renderer at call time, like `baseClass`. */
+  leadingChildHeex?: string;
+  trailingChildHeex?: string;
 }
 
 /** The attribute NAME of a rendered HEEx attribute fragment (`aria-label={…}` →
@@ -1684,13 +1661,13 @@ export function renderPrimitive(
       : []),
   ];
   const childrenHeex = [
-    ...(spec.leadingChildren ? [spec.leadingChildren] : []),
+    ...(spec.leadingChildHeex ? [spec.leadingChildHeex] : []),
     ...(spec.childWrapper
       ? renderedChildren.map(
           (c) => `<${spec.childWrapper}>\n${indent(c, 2)}\n</${spec.childWrapper}>`,
         )
       : renderedChildren),
-    ...(spec.trailingChildren ? [spec.trailingChildren] : []),
+    ...(spec.trailingChildHeex ? [spec.trailingChildHeex] : []),
   ].join("\n");
   const attrs = namedAttrs.length > 0 ? " " + namedAttrs.join(" ") : "";
   if (childrenHeex.length === 0) {
@@ -1922,7 +1899,11 @@ export function isAttrRenderable(arg: ExprIR): boolean {
 
 /** Render an attribute VALUE, or `undefined` when the authored value cannot be
  *  one (see {@link isAttrRenderable}) — callers must skip the attribute then. */
-function renderAttrValue(arg: ExprIR, ctx: WalkContext, isStatic: boolean): string | undefined {
+export function renderAttrValue(
+  arg: ExprIR,
+  ctx: WalkContext,
+  isStatic: boolean,
+): string | undefined {
   if (!isAttrRenderable(arg)) return undefined;
   // Quote a literal attribute value with `"` / `&` entity-escaped so a
   // `.ddd`-sourced value can't close the attribute or open an entity

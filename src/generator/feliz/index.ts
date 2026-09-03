@@ -608,6 +608,37 @@ function caseArgs(names: readonly string[]): string {
   return ` (${names.join(", ")})`;
 }
 
+/** Pages in `parseUrl` MATCH order — F# takes the first arm that matches, and a
+ *  `:param` segment binds ANY segment, so a literal route declared after a
+ *  sibling parameterised route of the same length is a dead rule (`/things/new`
+ *  after `/things/:id` routes the create form to the detail view with
+ *  `id = "new"`; F# reports only warning FS0026, which the generated
+ *  `App.fsproj` does not escalate).  Only patterns of the SAME segment count can
+ *  shadow each other, so sort within a length group — more literal segments
+ *  first, declaration order breaking ties — and keep the groups themselves in
+ *  first-declaration order, which leaves every already-correct ui byte-identical.
+ */
+function routeMatchOrder(pages: readonly PageIR[]): readonly PageIR[] {
+  const segCount = (p: PageIR): number =>
+    (p.route ?? "/").split("/").filter((s) => s.length > 0).length;
+  const literals = (p: PageIR): number =>
+    (p.route ?? "/").split("/").filter((s) => s.length > 0 && !s.startsWith(":")).length;
+  const groupRank = new Map<number, number>();
+  pages.forEach((p, i) => {
+    const n = segCount(p);
+    if (!groupRank.has(n)) groupRank.set(n, i);
+  });
+  return pages
+    .map((p, i) => ({ p, i }))
+    .sort(
+      (a, b) =>
+        groupRank.get(segCount(a.p))! - groupRank.get(segCount(b.p))! ||
+        literals(b.p) - literals(a.p) ||
+        a.i - b.i,
+    )
+    .map((x) => x.p);
+}
+
 /** The `Page` union + `parseUrl` — URL segments → the active `Page`.  A detail
  *  page's case carries its route param (`| ProductDetail of string`); `parseUrl`
  *  binds the segment.  Arms are emitted in page order; the catch-all falls back
@@ -629,7 +660,7 @@ function renderRouting(
     `  | ${pageCase(p, nameCtx)}${caseFields(routeParamNames(p).length)}`;
   const ctor = (p: PageIR): string => `${pageCase(p, nameCtx)}${caseArgs(routeParamNames(p))}`;
   const union = `type Page =\n${pages.map(caseDecl).join("\n")}`;
-  const arms = pages.map((p) => `  | ${routePattern(p.route)} -> ${ctor(p)}`);
+  const arms = routeMatchOrder(pages).map((p) => `  | ${routePattern(p.route)} -> ${ctor(p)}`);
   const fallback = pages.find((p) => !hasRouteParam(p)) ?? pages[0]!;
   const fallbackCtor = `${pageCase(fallback, nameCtx)}${caseArgs(
     routeParamNames(fallback).map(() => `""`),

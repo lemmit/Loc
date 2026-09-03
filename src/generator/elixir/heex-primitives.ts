@@ -31,6 +31,7 @@ import {
   localizedHeexAttr,
   type PrimitiveSpec,
   positionalRole,
+  renderAttrValue,
   renderChild,
   renderExpr,
   renderInTemplate,
@@ -1399,11 +1400,12 @@ const CLOSED_PRIMITIVE_SPECS: Record<string, PrimitiveSpec> = {
   Badge: { tag: ".badge", takesChildren: true },
   // `to:`/`disabled:`/`type:`/`variant:` are the four knobs `<.button>` declares
   // (`to` = render as a nav link, `variant` = the pack's rank vocabulary,
-  // `disabled`/`type` its global/`attr`).  `icon:`/`iconSvg:`/`iconPosition:`/
-  // `loading:` are NOT attrs — an undeclared attribute on a Phoenix function
-  // component is a compile WARNING, i.e. a build failure under
-  // `--warnings-as-errors` — so `renderButton` routes them through the
-  // component's `inner_block` slot and `attr :rest, :global` instead.
+  // `disabled`/`type` its global/`attr`).  `icon:`/`iconSvg:`/`iconPosition:`
+  // and `loading:` are NOT attributes on this spec — `renderButton` turns them
+  // into an inner-block glyph and an `aria-busy` ARIA global respectively,
+  // because an undeclared attribute on a Phoenix function component is a
+  // compile WARNING, i.e. a build failure under
+  // `mix compile --warnings-as-errors`.
   Button: {
     tag: ".button",
     takesChildren: true,
@@ -1983,41 +1985,41 @@ export function renderBadge(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCo
  *  registry the JSX walker uses, so the two targets ship the same glyph. */
 export function renderButton(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   const spec = CLOSED_PRIMITIVE_SPECS.Button!;
-  const iconName = stringNamedLit(expr, "icon");
-  const svg =
-    stringNamedLit(expr, "iconSvg") ?? (iconName ? lookupBuiltinIcon(iconName) : undefined);
-  // Decorative: the button's own text (or its `label:` aria-name) is the
-  // accessible name, so the glyph is hidden from assistive tech — the same
-  // stance `iconA11yAttr({ decorative: true })` takes on a bare `Icon`.
-  const glyph = svg ? `<span class="loom-icon" aria-hidden="true">${svg}</span>` : undefined;
-  const position = stringNamedLit(expr, "iconPosition") ?? "right";
-  const loading = namedArg(expr, "loading");
-  const disabled = namedArg(expr, "disabled");
-  const extraAttrs: string[] = [];
-  let overrideDisabled: string | undefined;
-  if (loading !== undefined && isAttrRenderable(loading)) {
-    const busy = renderExpr(loading, { ...ctx, position: "template" });
-    extraAttrs.push(`aria-busy={${busy}}`);
-    overrideDisabled =
-      disabled !== undefined && isAttrRenderable(disabled)
-        ? `disabled={${renderExpr(disabled, { ...ctx, position: "template" })} or ${busy}}`
-        : `disabled={${busy}}`;
-  }
+  // `icon:` / `iconSvg:` / `iconPosition:` and `loading:` — the four knobs the
+  // TSX `emitButton` consumes that HEEx used to DROP (ledger G2667-C7), and the
+  // reason they were dropped: `<.button>` declares none of them, and an
+  // undeclared attribute on a Phoenix function component is a compile warning,
+  // i.e. a failure under `mix compile --warnings-as-errors`.  Neither needs to
+  // be an attribute, so neither has to touch the packs:
+  //
+  //   - the GLYPH is markup — an inline `<span class="loom-icon">` spliced into
+  //     the button's inner block on the authored side (`iconPosition:`,
+  //     defaulting to `"right"` exactly as the TSX emitter does).  It is
+  //     `aria-hidden` because the button's text (or its `label:` aria-label) is
+  //     already the accessible name — the same decorative-by-default contract
+  //     `renderIcon` applies.
+  //   - `loading:` becomes `aria-busy`, an ARIA global Phoenix's `:global`
+  //     attr accepts on any component, so the busy state reaches assistive tech
+  //     instead of vanishing.  It deliberately does NOT also force `disabled`:
+  //     that is the author's `disabled:` knob, which already passes through,
+  //     and emitting both would put two `disabled` attributes on one tag.
+  const loadingArg = namedArg(expr, "loading");
+  const loadingValue = loadingArg ? renderAttrValue(loadingArg, ctx, false) : undefined;
+  const iconSvg =
+    stringNamedLit(expr, "iconSvg") ??
+    ((n) => (n === undefined ? undefined : lookupBuiltinIcon(n)))(stringNamedLit(expr, "icon"));
+  const iconHeex = iconSvg
+    ? `<span class="loom-icon" aria-hidden="true">${iconSvg}</span>`
+    : undefined;
+  const iconLeads = stringNamedLit(expr, "iconPosition") === "left";
   return renderPrimitive(
     {
       ...spec,
-      // An explicit `disabled=` is emitted here (already OR-ed with `loading`),
-      // so the pass-through must not emit a second one.
-      passThroughAttrs: overrideDisabled
-        ? spec.passThroughAttrs?.filter((a) => a !== "disabled")
-        : spec.passThroughAttrs,
-      extraAttrs: [
-        ...(spec.extraAttrs ?? []),
-        ...extraAttrs,
-        ...(overrideDisabled ? [overrideDisabled] : []),
-      ],
-      ...(glyph && position === "left" ? { leadingChildren: glyph } : {}),
-      ...(glyph && position !== "left" ? { trailingChildren: glyph } : {}),
+      extraAttrs: loadingValue
+        ? [...(spec.extraAttrs ?? []), `aria-busy=${loadingValue}`]
+        : spec.extraAttrs,
+      leadingChildHeex: iconLeads ? iconHeex : undefined,
+      trailingChildHeex: iconLeads ? undefined : iconHeex,
     },
     expr,
     ctx,

@@ -301,3 +301,155 @@ describe("ProvenanceInfo — Flutter renders an ExpansionTile disclosure over th
     expect(out).not.toContain("provLineageSchema");
   });
 });
+
+// ---------------------------------------------------------------------------
+// The BARE read — a hand-written page body that reads a `provenanced` field
+// without spelling the carrier hop.
+//
+// M-T6.12 moved the lineage INSIDE the field's wire entry, which changed what
+// `<record>.<field>` denotes: a `{ value, lineage }` object where the field's
+// DECLARED type still says `int`.  Only the scaffold macro was taught to append
+// `.value`, so a hand-written `Text { o.total }` put the whole carrier object
+// into a text slot — TS2322 under `tsc --noEmit` on the JSX frontends,
+// "Objects are not valid as a React child" at runtime, a stringified record on
+// Feliz/Flutter — and no `loom.*` code said a word.
+//
+// The walker now appends the hop itself, so the two spellings agree: the
+// DECLARED type keeps meaning what it says, and `.value` stays legal for an
+// author who prefers to be explicit (it must not double into `.value.value`).
+// HEEx is the documented exception in the OTHER direction — LiveView renders
+// off the Ecto struct, where the field is still the scalar column — so both
+// spellings must render the bare column there.
+// ---------------------------------------------------------------------------
+
+/** A HAND-WRITTEN detail page reading the provenanced `total` twice: once bare,
+ *  once through the explicit `.value` hop.  Both must render the figure. */
+const bareReadSystem = (frontend: string): string => `
+  system BareRead {
+    api SalesApi from Sales
+    subdomain Sales {
+      context Orders {
+        aggregate Order with crudish {
+          name: string
+          total: int provenanced
+        }
+        repository Orders for Order { }
+      }
+    }
+    storage primary { type: postgres }
+    ui Web {
+      api A: SalesApi
+      page OrderDetail(id: Order id) {
+        route: "/orders/:id"
+        body: QueryView {
+          of: A.Order.byId(id),
+          data: o => Stack { Text { o.total }, Text { string(o.total.value) } }
+        }
+      }
+    }
+    resource ordersState { for: Orders, kind: state, use: primary }
+    deployable api {
+      platform: node, contexts: [Orders], dataSources: [ordersState],
+      serves: SalesApi, port: 3000
+    }
+    deployable web { platform: ${frontend}, targets: api, ui: Web { A: api }, port: 3001 }
+  }
+`;
+
+/** The HEEx twin — Phoenix LiveView is fullstack, so the ui is hosted ON the
+ *  elixir backend rather than on a separate frontend deployable. */
+const bareReadHeex = `
+  system BareRead {
+    api SalesApi from Sales
+    subdomain Sales {
+      context Orders {
+        aggregate Order with crudish {
+          name: string
+          total: int provenanced
+        }
+        repository Orders for Order { }
+      }
+    }
+    storage primary { type: postgres }
+    ui Web {
+      api A: SalesApi
+      page OrderDetail(id: Order id) {
+        route: "/orders/:id"
+        body: QueryView {
+          of: A.Order.byId(id),
+          data: o => Stack { Text { o.total }, Text { string(o.total.value) } }
+        }
+      }
+    }
+    resource ordersState { for: Orders, kind: state, use: primary }
+    deployable app {
+      platform: elixir, contexts: [Orders], dataSources: [ordersState],
+      serves: SalesApi, ui: Web { A: app }, port: 4000
+    }
+  }
+`;
+
+/** Per-frontend: the exact text the DETAIL page must contain for the bare read,
+ *  and the substring that proves the explicit hop did not double. */
+const BARE_READ_EXPECTATIONS: readonly {
+  frontend: string;
+  /** How the bare `o.total` must render — with the hop appended. */
+  bare: string;
+  /** How the explicit `o.total.value` must still render. */
+  explicit: string;
+}[] = [
+  {
+    frontend: "react",
+    bare: "<Text>{orderById.data.total.value}</Text>",
+    explicit: "<Text>{String(orderById.data.total.value)}</Text>",
+  },
+  {
+    frontend: "vue",
+    bare: "{{ orderById.data.total.value }}",
+    explicit: "{{ String(orderById.data.total.value) }}",
+  },
+  {
+    frontend: "svelte",
+    bare: ">{orderById.data.total.value}<",
+    explicit: ">{String(orderById.data.total.value)}<",
+  },
+  {
+    frontend: "angular",
+    bare: "{{ orderById.data()!.total.value }}",
+    explicit: "{{ String(orderById.data()!.total.value) }}",
+  },
+  {
+    frontend: "feliz",
+    bare: "Html.text (string (orderById.total.value))",
+    explicit: "Html.text ((string orderById.total.value))",
+  },
+  {
+    frontend: "flutter",
+    bare: "Text('${orderById.total.value}')",
+    explicit: "Text(orderById.total.value.toString())",
+  },
+];
+
+describe("a hand-written page body reading a `provenanced` field bare", () => {
+  for (const { frontend, bare, explicit } of BARE_READ_EXPECTATIONS) {
+    it(`${frontend}: the bare read gets the carrier hop, the explicit one is left alone`, async () => {
+      const out = allFiles(await generateSystemFiles(bareReadSystem(frontend)));
+      // The bug: the bare read emitted the `{ value, lineage }` object itself.
+      expect(out).toContain(bare);
+      // …and the explicit spelling must not double into `.value.value`.
+      expect(out).toContain(explicit);
+      expect(out).not.toContain(".total.value.value");
+    });
+  }
+
+  it("heex: BOTH spellings read the scalar column — the hop is dropped, not added", async () => {
+    const out = allFiles(await generateSystemFiles(bareReadHeex));
+    // LiveView renders server-side off the Ecto struct, where `total` is the
+    // typed column and the lineage is a separate jsonb sibling.  A `.value` hop
+    // would raise on an integer, so the HEEx engine strips it — and must not
+    // acquire the JS walker's opposite edit.
+    expect(out).toContain("<%= @o.total %>");
+    expect(out).toContain("<%= to_string(@o.total) %>");
+    expect(out).not.toContain("@o.total.value");
+  });
+});

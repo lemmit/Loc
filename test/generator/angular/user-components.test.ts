@@ -283,4 +283,50 @@ describe("user components — Angular", () => {
       'import { Ribbon } from "../components/Ribbon";',
     );
   });
+
+  // F2-CFE-8 — `Slot {}` content the caller passes is unprojectable through
+  // `ngComponentOutlet` (it sets INPUTS; there is no content channel).  The
+  // drop stays, but it is no longer INVISIBLE: every other frontend emits the
+  // child (`<Panel item={r}><Text>…</Text></Panel>` on React), so a marker
+  // scan needs something to find on Angular.
+  it("a dropped Slot child leaves a degradation comment at the call site", async () => {
+    const files = await angularFiles(
+      sys(`
+      component Panel(label: string) { body: Card { Text { label }, Slot {} } }
+      page Home {
+        route: "/"
+        body: Stack { Panel("hi", Text { "inner-content" }) }
+      }`),
+    );
+    const page = files.get("src/app/pages/home.component.ts")!;
+    expect(page).toContain('[ngComponentOutlet]="Panel"');
+    expect(page).toContain(
+      "<!-- Panel: 1 projected child dropped — ngComponentOutlet has no content-projection channel -->",
+    );
+    // The child's own text really is gone — the comment is the whole record.
+    expect(page).not.toContain("inner-content");
+  });
+
+  it("the dropped-children comment counts and pluralises", async () => {
+    const files = await angularFiles(
+      sys(`
+      component Panel(label: string) { body: Card { Text { label }, Slot {} } }
+      page Home {
+        route: "/"
+        body: Stack { Panel("hi", Text { "a" }, Text { "b" }) }
+      }`),
+    );
+    const page = files.get("src/app/pages/home.component.ts")!;
+    expect(page).toContain("<!-- Panel: 2 projected children dropped");
+  });
+
+  it("a component call with no extra child emits no degradation comment", async () => {
+    const files = await angularFiles(
+      sys(`
+      component Panel(label: string) { body: Card { Text { label } } }
+      page Home { route: "/" body: Stack { Panel("hi") } }`),
+    );
+    const page = files.get("src/app/pages/home.component.ts")!;
+    expect(page).not.toContain("projected child");
+  });
 });

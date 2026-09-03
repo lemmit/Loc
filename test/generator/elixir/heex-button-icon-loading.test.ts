@@ -1,118 +1,93 @@
+// ---------------------------------------------------------------------------
+// HEEx `Button` — the `icon:` / `iconSvg:` / `iconPosition:` glyph slot and the
+// `loading:` busy state (ledger G2667-C7).
+//
+// Both were DROPPED on Phoenix while every JSX target rendered them, and the
+// drop was rationalised in a code comment rather than tracked: `<.button>`
+// declares neither attribute, and an undeclared attribute on a Phoenix function
+// component is a compile warning — a build failure under
+// `mix compile --warnings-as-errors`.  Neither knob has to be an attribute:
+// the glyph is markup inside the button's inner block, and `loading:` is the
+// ARIA global `aria-busy`, which Phoenix's `:global` attr accepts on any
+// component.  So the pack templates stay untouched.
+// ---------------------------------------------------------------------------
+
 import { describe, expect, it } from "vitest";
 import { generateSystemFiles } from "../../_helpers/index.js";
 
-// ---------------------------------------------------------------------------
-// G2667-C7 — `Button { icon: / iconPosition: / loading: }` on HEEx.
-//
-// The three were DROPPED, rationalised by a comment: they are not attrs
-// `<.button>` declares, and an undeclared attribute on a Phoenix function
-// component is a compile warning ⇒ a `--warnings-as-errors` build failure.  A
-// silent degradation with a code comment is still silent, so the drop is now a
-// real rendering that stays inside what BOTH shipping HEEx packs' buttons
-// already declare — the `inner_block` slot and `attr :rest, :global`:
-//
-//   icon:/iconSvg:/iconPosition: → a `<span class="loom-icon">` sibling of the
-//     label INSIDE the button (the shape the shadcn/flowbite JSX templates
-//     emit), before or after it per `iconPosition:` (default "right")
-//   loading:                     → `aria-busy={…}` (an `aria-` global) plus
-//     `disabled={…}`, OR-ed with an author `disabled:`
-//
-// Nothing here adds an attribute to the pack component, so `designs/` is
-// untouched and the emitted page still compiles warning-free.
-// ---------------------------------------------------------------------------
-
-const SRC = `
-system Demo {
-  subdomain M {
-    context C {
-      aggregate Doc { name: string  derived display: string = name }
-      repository Docs for Doc { }
-    }
-  }
-  api DemoApi from M
-  ui DemoUi {
+const src = (buttons: string) => `
+system Btn {
+  subdomain M { context C { } }
+  api A from M
+  ui U {
     page Landing {
       route: "/"
-      state { busy: bool = false  locked: bool = false }
       body: Stack {
-        Button("Add", icon: "check", iconPosition: "left"),
-        Button("Next", icon: "arrow-right"),
-        Button("Save", loading: busy),
-        Button("Send", loading: busy, disabled: locked),
-        Button("Plain")
+${buttons}
       }
     }
   }
-  storage loomDb { type: postgres }
-  resource cState { for: C, kind: state, use: loomDb }
-  deployable phoenixApp {
-    platform: elixir, contexts: [C], dataSources: [cState], serves: DemoApi,
-    ui: DemoUi, port: 4000
-  }
-}
-`;
+  storage db { type: postgres }
+  resource st { for: C, kind: state, use: db }
+  deployable p { platform: elixir, contexts: [C], dataSources: [st], serves: A, ui: U, port: 4000 }
+}`;
 
-async function landingHeex(): Promise<string> {
-  const files = await generateSystemFiles(SRC);
-  for (const [p, c] of files) {
-    if (p.endsWith("/landing_live.ex")) return c;
-  }
+async function landing(buttons: string): Promise<string> {
+  const files = await generateSystemFiles(src(buttons));
+  for (const [p, c] of files) if (p.endsWith("/landing_live.ex")) return c;
   throw new Error("landing_live.ex not found");
 }
 
-/** The `<.button>…</.button>` block whose label is `label`. */
-function buttonBlock(heex: string, label: string): string {
-  const blocks = [...heex.matchAll(/<\.button[\s\S]*?<\/\.button>/g)].map((m) => m[0]);
-  const hit = blocks.find((b) => b.includes(label));
-  expect(
-    hit,
-    `no <.button> block containing '${label}' (${blocks.length} buttons emitted)`,
-  ).toBeTruthy();
-  return hit as string;
+/** The `<.button …>…</.button>` block carrying the given data-testid. */
+function button(heex: string, testid: string): string {
+  const start = heex.indexOf(`<.button data-testid="${testid}"`);
+  expect(start, `no button with testid ${testid}`).toBeGreaterThan(-1);
+  return heex.slice(start, heex.indexOf("</.button>", start));
 }
 
-describe("HEEx Button icon / loading", () => {
-  it("renders a left icon as a glyph span BEFORE the label, inside the button", async () => {
-    const block = buttonBlock(await landingHeex(), "Add");
-    expect(block).toContain(`<span class="loom-icon" aria-hidden="true">`);
-    expect(block).toContain("<svg");
-    // Order: the glyph precedes the label text.
-    expect(block.indexOf("loom-icon")).toBeLessThan(block.indexOf("Add"));
+describe("HEEx Button — icon + loading slots", () => {
+  it("renders `icon:` as an aria-hidden glyph AFTER the label by default", async () => {
+    const heex = await landing(`        Button { "Save", icon: "check", testid: "save" }`);
+    const save = button(heex, "save");
+    // The builtin registry's SVG, resolved walker-side exactly as the TSX
+    // emitter resolves it — the pack's `<.button>` needs no new attr.
+    expect(save).toContain('<span class="loom-icon" aria-hidden="true"><svg');
+    expect(save).toContain('<path d="M5 12l4 4L19 7"/>');
+    // Decorative: the button's own text is already the accessible name.
+    // …and the default position is trailing (the TSX `iconPosition` default).
+    expect(save.indexOf('"Save"')).toBeLessThan(save.indexOf('class="loom-icon"'));
   });
 
-  it("defaults `iconPosition` to the right — glyph AFTER the label", async () => {
-    const block = buttonBlock(await landingHeex(), "Next");
-    expect(block).toContain(`<span class="loom-icon" aria-hidden="true">`);
-    expect(block.indexOf("Next")).toBeLessThan(block.indexOf("loom-icon"));
+  it('honours `iconPosition: "left"` by leading with the glyph', async () => {
+    const heex = await landing(
+      `        Button { "Back", icon: "x", iconPosition: "left", testid: "back" }`,
+    );
+    const back = button(heex, "back");
+    expect(back).toContain('class="loom-icon"');
+    expect(back.indexOf('class="loom-icon"')).toBeLessThan(back.indexOf('"Back"'));
   });
 
-  it("never emits `icon` / `iconPosition` / `loading` as an attribute on <.button>", async () => {
-    const heex = await landingHeex();
-    for (const label of ["Add", "Next", "Save", "Send"]) {
-      const open = buttonBlock(heex, label).split(">")[0] as string;
-      expect(open).not.toMatch(/\sicon[=\s]/);
-      expect(open).not.toMatch(/\siconPosition=/);
-      expect(open).not.toMatch(/\sicon_position=/);
-      expect(open).not.toMatch(/\sloading=/);
-    }
+  it("renders `loading:` as the ARIA global aria-busy, not a dropped attr", async () => {
+    const heex = await landing(`        Button { "Go", loading: true, testid: "go" }`);
+    expect(button(heex, "go")).toContain("aria-busy={true}");
   });
 
-  it("renders `loading:` as aria-busy plus a disabled binding", async () => {
-    const block = buttonBlock(await landingHeex(), "Save");
-    expect(block).toMatch(/aria-busy=\{[^}]*busy[^}]*\}/);
-    expect(block).toMatch(/disabled=\{[^}]*busy[^}]*\}/);
+  // The knobs stay OFF the tag: `<.button>` declares no `icon`/`loading`
+  // attribute, so leaking either as an attribute is a -Werror build failure.
+  it("never emits icon / loading / iconPosition as attributes on <.button>", async () => {
+    const heex = await landing(
+      `        Button { "Save", icon: "check", loading: true, iconPosition: "left", testid: "save" }`,
+    );
+    const save = button(heex, "save");
+    expect(save).not.toMatch(/\sicon=/);
+    expect(save).not.toMatch(/\sloading=/);
+    expect(save).not.toMatch(/\sicon_position=|\siconPosition=/);
   });
 
-  it("ORs an author `disabled:` with `loading:` — one disabled attribute, both operands", async () => {
-    const block = buttonBlock(await landingHeex(), "Send");
-    const open = block.split(">")[0] as string;
-    expect((open.match(/\sdisabled=/g) ?? []).length).toBe(1);
-    expect(open).toMatch(/disabled=\{.*locked.* or .*busy.*\}/);
-  });
-
-  it("leaves a plain Button untouched — no glyph, no aria-busy", async () => {
-    const block = buttonBlock(await landingHeex(), "Plain");
-    expect(block).not.toContain("loom-icon");
-    expect(block).not.toContain("aria-busy");
+  it("leaves a plain Button byte-identical (no glyph, no aria-busy)", async () => {
+    const heex = await landing(`        Button { "Plain", testid: "plain" }`);
+    const plain = button(heex, "plain");
+    expect(plain).not.toContain("loom-icon");
+    expect(plain).not.toContain("aria-busy");
   });
 });

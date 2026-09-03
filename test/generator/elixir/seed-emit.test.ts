@@ -123,6 +123,35 @@ describe("elixir/vanilla generator — first-boot seeding", () => {
     expect(seeds).toContain(`dataset == "default" or MapSet.member?(requested, dataset)`);
   });
 
+  // Ledger G2667-D6: the seeder committed per row and wrote the completion
+  // marker LAST, so a crash mid-dataset left rows behind with NO marker and the
+  // next boot re-seeded them on top.  Python's seeder was already one commit.
+  it("commits each dataset's rows and its ship-once marker in ONE transaction", async () => {
+    const seeds = (await generateSystemFiles(SEEDED)).get(SEEDS)!;
+    for (const ds of ["default", "demo", "wired"]) {
+      // The whole dataset body — every row AND `mark_seeded` — lives inside one
+      // `Repo.transaction`, so a mid-dataset raise rolls the rows back with it.
+      const body = seeds.slice(
+        seeds.indexOf(`defp seed_${ds}(requested) do`),
+        seeds.indexOf(`defp seed_${ds}(requested) do`) + 800,
+      );
+      const txStart = body.indexOf("Repo.transaction(fn ->");
+      const txEnd = body.indexOf("        end)");
+      expect(txStart, `seed_${ds} opens no transaction`).toBeGreaterThan(-1);
+      expect(body.indexOf(`mark_seeded("${ds}")`)).toBeGreaterThan(txStart);
+      expect(body.indexOf(`mark_seeded("${ds}")`)).toBeLessThan(txEnd);
+    }
+    // The two `default` rows are inside the same transaction as its marker —
+    // the partial-apply window the per-row commit left open.
+    const dflt = seeds.slice(
+      seeds.indexOf("defp seed_default(requested) do"),
+      seeds.indexOf("defp seed_demo(requested) do"),
+    );
+    const tx = dflt.indexOf("Repo.transaction(fn ->");
+    expect(dflt.indexOf(`PartRepository.insert(%{name: "Alpha"`)).toBeGreaterThan(tx);
+    expect(dflt.indexOf(`PartRepository.insert(%{name: "Beta"`)).toBeGreaterThan(tx);
+  });
+
   it("INVOKES the seeder at boot — after the Repo, BEFORE the Endpoint", async () => {
     const files = await generateSystemFiles(SEEDED);
     const app = files.get(APPLICATION)!;
