@@ -359,6 +359,79 @@ system Demo {
   });
 });
 
+// ---------------------------------------------------------------------------
+// The Feliz ACTION path — the one surface that does not go through the shared
+// walker.
+//
+// `feliz/fs-expr.ts`'s `renderFsExpr` owns the MVU `update` arms a named
+// `action` lowers to, with its own dispatch.  It routed `method-call`
+// collection ops through `renderFsMethodCall` but had no arm for the PROPERTY
+// spelling, which lowers to a `member` — so on
+// `n := tags.where(t => t != "").count` it emitted
+//
+//     (model.CartTags |> List.filter (fun t -> (t <> ""))).count
+//
+// — the `where` translated and the chained `.count` did not, in the SAME
+// expression.  Not F#, and worse, the two Feliz paths disagreeing about one
+// body, which is precisely what this file's shared-leaf design exists to stop.
+//
+// Found by READING the emitted App.fs, not by a test: the gate accepts this
+// body (both ops are rendered ops) and nothing else looks at the update path.
+// ---------------------------------------------------------------------------
+describe("collection ops on the Feliz MVU update path", () => {
+  async function appFs(storeBody: string): Promise<string> {
+    const files = await generateSystemFiles(`
+system Demo {
+  subdomain S {
+    context C {
+      aggregate Customer { name: string }
+      repository Customers for Customer { }
+    }
+  }
+  api A from S
+  ui Web {
+    framework: feliz
+    api C: A
+    store Cart {
+      state { tags: string[]  n: int = 0 }
+${storeBody}
+    }
+    page X { route: "/x"  body: Text("x") }
+  }
+  storage primary { type: postgres }
+  resource st { for: C, kind: state, use: primary }
+  deployable api { platform: node  contexts: [C]  dataSources: [st]  serves: A  port: 3000 }
+  deployable web { platform: feliz  targets: api  ui: Web { C: api }  port: 3001 }
+}`);
+    return [...files.entries()].find(([p]) => p.endsWith("src/App.fs"))![1];
+  }
+
+  it("translates a CHAINED property-form op in an action body", async () => {
+    const fs = await appFs(`      action tidy() { n := tags.where(t => t != "").count }`);
+    expect(fs).toContain(
+      'CartN = (List.length (model.CartTags |> List.filter (fun t -> (t <> ""))))',
+    );
+    // The assertion that fails on the un-fixed update path: the chained
+    // `.count` rode out verbatim on the end of a correctly-translated filter.
+    expect(fs).not.toMatch(/\)\.count/);
+  });
+
+  it("translates a chain of two call-form ops in an action body", async () => {
+    const fs = await appFs(`      action topTwo() { tags := tags.sortBy(t => t).take(2) }`);
+    expect(fs).toContain(
+      "CartTags = ((model.CartTags |> List.sortBy (fun t -> t)) |> List.truncate 2)",
+    );
+  });
+
+  it("leaves a non-collection receiver alone — the arm is receiver-TYPED", async () => {
+    // Keyed on the receiver being a collection, not on the member NAME, so a
+    // scalar field stays a scalar read and a record field genuinely called
+    // `count` would stay a field.
+    const fs = await appFs(`      action bump() { n := n + 1 }`);
+    expect(fs).toContain("CartN = (model.CartN + 1)");
+  });
+});
+
 describe("collection ops in a component body, not just a page", () => {
   it("renders through the same table from a component", async () => {
     const files = await generateSystemFiles(`

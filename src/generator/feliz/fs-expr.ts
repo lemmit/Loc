@@ -16,7 +16,7 @@
 // the seam extraction converts it.
 
 import type { BinOp, ExprIR, LiteralKind, PrimitiveName, TypeIR } from "../../ir/types/loom-ir.js";
-import { isDescendingSort } from "../../ir/util/collection-op-site.js";
+import { isCollectionType, isDescendingSort } from "../../ir/util/collection-op-site.js";
 import { intrinsicFor, intrinsicKey } from "../../util/intrinsics.js";
 import { upperFirst } from "../../util/naming.js";
 import { DURATION_UNIT_MS } from "../../util/temporal.js";
@@ -539,7 +539,26 @@ export function renderFsExpr(e: ExprIR, ctx: FsExprCtx): string {
       // record the VIEW path emits for it (walker-core's `new` arm → the
       // `exprObject` seam → this same leaf).
       return `(${FS_LEAVES.object(e.fields.map((f) => ({ name: f.name, value: r(f.value) })))})`;
-    case "member":
+    case "member": {
+      // A COLLECTION OP in its property spelling (`tags.count`, `xs.distinct`).
+      // Checked first, because the verbatim fall-through below is not F#:
+      // measured on a store action `n := tags.where(t => t != "").count`, the
+      // update path emitted
+      //     (model.CartTags |> List.filter (fun t -> (t <> ""))).count
+      // — the `where` translated (it is a `method-call`, which
+      // `renderFsMethodCall` has always routed) and the chained `.count` did
+      // not, because a no-paren op lowers to a `member` and this arm had no
+      // idea.  The VIEW path has always been fine: it goes through the shared
+      // walker, whose `member` arm routes collection ops.  So the two Feliz
+      // paths disagreed on the same expression — the exact divergence this
+      // file's shared-leaf design exists to prevent.
+      //
+      // Receiver-typed, like everything else here: a wire record with a field
+      // genuinely named `count` still reads as a field.
+      if (isCollectionType(e.receiverType)) {
+        const op = renderFsCollectionOp({ op: e.member, recv: r(e.receiver), args: [] });
+        if (op !== undefined) return op;
+      }
       // Record-field access — the receiver is a wire record (an async-effect
       // success binding `p`, a read row) whose F# fields keep the EXACT lowercase
       // wire-shape names (`type Project = { name: string }`).  Render the field
@@ -548,6 +567,7 @@ export function renderFsExpr(e: ExprIR, ctx: FsExprCtx): string {
       // casing seam.  (`upperFirst` here was a latent bug — no member access
       // reached this arm until the async-effect renderer landed.)
       return `${r(e.receiver)}.${e.member}`;
+    }
     case "call":
       return `${e.name}(${e.args.map(r).join(", ")})`;
     case "method-call":
