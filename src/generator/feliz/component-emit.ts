@@ -351,10 +351,40 @@ function renderOne(
     ctx.i18nEnabled ? `component.${c.name}` : undefined,
   );
   const body = result.tsx.trim();
+  // A body that CALLS a model- or dispatch-taking sibling component emits
+  // `<Name> model dispatch {| … |}` — so this component needs the same leading
+  // curried args in ITS OWN scope, even when nothing in it reads `model.<Field>`
+  // or dispatches an action of its own.  Read off the resolved call-site params
+  // rather than re-scanning the emitted F#, so the two can't disagree.
+  const callsMarker = (marker: string): boolean =>
+    [...result.usedUserComponents].some((n) =>
+      (componentParams.get(n) ?? []).some((p) => p.name === marker),
+    );
   // The scans below run over the derived `let`s TOO — a derived reading a store
   // renders `model.<Store><Field>`, which is a Model field this component has no
   // business naming, and the check has to see it.
-  const scanned = [body, ...derivedBinds].join("\n");
+  //
+  // The bare `model` / `dispatch` those nested calls splice in are NOT page
+  // scope this body is reaching for — they are the very arguments this function
+  // gains below — so blank the exact callee HEAD `renderUserComponent` builds
+  // before scanning, or `needsMvuScope` defers every component that nests a
+  // stateful one and the whole subtree silently drops.
+  const calleeHead = (n: string): string => {
+    const ps = componentParams.get(n) ?? [];
+    const has = (m: string): boolean => ps.some((p) => p.name === m);
+    return [
+      n,
+      ...(has(FELIZ_MODEL_PARAM) ? ["model"] : []),
+      ...(has(FELIZ_DISPATCH_PARAM) ? ["dispatch"] : []),
+    ].join(" ");
+  };
+  const scanned = [...result.usedUserComponents].reduce(
+    (acc, n) => {
+      const head = calleeHead(n);
+      return head === n ? acc : acc.split(head).join(n);
+    },
+    [body, ...derivedBinds].join("\n"),
+  );
   // This component's own `state {}` cells are Model fields (folded in by
   // `index.ts`'s `combinedState`), so `model.<Field>` reads of them are declared.
   const modelFields = new Set([...ctx.modelFields, ...c.state.map((s) => upperFirst(s.name))]);
@@ -371,7 +401,7 @@ function renderOne(
   }
   // Every `model.` here is now a declared read field or one of this component's
   // own state cells, so the function takes the `Model`.
-  const takesModel = /\bmodel\./.test(scanned);
+  const takesModel = /\bmodel\./.test(scanned) || callsMarker(FELIZ_MODEL_PARAM);
   // Named `action`s the body invoked — bound here as dispatchers, exactly as
   // `index.ts`'s `dispatchWrappers` does for a page view.
   const actionBinds = c.actions
@@ -382,7 +412,7 @@ function renderOne(
         ? `    let ${a.name} ${p} = dispatch (${msgCase(a.name)} ${p})`
         : `    let ${a.name} () = dispatch ${msgCase(a.name)}`;
     });
-  const takesDispatch = actionBinds.length > 0;
+  const takesDispatch = actionBinds.length > 0 || callsMarker(FELIZ_DISPATCH_PARAM);
   const fields = c.params.map((p) => `${p.name}: ${propType(p, ctx.emittedRecords)}`);
   // A body containing `Slot { }` reads `props.children` (the `renderChildrenSlot`
   // seam), so the props record has to CARRY it — otherwise the F# names an
@@ -503,6 +533,22 @@ export function renderFelizComponentModule(decls: readonly string[]): string[] {
   return ["", "module Components =", indented.join("\n\n"), "", "open Components"];
 }
 
+/** Two call-site param maps agree — the fixpoint's stopping test.  Compares the
+ *  key sets and each entry's param NAMES in order, which is all the call-site
+ *  seam reads (the marker names plus the declared ones). */
+function sameParamMap(
+  a: ReadonlyMap<string, readonly ParamIR[]>,
+  b: ReadonlyMap<string, readonly ParamIR[]>,
+): boolean {
+  if (a.size !== b.size) return false;
+  for (const [k, ps] of a) {
+    const other = b.get(k);
+    if (other === undefined || other.length !== ps.length) return false;
+    if (ps.some((p, i) => other[i]!.name !== p.name)) return false;
+  }
+  return true;
+}
+
 /** Emit every walked (non-`extern`) user component of this ui.
  *
  *  Returns the F# declarations (wrapped by `renderFelizComponentModule` and
@@ -516,11 +562,17 @@ export function emitFelizUserComponents(
 ): { decls: string[]; params: Map<string, readonly ParamIR[]> } {
   let candidates = components.filter((c) => isCandidate(c, ctx.emittedRecords));
   // Nested components make emittability TRANSITIVE (a body may only call a
-  // function that is itself emitted), so iterate to a fixpoint: each round either
-  // drops at least one candidate or is the last.
+  // function that is itself emitted), so iterate to a fixpoint.  The scope map
+  // is the CALL-SITE shape (`callSiteParams`), not the declared params: a
+  // component reached from another component's body has to resolve to the same
+  // `model` / `dispatch` / `children` markers a page-level call site sees, or
+  // the nested call emits a bare application that `dotnet fable` rejects.  A
+  // round therefore ends the loop only when both the candidate set AND the map
+  // are unchanged; the round bound is the belt-and-braces guard against a
+  // pathological oscillation.
+  let inScope = new Map<string, readonly ParamIR[]>(candidates.map((c) => [c.name, c.params]));
   let rendered: RenderedComponent[] = [];
-  for (;;) {
-    const inScope = new Map<string, readonly ParamIR[]>(candidates.map((c) => [c.name, c.params]));
+  for (let guard = 0; guard <= candidates.length + 1; guard++) {
     const round: RenderedComponent[] = [];
     for (const c of candidates) {
       const one = renderOne(c, inScope, ctx);
@@ -535,9 +587,13 @@ export function emitFelizUserComponents(
         takesDispatch: one.takesDispatch,
       });
     }
+    const settled = round.length === candidates.length;
+    const next = new Map<string, readonly ParamIR[]>(round.map((r) => [r.name, callSiteParams(r)]));
+    const stable = settled && sameParamMap(next, inScope);
     rendered = round;
-    if (round.length === candidates.length) break;
     candidates = round.map((r) => r.component);
+    inScope = next;
+    if (stable) break;
   }
   const ordered = orderByCallGraph(rendered);
   return {

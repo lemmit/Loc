@@ -66,10 +66,16 @@ describe("angular generator — invariant-derived form Validators", () => {
     expect(page).toContain(
       'sku: new FormControl("", { nonNullable: true, validators: [Validators.pattern(/^[A-Z0-9-]+$/)] })',
     );
-    // length range → minLength + maxLength
+    // length range → a code-point min + a code-point max.  NOT
+    // `Validators.minLength/maxLength`: those count UTF-16 code units while
+    // the `minLength`/`maxLength` the server publishes for this same field
+    // are JSON-Schema code points (F2-XB-2).
     expect(page).toContain(
-      'name: new FormControl("", { nonNullable: true, validators: [Validators.minLength(2), Validators.maxLength(120)] })',
+      'name: new FormControl("", { nonNullable: true, validators: [((c: AbstractControl) => c.value == null || c.value === "" || [...String(c.value)].length >= 2 ? null : { minlength: { requiredLength: 2 } }), ((c: AbstractControl) => c.value == null || c.value === "" || [...String(c.value)].length <= 120 ? null : { maxlength: { requiredLength: 120 } })] })',
     );
+    // The UTF-16 built-ins must not survive anywhere in the file.
+    expect(page).not.toContain("Validators.minLength");
+    expect(page).not.toContain("Validators.maxLength");
     // int >= 1 → Validators.min(1)
     expect(page).toContain(
       "quantity: new FormControl(0, { nonNullable: true, validators: [Validators.min(1)] })",
@@ -83,7 +89,7 @@ describe("angular generator — invariant-derived form Validators", () => {
   it("imports Validators from @angular/forms", async () => {
     const page = await formPage();
     expect(page).toContain(
-      'import { FormControl, FormGroup, ReactiveFormsModule, Validators } from "@angular/forms";',
+      'import { AbstractControl, FormControl, FormGroup, ReactiveFormsModule, Validators } from "@angular/forms";',
     );
   });
 
@@ -161,5 +167,63 @@ describe("angular generator — operation-form Validators", () => {
       "if (this.restockProductForm.invalid) { this.restockProductForm.markAllAsTouched(); return; }",
     );
     expect(page).toContain('data-testid="products-op-restock-error-amount"');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F2-XB-2 — a form whose ONLY wire constraint is a `len-*` bound emits inline
+// code-point `ValidatorFn`s and never spells `Validators`, so the import must
+// not be registered (an unused import is a `tsc` error in the generated
+// project).
+// ---------------------------------------------------------------------------
+
+const LEN_ONLY_SOURCE = `
+  system Shop {
+    subdomain Sales {
+      context Catalog {
+        aggregate Product {
+          sku: string
+          invariant sku.length <= 8
+        }
+        repository Products for Product { }
+      }
+    }
+    api CatalogApi from Sales
+    ui WebApp {
+      api Sales: CatalogApi
+      page ProductNew {
+        route: "/"
+        body: CreateForm { of: Product, testid: "products-new" }
+      }
+    }
+    storage primary { type: postgres }
+    resource productsState { for: Catalog, kind: state, use: primary }
+    deployable api {
+      platform: node
+      contexts: [Catalog]
+      dataSources: [productsState]
+      serves: CatalogApi
+      port: 8080
+    }
+    deployable web {
+      platform: angular
+      targets: api
+      ui: WebApp { Sales: api }
+      port: 3007
+    }
+  }
+`;
+
+describe("angular generator — code-point length validators", () => {
+  it("a length-only form imports AbstractControl and not Validators", async () => {
+    const all = await generateSystemFiles(LEN_ONLY_SOURCE);
+    const page = all.get("web/src/app/pages/product-new.component.ts")!;
+    expect(page).toContain(
+      'import { AbstractControl, FormControl, FormGroup, ReactiveFormsModule } from "@angular/forms";',
+    );
+    expect(page).not.toContain("Validators");
+    expect(page).toContain(
+      "[...String(c.value)].length <= 8 ? null : { maxlength: { requiredLength: 8 } }",
+    );
   });
 });

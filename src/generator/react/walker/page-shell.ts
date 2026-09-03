@@ -18,6 +18,7 @@ import type {
   WorkflowIR,
 } from "../../../ir/types/loom-ir.js";
 import { typeUsesMoney } from "../../../ir/types/loom-ir.js";
+import { walkExprDeep } from "../../../ir/util/walk.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import { coerceMoneyStateInit, usesDecimalBinding } from "../../_expr/js-intrinsics.js";
 import { componentPropTsType } from "../../_frontend/component-prop-type.js";
@@ -1313,34 +1314,24 @@ export type { ${name}Props } from "./${name}.props";
 `;
 }
 
-/** Collect every name referenced in an expression
- *  (via `ref` nodes), used to derive the deps array for the
- *  title's `useEffect`.  Walks binary / unary / call subtrees. */
+/** Collect every name referenced in an expression (via `ref` nodes),
+ *  used to derive the deps array for `derived` `useMemo`s and the
+ *  page `title:` `useEffect`.
+ *
+ *  Deep: it rides the shared, exhaustively-`never`-checked IR walker
+ *  (`walkExprDeep`) rather than a hand-rolled switch, so every ref
+ *  reachable from the expression is a dep — including the ones a
+ *  four-arm copy dropped (a ternary's test/branches, a member or
+ *  method-call RECEIVER, list/object elements, `match` arms).  A
+ *  missing dep freezes the memo at its first-render value while the
+ *  state it reads keeps changing, and `tsc` cannot see it.  Callers
+ *  filter the result down to the names actually in render scope
+ *  (params / state / earlier derived), so over-collecting a lambda
+ *  parameter is inert. */
 function collectExprRefs(expr: ExprIR, out: Set<string>): void {
-  switch (expr.kind) {
-    case "ref":
-      out.add(expr.name);
-      return;
-    case "binary":
-      collectExprRefs(expr.left, out);
-      collectExprRefs(expr.right, out);
-      return;
-    case "unary":
-      collectExprRefs(expr.operand, out);
-      return;
-    case "call":
-      for (const a of expr.args) collectExprRefs(a, out);
-      return;
-    case "convert":
-      // The wrapped value carries the original ref(s) — without
-      // recursing here the useEffect deps-array would miss refs
-      // wrapped by implicit string-concat (`document.title = "n: "
-      // + n` lowers the `n` ref inside a convert).
-      collectExprRefs(expr.value, out);
-      return;
-    default:
-      return;
-  }
+  walkExprDeep(expr, (e) => {
+    if (e.kind === "ref") out.add(e.name);
+  });
 }
 
 /** Render one `state {}` field as a React `useState`

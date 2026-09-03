@@ -86,18 +86,19 @@ async function rendered(framework: string, query: string): Promise<string> {
 // green on the same cell.
 const NOT_IN_SCOPE = /is not an in-scope aggregate instance/;
 
-// Flutter is DELIBERATELY not in this list.  `flutterTarget.renderOperationForm`
-// declines the instance-qualified shape BEFORE any aggregate resolution
-// happens, so the `.all` fix is not observable in its output at all — a
-// parameterised cell for it would pass with the fix reverted, i.e. prove
-// nothing.  Its own (real, separately mutation-proved) behaviour is asserted
-// below.
+// Flutter used to be DELIBERATELY absent here: `flutterTarget.renderOperationForm`
+// declined the instance-qualified shape BEFORE any aggregate resolution
+// happened, so the `.all` fix was not observable in its output at all.  It now
+// RESOLVES that shape (`flutter-modal-instance-operationform`) and emits the
+// generated `<Op><Agg>Form` widget, so the binding fix is observable and the row
+// belongs in the matrix.
 describe.each([
   "react",
   "vue",
   "svelte",
   "angular",
   "feliz",
+  "flutter",
 ])("%s — single QueryView over `.all`", (framework) => {
   it("types the data-lambda binding, so the operation form survives", async () => {
     const src = await rendered(framework, "Ops.Item.all");
@@ -114,17 +115,15 @@ describe.each([
   });
 });
 
-it("flutter: the instance-qualified op form is DECLINED, not dropped into the shared path", async () => {
-  // Flutter builds an `<Op><Agg>Form` widget only for the by-name shape
-  // (`flutter-modal-instance-operationform`), so this shape has nothing to
-  // render either way.  What this slice owns is HOW it says so: an explicit
-  // decline from `flutterTarget.renderOperationForm` — a syntactically inert
-  // `const SizedBox.shrink() /* … */` — rather than a `null` that falls
-  // through to the shared walker's `primitive-modal`, which the procedural
-  // Flutter pack answers with a Dart LINE comment.  A line comment in this
-  // slot (the `:` arm of a conditional expression) does not compile.
+it("flutter: the instance-qualified op form renders the generated widget", async () => {
+  // Flutter's `renderOperationForm` now resolves the instance shape through
+  // `ctx.paramTypes` and emits the `<Op><Agg>Form` widget `forms-emit.ts`
+  // builds — the same widget the by-name shape gets, addressed by the route id.
   const src = await rendered("flutter", "Ops.Item.all");
-  expect(src).toMatch(/the instance-qualified shape is not rendered on Flutter/);
+  expect(src).toContain("ActivateItemForm(id: id)");
+  // Never the fall-through: a `null` return would reach the shared walker's
+  // `primitive-modal`, which the procedural Flutter pack answers with a Dart
+  // LINE comment — illegal in this slot (the `:` arm of a conditional).
   expect(src, "flutter: a line comment here would not compile").not.toMatch(
     /flutter pack: no renderer for "primitive-modal"/,
   );

@@ -37,15 +37,25 @@ async function main() {
   // mirror back through the `update` wrapper.  First load: the declared defaults
   // (nothing stored yet), and the localStorage blob written on the first message
   // is keyed `loom.store.Draft` with the SAME JSON shape the JS frontends write.
+  //
+  // That shape is zustand `persist`'s envelope — `{"state":{ … },"version":0}` —
+  // because the four JS builders persist through `createJSONStorage`, and the
+  // key is shared across frontends.  Asserting the envelope explicitly is the
+  // point: Feliz used to write the fields FLAT under the same key, so each side
+  // read the other's blob, matched none of its fields, fell back to the declared
+  // defaults and then overwrote it.  A check that reads `parsed.note` directly
+  // passes for either shape and cannot see that divergence.
   await page.getByText("Mode: dark").waitFor();
   const draftBlob = await page.evaluate(() => localStorage.getItem("loom.store.Draft"));
   const parsedDraft = JSON.parse(draftBlob ?? "null");
+  const draftState = parsedDraft?.state;
   if (
-    parsedDraft === null ||
-    parsedDraft.note !== "" ||
-    parsedDraft.seen !== 0 ||
-    parsedDraft.ok !== false ||
-    !Array.isArray(parsedDraft.tags)
+    draftState === undefined ||
+    parsedDraft.version !== 0 ||
+    draftState.note !== "" ||
+    draftState.seen !== 0 ||
+    draftState.ok !== false ||
+    !Array.isArray(draftState.tags)
   ) {
     throw new Error(`store write-back missing/misshaped: ${draftBlob}`);
   }
@@ -53,15 +63,31 @@ async function main() {
     throw new Error("session-tier store never wrote its blob");
   }
   // Hydration: seed the blob, reload, and the Model must come back from storage
-  // rather than from the declared default.
+  // rather than from the declared default.  Seeded in the ENVELOPE, which is what
+  // a JS frontend sharing this key actually leaves behind.
   await page.evaluate(() =>
     localStorage.setItem(
       "loom.store.Draft",
-      JSON.stringify({ note: "hydrated", seen: 7, ok: true, price: "1.50", tags: ["a"] }),
+      JSON.stringify({
+        state: { note: "hydrated", seen: 7, ok: true, price: "1.50", tags: ["a"] },
+        version: 0,
+      }),
     ),
   );
   await page.goto(URL, { waitUntil: "networkidle" });
   await page.getByText("Draft: hydrated").waitFor({ timeout: 10000 });
+  // …and a BARE object still hydrates: the reader unwraps `state` only when it
+  // is there, so a blob an older Feliz build wrote survives the upgrade instead
+  // of silently resetting to defaults.  The emitter's comment promises this;
+  // without a case for it, nothing holds it.
+  await page.evaluate(() =>
+    localStorage.setItem(
+      "loom.store.Draft",
+      JSON.stringify({ note: "legacy", seen: 3, ok: true, price: "2.50", tags: ["b"] }),
+    ),
+  );
+  await page.goto(URL, { waitUntil: "networkidle" });
+  await page.getByText("Draft: legacy").waitFor({ timeout: 10000 });
   // The `url` tier reads the query string as untrusted input.
   await page.goto(`${URL}?term=shoes`, { waitUntil: "networkidle" });
   await page.getByText("Term: shoes").waitFor({ timeout: 10000 });
