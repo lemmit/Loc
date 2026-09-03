@@ -195,8 +195,8 @@ describe("seed — raw × shape: document (F2-SEED-RAW-DOCUMENT)", () => {
   });
 });
 
-describe("seed — event-sourced + abstract rows (F2-SEED-EVENTSOURCED)", () => {
-  it("flags a seed row on an event-sourced aggregate rather than dropping it", async () => {
+describe("seed — event-sourced rows (M-T6.52, F2-SEED-EVENTSOURCED)", () => {
+  it("accepts a domain seed row on an event-sourced aggregate — it appends the creation event", async () => {
     const { errors } = await parseString(
       wrap(`
         event Opened { account: Account id, owner: string }
@@ -210,7 +210,46 @@ describe("seed — event-sourced + abstract rows (F2-SEED-EVENTSOURCED)", () => 
         seed default { Account { owner: "seeded-alice" } }
       `),
     );
-    expect(errors.some((e) => /Seed row on event-sourced aggregate 'Account'/.test(e))).toBe(true);
+    expect(errors).toEqual([]);
+  });
+
+  it("flags a `raw` seed row on an event-sourced aggregate — its table is the event stream, not per-field columns", async () => {
+    const { errors } = await parseString(
+      wrap(`
+        event Opened { account: Account id, owner: string }
+        aggregate Account persistedAs: eventLog {
+          owner: string
+          create open(owner: string) { emit Opened { account: id, owner: owner } }
+          apply(e: Opened) { owner := e.owner }
+        }
+        repository Accounts for Account { }
+        seed wired raw {
+          Account { id: "11111111-1111-1111-1111-111111111111", owner: "seeded-alice" }
+        }
+      `),
+    );
+    expect(errors.some((e) => /Raw seed row on event-sourced aggregate 'Account'/.test(e))).toBe(
+      true,
+    );
+  });
+
+  it("flags a domain seed row on an event-sourced aggregate with no `create` — nothing to append", async () => {
+    const { errors } = await parseString(
+      wrap(`
+        event Opened { account: Account id, owner: string }
+        aggregate Account persistedAs: eventLog {
+          owner: string
+          apply(e: Opened) { owner := e.owner }
+        }
+        repository Accounts for Account { }
+        seed default { Account { owner: "seeded-alice" } }
+      `),
+    );
+    expect(
+      errors.some((e) =>
+        /Seed row on event-sourced aggregate 'Account'.*declares no `create`/.test(e),
+      ),
+    ).toBe(true);
   });
 
   it("flags a seed row on an abstract base — the other half of the same silent per-row drop", async () => {

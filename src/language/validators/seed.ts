@@ -18,7 +18,13 @@ import { diagMessage } from "../../diagnostics/messages.js";
 import { CAPABILITIES_TAG } from "../../util/capability-tag.js";
 import { snake, upperFirst } from "../../util/naming.js";
 import type { Aggregate, BoundedContext, Model, Seed } from "../generated/ast.js";
-import { isBoundedContext, isBuilderCall, isObjectLit, isSeed } from "../generated/ast.js";
+import {
+  isBoundedContext,
+  isBuilderCall,
+  isCreate,
+  isObjectLit,
+  isSeed,
+} from "../generated/ast.js";
 
 /** The `tenantOwned` prelude capability (src/macros/prelude.ts).  Spelled here
  *  rather than imported from `src/ir/util/tenant-stance.ts`: `language/` knows
@@ -86,21 +92,45 @@ function checkSeed(seed: Seed, accept: ValidationAcceptor): void {
   for (const row of seed.rows) {
     const rowAgg = row.aggregate.ref;
     if (rowAgg) {
-      // Rule 6 — an event-sourced aggregate's truth is its event stream, and
-      // no backend has a seed path that APPENDS one.  Three of five were wrong
-      // in two different ways with zero diagnostics: elixir dropped the row and
-      // still committed the dataset's ship-once marker (so a later boot could
-      // never apply it), while java/.NET built the create call from the full
-      // create-input set against a factory that takes only the declared
-      // `create` parameters — `Account.create("seeded-alice", null)` against
-      // `create(String owner)`, a javac/CS1501 break.  Gate all five
-      // identically until an event-append seed path exists.
+      // Rule 6 — an event-sourced aggregate's truth is its append-only event
+      // stream: the DOMAIN path now appends the creation event through the
+      // same command seam an ordinary create request uses (M-T6.52,
+      // `src/generator/_persistence/seed-datasets.ts`'s shared seeder model —
+      // one classifier deriving the event-sourced `create` action's OWN
+      // declared params, instead of each backend's `forCreateInput(agg.fields)`
+      // FIELD set, which is what made three of five backends wrong in two
+      // different ways: elixir dropped the row while still committing the
+      // dataset's ship-once marker, and java/.NET built the create call from
+      // every declared field against a factory that takes only the create
+      // action's own params — `Account.create("seeded-alice", null)` against
+      // `create(String owner)`, a javac/CS1501 break).  Two crossings stay
+      // rejected:
+      //
+      //   - `raw` — an event-sourced aggregate's table is its `<agg>_events`
+      //     stream (stream_id, version, type, data, occurred_at), which has
+      //     no per-field columns for a raw INSERT to target (the same shape
+      //     rule 7 already applies to `shape: document`);
+      //   - a DOMAIN row with no `create` action to append through — zero
+      //     creates is a legitimate event-sourced shape (`docs/inheritance
+      //     .md`'s sibling rule; "constructed out-of-band, no create route"),
+      //     but the shared seeder model then has nothing to build a call
+      //     from and drops the aggregate from `seedable` — exactly the
+      //     silent-shrink shape this mission closed for every OTHER crossing,
+      //     so it gets the same AST-tier refusal instead.
       if (rowAgg.persistedAs === "eventLog") {
-        accept("error", diagMessage("loom.seed-event-sourced-unsupported", { name: rowAgg.name }), {
-          node: row,
-          property: "aggregate",
-          code: "loom.seed-event-sourced-unsupported",
-        });
+        if (seed.raw) {
+          accept("error", diagMessage("loom.seed-raw-eventsourced", { name: rowAgg.name }), {
+            node: row,
+            property: "aggregate",
+            code: "loom.seed-raw-eventsourced",
+          });
+        } else if (!rowAgg.members.some(isCreate)) {
+          accept("error", diagMessage("loom.seed-eventsourced-no-create", { name: rowAgg.name }), {
+            node: row,
+            property: "aggregate",
+            code: "loom.seed-eventsourced-no-create",
+          });
+        }
       }
 
       // Rule 6b — the OTHER half of the same per-row filter.  Every backend

@@ -100,6 +100,34 @@ describe("python seeding", () => {
     expect(seedAt).toBeGreaterThan(migrateAt);
   });
 
+  it("event-sourced: appends the creation event via the domain create factory (M-T6.52)", async () => {
+    // `owner` is the create action's ONLY param; `balance` is a real
+    // aggregate FIELD folded by the applier, not a create param.
+    const src = `system EsSeed {
+      subdomain Bank { context Bank {
+        event Opened { account: Account id, owner: string }
+        aggregate Account persistedAs: eventLog {
+          owner: string
+          balance: int
+          create open(owner: string) { emit Opened { account: id, owner: owner } }
+          apply(e: Opened) { owner := e.owner  balance := 0 }
+        }
+        repository Accounts for Account { }
+        seed default { Account { owner: "seeded-alice" } }
+      } }
+      api A from Bank
+      storage pg { type: postgres }
+      resource bankLog { for: Bank, kind: eventLog, use: pg }
+      deployable api { platform: python contexts: [Bank] dataSources: [bankLog] serves: A port: 3000 }
+    }`;
+    const { model, errors } = await parseString(src);
+    if (errors.length) throw new Error(errors.join("\n"));
+    const seed = generateSystems(model).files.get("api/app/db/seed.py")!;
+    expect(seed).toContain('Account.create(owner="seeded-alice")');
+    expect(seed).not.toContain("balance=");
+    expect(seed).toContain("await account_repo.save(");
+  });
+
   it("seed-less projects emit no seed module and no lifespan call", async () => {
     const source = FIXTURE.replace(/ {6}seed[\s\S]*?\n {6}\}\n/g, "");
     expect(source).not.toMatch(/^\s*seed[ \w]*\{/m);
