@@ -153,7 +153,7 @@ Handler gates (all `src/ir/validate/checks/api-checks.ts` unless noted): a `quer
 
 ```
 Storage:     'storage' name=LooseName '{' ('type' ':' StorageType) ('instance' ':' …)? ('connection' ':' ConnectionSource)? ('config' ':' '{' … '}')? '}'
-StorageType: postgres | mysql | sqlite | inMemory | redis | elastic | meilisearch | kafka | clickhouse | bigquery | s3 | rabbitmq | nats | restApi | smtp | ses | sendgrid
+StorageType: postgres | mysql | sqlite | inMemory | redis | elastic | meilisearch | kafka | clickhouse | bigquery | s3 | localDisk | rabbitmq | nats | restApi | smtp | ses | sendgrid
 ```
 
 A `storage` is a **physical store or service** — a typed, reusable slot (one postgres can back several deployables). `type:` names a built-in sourceType; the `config { k: v }` map carries vendor parameters validated per sourceType against the registry's config schema (`src/util/source-types.ts`): an unknown key is a warning, a wrong-typed value is an error, a missing required key (e.g. `s3` needs `bucket`) is an error.
@@ -163,10 +163,20 @@ storage primarySql { type: postgres }
 storage blobs      { type: s3, config: { bucket: "app-files", region: "eu-central-1" } }
 ```
 
-Each `storage` whose type needs a dev backing service becomes a **compose sidecar** — but only for the kinds that have one: `s3` → MinIO, `rabbitmq` → RabbitMQ. The relational stores share the single stack `db` postgres service (see [Systems & topology](02-systems-and-topology.md)); `redis` / `kafka` / `nats` etc. parse and validate but emit **no** sidecar yet.
+Each `storage` whose type needs a dev backing service becomes a **compose sidecar** (`renderStorageSidecars`, `src/system/index.ts`). The relational stores instead share the single stack `db` postgres service (see [Systems & topology](02-systems-and-topology.md)):
+
+| storage type | sidecar | when |
+|---|---|---|
+| `s3` | `minio/minio:latest` + a named data volume | always |
+| `smtp` | `axllent/mailpit:latest` (SMTP :1025, web inbox :8025) | always — `ses` / `sendgrid` are SaaS, no sidecar |
+| `redis` | `valkey/valkey:8-alpine` with `--requirepass` | only when it backs a `channelSource` a deployable wires; a cache-only redis emits nothing |
+| `rabbitmq` | `rabbitmq:4-management-alpine` + a mounted `broker-init/` definitions file (vhost + per-deployable user) | when wired as a channel transport; an unwired one falls back to plain `rabbitmq:3-management` |
+| `kafka` | `apache/kafka:4.1.0`, single-node KRaft, SASL/PLAIN on the client listener | only when wired as a channel transport |
+| `localDisk` | none — the object store is a directory in the container (`<RESOURCE>_URL_DIR`) | — |
+| everything else | none | — |
 
 ```yaml
-# docker-compose.yml — the s3 storage `blobs` becomes a MinIO sidecar
+# docker-compose.yml — an s3 storage and an smtp storage, from `generate system`
   blobs:
     image: minio/minio:latest
     command: server /data --console-address ":9001"
@@ -175,12 +185,17 @@ Each `storage` whose type needs a dev backing service becomes a **compose sideca
       MINIO_ROOT_PASSWORD: minioadmin
     volumes:
       - blobs-data:/data
+  mailer:
+    image: axllent/mailpit:latest
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: 1
+      MP_SMTP_AUTH_ALLOW_INSECURE: 1
 volumes:
   pgdata: {}
   blobs-data: {}
 ```
 
-> **Generator support is narrower than the grammar.** Only `postgres` / `inMemory` have full backend codegen, plus `s3` / `rabbitmq` (the object-store / queue clients), `restApi` (http api client), `smtp` / `ses` / `sendgrid` (the mailer clients), and `redis` / `nats` (channel transports). The remaining `StorageType` values parse and validate but emit nothing — an honest forward-compat gap.
+> **Generator support is narrower than the grammar.** Only `postgres` / `inMemory` have full backend codegen, plus `s3` and `localDisk` (object-store clients), `rabbitmq` and `kafka` (queue / channel transports), `redis` (broadcast channel transport), `restApi` (http api client) and `smtp` / `ses` / `sendgrid` (mailer clients). `mysql` / `sqlite` bind kinds in the registry but have no shipped backend emitter; `nats`, `elastic`, `meilisearch`, `clickhouse` and `bigquery` parse and validate but bind no kind and emit nothing — an honest forward-compat gap. (`nats` is *not* a channel transport: `CHANNEL_COMPATIBILITY` in `src/util/channels.ts` lists only `inMemory` / `redis` / `rabbitmq` / `kafka`.)
 
 ### Connection sources
 
