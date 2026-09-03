@@ -116,14 +116,23 @@ test("⌘K opens the palette and Generate runs generate", async ({ page }) => {
   await expect(search).toBeVisible();
   await search.fill("Generate");
   await expect(page.getByRole("button", { name: /^Run Generate/ })).toBeVisible();
+  // Arm the watch BEFORE the click.  `running` is transient — generate over
+  // this source finishes in about a second — and awaiting the palette's close
+  // first was enough to miss it entirely (failed 2/2 on a re-run).  The
+  // observation has to exist while the state can still change.
+  const sawRunning = page.waitForFunction(
+    () =>
+      document.querySelector('[data-testid="btn-generate"]')?.getAttribute("data-state") ===
+      "running",
+    null,
+    { timeout: 30_000 },
+  );
   await page.keyboard.press("Enter");
   await expect(search).toBeHidden();
 
   // The palette's action reached `runGenerate`: the segment leaves `ok` for
   // `running` and comes back with a file count.
-  await expect(page.getByTestId("btn-generate")).toHaveAttribute("data-state", "running", {
-    timeout: 30_000,
-  });
+  await sawRunning;
   await expect(page.getByTestId("btn-generate")).toHaveAttribute("data-state", "ok", { timeout: 60_000 });
   await expect(page.getByTestId("pipeline-count-generate")).toHaveText(/^\d+ files?$/);
 });
