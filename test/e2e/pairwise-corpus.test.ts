@@ -15,7 +15,7 @@ import { GENERATION_WAIVERS, type Waiver, waiverFor } from "../pairwise/waivers.
 // compile" bug class does not live inside a feature — it lives at the
 // intersections (#2412 mask×audited, #2387/#2391 audited×dapper×document/ES,
 // #2492 policy-deny×dapper).  This suite runs the full compiler pipeline over
-// the cross product of capability × shape × authz × persistence on every
+// the cross product of capability × shape × authz × inheritance × read × persistence on every
 // backend and asserts the cheapest possible property:
 //
 //     a system a user could write must get an ANSWER, not an exception.
@@ -24,7 +24,7 @@ import { GENERATION_WAIVERS, type Waiver, waiverFor } from "../pairwise/waivers.
 // cannot coexist are supposed to be refused by name, and those are recorded
 // (with their code) rather than failed.  A THROW is the finding.
 //
-// Opt-in via LOOM_PAIRWISE=1: it is ~1000 pipeline runs, seconds not minutes,
+// Opt-in via LOOM_PAIRWISE=1: it is ~4200 pipeline runs, ~95s not minutes,
 // but it is a discovery sweep, not a per-PR floor.
 // ---------------------------------------------------------------------------
 
@@ -51,7 +51,7 @@ interface Row {
 describe.skipIf(!ENABLED)(
   "pairwise corpus — every crossing gets an answer, not an exception",
   () => {
-    it("cross product of capability × shape × authz × persistence, all backends", async () => {
+    it("cross product of capability × shape × authz × inheritance × read × persistence, all backends", async () => {
       const rows: Row[] = [];
       const usedWaivers = new Set<Waiver>();
 
@@ -137,17 +137,22 @@ describe.skipIf(!ENABLED)(
       // successfully generated crossings so the sweep cannot pass vacuously.
       const ok = rows.filter((r) => r.verdict === "ok").length;
       const rejected = rows.filter((r) => r.verdict === "rejected").length;
-      expect(rows.length, "crossings attempted").toBeGreaterThan(500);
+      // W3 raised all three floors with the matrix.  A floor left at its
+      // pre-widening value is not conservative, it is DEAD: 4200 crossings
+      // clear a floor of 500 even if five of the six axes collapsed to one
+      // value each, so the collapse detector would have stopped detecting
+      // collapse while still reading as a passing assertion.
+      expect(rows.length, "crossings attempted").toBeGreaterThan(3500);
       // A COLLAPSE floor, not a target: a composer bug (or a rename) that made
       // every case fail to parse would otherwise leave assertions (1) and (2)
-      // trivially satisfiable.  The floor sits well under the current 543 so
+      // trivially satisfiable.  The floor sits well under the current 3528 so
       // that legitimately growing the rejection count — a backend adding an
       // honest `loom.*` refusal — does not fail the gate.
       expect(
         ok,
         "crossings that generated cleanly — a collapse here means the " +
           "composer broke, not that the language did",
-      ).toBeGreaterThan(400);
+      ).toBeGreaterThan(2800);
       // …and the mirror: rejections must still be REACHED.  If phase ⑦ stopped
       // running (the hole this harness shipped with once — see harness.ts), the
       // honest refusals would silently become `ok` and the sweep would go quiet
@@ -156,7 +161,7 @@ describe.skipIf(!ENABLED)(
         rejected,
         "crossings refused by a named loom.* diagnostic — zero here means the " +
           "validator phases are not being run at all",
-      ).toBeGreaterThan(50);
+      ).toBeGreaterThan(400);
     }, 900_000);
   },
 );

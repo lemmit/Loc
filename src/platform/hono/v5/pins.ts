@@ -4,7 +4,8 @@
 //
 // v5 is the cross-major successor to v4: it takes the dep majors v4's
 // within-major policy deferred — **zod 4** (and the `@hono/zod-openapi`
-// 1.x that requires it), **TypeScript 6**, **vitest 4**, and
+// 1.x that requires it), **TypeScript 6**, **vitest 3** (see the pin's own
+// note — vitest 4's peer graph currently breaks `npm install`), and
 // **pino-pretty 13**.  Hono itself stays 4.x (there is no Hono 5 yet),
 // so the package *version* bump here is driven by the zod/TS majors, not
 // a Hono major — the `loomVersion` tracks the package's own evolution.
@@ -66,7 +67,18 @@ export const BACKEND_PINS = {
     typescript: "^6.0.0",
     tsx: "^4.19.0",
     tsup: "^8.3.0",
-    vitest: "^4.0.0",
+    // vitest is held at 3.x, NOT 4.x, until npm's resolver can install
+    // vitest 4's peer graph again.  `npm install vitest@4` currently dies in
+    // arborist's `#loadPeerSet` (`Cannot read properties of null (reading
+    // 'edgesOut')`, npm 10.9.7) while walking `@vitest/browser-playwright@5`
+    // — reproducible in an empty directory with `npm init -y && npm install
+    // vitest@4`, so it is upstream, not ours.  A generated project ships no
+    // lockfile (see the Dockerfile comment on `npm install` vs `npm ci`), so
+    // every `docker compose up` and every corpus/behavioural leg resolves the
+    // graph fresh and hits it.  3.x resolves cleanly and runs the emitted
+    // `describe`/`it`/`expect` tests unchanged.  Restore `^4.0.0` once a
+    // vitest 4 release installs under a stock npm.
+    vitest: "^3.2.0",
     "drizzle-kit": "^0.31.0",
     "@types/pg": "^8.11.0",
     "pino-pretty": "^13.0.0",

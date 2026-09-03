@@ -32,8 +32,8 @@ name: Pairwise combination corpus
 #
 # TIERS, and why they differ.  The three legs have genuinely different costs:
 #
-#   generation   — ~700 crossings through phases ①–⑦ + codegen, no toolchain,
-#                  ~19s.  PER-PR.  Its `crashed` verdict (valid-looking source
+#   generation   — ~4200 crossings through phases ①–⑦ + codegen, no toolchain,
+#                  ~95s.  PER-PR.  Its `crashed` verdict (valid-looking source
 #                  that takes the compiler down instead of answering with a
 #                  named `loom.*` diagnostic) is the highest-signal finding
 #                  class in the repo, and it is cheap enough to owe every PR.
@@ -43,14 +43,21 @@ name: Pairwise combination corpus
 #                  throwaway database, ~1min + a postgres service.  Nightly +
 #                  label + dispatch, alongside tsc.
 #
-# The node-only compile leg is slice 1's deliberate scope ("this slice's job is
-# to prove the harness earns them").  The dotnet / java / python / elixir
-# compile legs are the named follow-up; they need their toolchain containers,
-# which the five per-backend build workflows already stand up.
+# The W3 axis widening (inheritance TPH/TPC + `paged` reads) grew the generation
+# leg 6× — 700 crossings to 4200, ~15s of pipeline time to ~93s — and grew the
+# compile/schema-load legs by ZERO cases.  That asymmetry is the whole reason
+# the cover is all-pairs: a cover is bounded below by the largest single PAIR
+# product, still `capability × authz` = 5×5, so a 3-valued and a 2-valued new
+# axis pack into rows those 25 pairs already forced.  Width goes where it is
+# free.  Cover completeness is asserted, not assumed — `test/pairwise/
+# axes.test.ts` re-derives every 2-way combination from the axis constants.
 #
-# Local: `npm run test:pairwise-corpus` / `-tsc` / `-schema-load`.
+# All five compile legs shipped in #2690; the matrix below is one cell each.
+#
+# Local: `npm run test:pairwise-corpus` / `-tsc` / `-schema-load` /
+# `-python` / `-dotnet` / `-java` / `-elixir`.
 # Findings register: docs/audits/pairwise-corpus-findings-2026-08.md.
-# Waiver registers: test/pairwise/waivers{,-tsc,-schema}.ts — all three ratchet.
+# Waiver registers: test/pairwise/waivers{,-compile,-schema}.ts — all ratchet.
 
 on:
   push:

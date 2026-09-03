@@ -19,13 +19,24 @@
 
 import type { PairwiseCase } from "./axes.js";
 
-/** `*` matches any value of that axis; a `|`-separated list matches any of. */
+/** `*` matches any value of that axis; a `|`-separated list matches any of.
+ *
+ *  EVERY axis is required, `*` included.  W3 added `inheritance` and `read`
+ *  and made them mandatory rather than optional-defaulting-to-`*`, because an
+ *  omitted axis silently widens a waiver: an entry written for `embedded × tph`
+ *  before the axis existed would, on the day it was added, quietly cover
+ *  `embedded × tpc` and `embedded` with no inheritance at all — and the
+ *  stale-waiver ratchet cannot see that, since the entry keeps matching.  A
+ *  required field turns "I did not think about this axis" into a compile
+ *  error at the register, which is where it can still be answered. */
 export interface Waiver {
   readonly platform: string;
   readonly persistence: string;
   readonly capability: string;
   readonly shape: string;
   readonly authz: string;
+  readonly inheritance: string;
+  readonly read: string;
   /** Findings-register id (`F1`, `F2`, …) + one-line summary. */
   readonly reason: string;
 }
@@ -45,7 +56,9 @@ export function waiverFor(
       matches(x.persistence, c.persistence) &&
       matches(x.capability, c.capability) &&
       matches(x.shape, c.shape) &&
-      matches(x.authz, c.authz),
+      matches(x.authz, c.authz) &&
+      matches(x.inheritance, c.inheritance) &&
+      matches(x.read, c.read),
   );
 }
 

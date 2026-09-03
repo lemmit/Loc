@@ -22,10 +22,14 @@ import {
   type Authz,
   CAPABILITIES,
   type Capability,
+  INHERITANCE,
+  type Inheritance,
   type PairwiseCase,
   PERSISTENCE,
   PERSISTENCE_BACKEND,
   type Persistence,
+  READS,
+  type Read,
   SHAPES,
   type Shape,
 } from "./axes.js";
@@ -106,8 +110,16 @@ export function allPairs(axes: AxisValues): number[][] {
   return rows;
 }
 
-/** The all-pairs cover over capability × shape × authz × persistence, for one
- *  backend's reachable persistence menu.
+/** The all-pairs cover over capability × shape × authz × inheritance × read ×
+ *  persistence, for one backend's reachable persistence menu.
+ *
+ *  W3 NOTE — adding the two axes cost the COMPILE tier almost nothing, and the
+ *  reason is worth stating because it is the whole argument for all-pairs over
+ *  a cross product.  A cover's size is bounded below by the largest single PAIR
+ *  product; that is still `capability × authz` = 5×5 = 25, and the greedy fill
+ *  packs the 3- and 2-valued newcomers into rows the 5×5 pairs already forced.
+ *  So the cover went from ~26 rows to ~30 while the cross product it samples
+ *  went from 100 to 600 — the axes multiply, the sample does not.
  *
  *  `only` narrows the persistence axis — the schema-load oracle passes
  *  `["default"]` because only the raw-SQL adapters emit a `.sql` migration
@@ -117,11 +129,13 @@ export function allPairs(axes: AxisValues): number[][] {
  *  emitted" as a failure of an adapter that never emits one. */
 export function pairwiseCover(platform: string, only?: readonly Persistence[]): PairwiseCase[] {
   const persistence = only ? [...only] : persistenceFor(platform);
-  const rows = allPairs([CAPABILITIES, SHAPES, AUTHZ, persistence]);
-  return rows.map(([c, s, a, p]) => ({
+  const rows = allPairs([CAPABILITIES, SHAPES, AUTHZ, INHERITANCE, READS, persistence]);
+  return rows.map(([c, s, a, i, r, p]) => ({
     capability: CAPABILITIES[c!] as Capability,
     shape: SHAPES[s!] as Shape,
     authz: AUTHZ[a!] as Authz,
+    inheritance: INHERITANCE[i!] as Inheritance,
+    read: READS[r!] as Read,
     persistence: persistence[p!] as Persistence,
   }));
 }

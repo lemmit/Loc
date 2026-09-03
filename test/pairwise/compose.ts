@@ -25,12 +25,45 @@
 //     `updateOnly: true` beside it (exactly as `corpus/scaffold-macros.ddd`
 //     spells it).
 //
+// W3 adds two more, both of the same "a user would have to write this too"
+// kind, and both MEASURED rather than guessed — the first run of the widened
+// matrix spent a third of its crossings bouncing off two diagnostics instead
+// of reaching an emitter:
+//
+//   - a `shape: document` / `persistedAs: eventLog` concrete of a `sharedTable`
+//     base is FORCED to `ownTable`, and `loom.es-tph-forced-own-table` says so
+//     in as many words ("declare 'inheritanceUsing: ownTable' on 'Thing'").  So
+//     the concrete declares it.  700 of 4200 crossings — one sixth of the whole
+//     matrix — were re-proving that one validator, which is the same waste the
+//     `auth: required` note below already calls out.  The BASE keeps saying
+//     `sharedTable`, so `tph` and `tpc` stay genuinely different systems.
+//   - an abstract base is `persistedAs: state` whatever the concrete is, so an
+//     event-sourced subject under inheritance needs a `state` dataSource
+//     ALONGSIDE its `eventLog` one, exactly as `loom.persistence-mode-
+//     unsupported` demands.  Another 280 crossings.
+//
+// Neither adjustment hides a finding: both diagnostics are honest, named, and
+// already covered by the crossing that reaches them from the OTHER side (the
+// forced-layout rule still fires for anyone who writes it the naive way — it
+// is a language rule, not an emitter gap).  What the adjustments buy is that
+// those 980 crossings now reach codegen, which is where the axis was added to
+// look.
+//
 // `__PLATFORM__` is substituted by the harness, matching the corpus
 // convention in `test/fixtures/corpus/harness.ts`.
 // ---------------------------------------------------------------------------
 
 import { upperFirst } from "../../src/util/naming.js";
-import type { Authz, Capability, PairwiseCase, Persistence, Shape } from "./axes.js";
+import type {
+  Authz,
+  Capability,
+  Inheritance,
+  PairwiseCase,
+  Persistence,
+  Read,
+  Shape,
+  SourceCase,
+} from "./axes.js";
 
 const PLATFORM_TOKEN = "__PLATFORM__";
 
@@ -55,16 +88,62 @@ function needsUser(cap: Capability, authz: Authz): boolean {
   return authz !== "none" || needsTenancy(cap, authz);
 }
 
+/** The abstract base the subject `extends`, or `[]` when inheritance is off.
+ *
+ *  Deliberately MINIMAL and deliberately non-empty: one plain string property.
+ *  Under `sharedTable` that property is a column on the table the subject also
+ *  writes, so it is the thing a per-concrete stamp or a subtype-shaped UPDATE
+ *  can clobber; under `ownTable` it is copied into the concrete's own table.
+ *  A base with no members would make the two layouts emit the same DDL and the
+ *  axis would be unable to fail.
+ *
+ *  The base carries NO capability, NO stance and NO repository — an abstract
+ *  base cannot be instantiated and has none.  Everything the axes vary stays on
+ *  the subject, so a failure is attributable to the crossing rather than to a
+ *  second aggregate the composer invented. */
+function baseAggregate(inh: Inheritance): string[] {
+  if (inh === "none") return [];
+  const layout = inh === "tph" ? "sharedTable" : "ownTable";
+  return [
+    `      abstract aggregate ThingBase inheritanceUsing: ${layout} {`,
+    "        note: string",
+    "      }",
+  ];
+}
+
+/** ` extends ThingBase`, in the grammar's slot between the name and the header
+ *  modifier group. */
+function extendsClause(inh: Inheritance): string {
+  return inh === "none" ? "" : " extends ThingBase";
+}
+
 /** Aggregate header modifiers (order-independent per the grammar, but emitted
  *  in a fixed order so the generated source is stable across runs). */
-function header(cap: Capability, shape: Shape, authz: Authz): string {
+function header(cap: Capability, shape: Shape, authz: Authz, inh: Inheritance): string {
   const parts: string[] = [];
   if (shape === "document") parts.push("shape: document,");
   if (shape === "embedded") parts.push("shape: embedded,");
   if (shape === "eventLog") parts.push("persistedAs: eventLog,");
+  // The FORCED layout, spelled out — see the header note.  A document /
+  // event-sourced concrete cannot live in a TPH base's shared table, and the
+  // language requires the author to write the override rather than inferring
+  // it.  `tpc` needs nothing: its base already says `ownTable`.
+  if (inh === "tph" && forcedOwnTable(shape)) parts.push("inheritanceUsing: ownTable,");
   if (needsTenancy(cap, authz) && !subjectIsTenantOwned(cap, authz)) parts.push("crossTenant,");
   if (cap === "audited") parts.push("audited,");
   return parts.length > 0 ? ` ${parts.join(" ").replace(/,$/, "")}` : "";
+}
+
+/** Shapes that cannot share a TPH base's table (`loom.es-tph-forced-own-table`). */
+function forcedOwnTable(shape: Shape): boolean {
+  return shape === "document" || shape === "eventLog";
+}
+
+/** An abstract base is `persistedAs: state` regardless of what its concrete is,
+ *  so an event-sourced subject under inheritance needs a `state` dataSource
+ *  beside its `eventLog` one. */
+function needsBaseStateResource(shape: Shape, inh: Inheritance): boolean {
+  return inh !== "none" && shape === "eventLog";
 }
 
 /** The `with …` mixin list on the subject aggregate. */
@@ -120,6 +199,22 @@ function members(shape: Shape, authz: Authz): string[] {
   return out;
 }
 
+/** The one declared repository find, in its bare-list or `paged`-carrier form.
+ *
+ *  Same predicate either way — the ONLY difference is the carrier, so a failure
+ *  belongs to the carrier and not to a differently-shaped query.  (The auto
+ *  `findAll` enrichment adds a second, always-paged read regardless; the point
+ *  of this axis is a DECLARED find whose filter the scope/mask layers must
+ *  reach through the envelope.) */
+function repositoryBlock(read: Read): string[] {
+  const ret = read === "paged" ? "Thing paged" : "Thing[]";
+  return [
+    "      repository Things for Thing {",
+    `        find byLabel(l: string): ${ret} where this.label == l`,
+    "      }",
+  ];
+}
+
 function policyBlock(authz: Authz): string[] {
   if (authz === "policyAllow") return ["      policy {", "        allow deep on Thing", "      }"];
   // WRITE-deny rather than read-deny: it keeps both seams emitted (reads stay
@@ -136,16 +231,16 @@ export function platformClause(platform: string, persistence: Persistence): stri
 
 /** Compose one system's `.ddd` source (with the `__PLATFORM__` token left in,
  *  exactly like a curated corpus fixture). */
-export function composeSource(c: Pick<PairwiseCase, "capability" | "shape" | "authz">): string {
-  const { capability: cap, shape, authz } = c;
+export function composeSource(c: SourceCase): string {
+  const { capability: cap, shape, authz, inheritance: inh, read } = c;
   const tenancy = needsTenancy(cap, authz);
   const truthKind = shape === "eventLog" ? "eventLog" : "state";
-  const name = `Pw${upperFirst(cap)}${upperFirst(shape)}${upperFirst(authz)}`;
+  const name = `Pw${upperFirst(cap)}${upperFirst(shape)}${upperFirst(authz)}${upperFirst(inh)}${upperFirst(read)}`;
 
   const L: string[] = [];
   L.push(
     "// GENERATED by test/pairwise/compose.ts (M-T9.29) — do not edit by hand.",
-    `// axes: capability=${cap} shape=${shape} authz=${authz}`,
+    `// axes: capability=${cap} shape=${shape} authz=${authz} inheritance=${inh} read=${read}`,
     `system ${name} {`,
   );
   if (needsUser(cap, authz)) {
@@ -161,14 +256,13 @@ export function composeSource(c: Pick<PairwiseCase, "capability" | "shape" | "au
       "      event Bumped { thing: Thing id, by: int }",
     );
   }
-  L.push(`      aggregate Thing${header(cap, shape, authz)}${withClause(cap, shape, authz)} {`);
+  L.push(...baseAggregate(inh));
+  L.push(
+    `      aggregate Thing${extendsClause(inh)}${header(cap, shape, authz, inh)}${withClause(cap, shape, authz)} {`,
+  );
   L.push(...members(shape, authz).map((m) => `  ${m}`));
   L.push("      }");
-  L.push(
-    "      repository Things for Thing {",
-    "        find byLabel(l: string): Thing[] where this.label == l",
-    "      }",
-  );
+  L.push(...repositoryBlock(read));
   L.push(...policyBlock(authz));
   L.push("    }");
   if (tenancy) {
@@ -189,12 +283,14 @@ export function composeSource(c: Pick<PairwiseCase, "capability" | "shape" | "au
   L.push("  api MainApi from Core");
   L.push("  storage primary { type: postgres }");
   L.push(`  resource mainState { for: Main, kind: ${truthKind}, use: primary }`);
+  const baseState = needsBaseStateResource(shape, inh);
+  if (baseState) L.push("  resource mainBase { for: Main, kind: state, use: primary }");
   if (tenancy) L.push("  resource registryState { for: Registry, kind: state, use: primary }");
   L.push(
     "  deployable d {",
     `    platform: ${PLATFORM_TOKEN}`,
     `    contexts: [Main${tenancy ? ", Registry" : ""}]`,
-    `    dataSources: [mainState${tenancy ? ", registryState" : ""}]`,
+    `    dataSources: [mainState${baseState ? ", mainBase" : ""}${tenancy ? ", registryState" : ""}]`,
     "    serves: MainApi",
     "    port: 4000",
     // `auth: required` whenever ANY principal-referencing machinery is on —
