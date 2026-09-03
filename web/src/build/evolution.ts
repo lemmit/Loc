@@ -22,7 +22,11 @@ import { EmptyFileSystem } from "langium";
 import { enrichLoomModel } from "../../../src/ir/enrich/enrichments.js";
 import { lowerProject } from "../../../src/ir/lower/lower.js";
 import type { EnrichedLoomModel } from "../../../src/ir/types/loom-ir.js";
-import type { SchemaSnapshot } from "../../../src/ir/types/migrations-ir.js";
+import type {
+  MigrationStep,
+  SchemaSnapshot,
+  TableShape,
+} from "../../../src/ir/types/migrations-ir.js";
 import { createDddServices } from "../../../src/language/ddd-module.js";
 import type { Model } from "../../../src/language/generated/ast.js";
 import { renderPgStep } from "../../../src/generator/sql-pg.js";
@@ -41,6 +45,7 @@ import type {
   EvolutionResult,
   EvolutionTree,
   MigrationView,
+  SchemaTableView,
   WireChangeView,
 } from "./protocol.js";
 
@@ -135,6 +140,7 @@ export async function runEvolution(params: EvolutionParams): Promise<EvolutionRe
       ok: true,
       hasBaseline: false,
       migrations: [],
+      tables: [],
       wireChanges: [],
       breaking: false,
       diagnostics: [
@@ -161,6 +167,7 @@ export async function runEvolution(params: EvolutionParams): Promise<EvolutionRe
   const hasBaseline = baseSystemsByName.size > 0;
 
   const migrations: MigrationView[] = [];
+  const tables: SchemaTableView[] = [];
   const wireChanges: WireChangeView[] = [];
   let breaking = false;
 
@@ -195,13 +202,16 @@ export async function runEvolution(params: EvolutionParams): Promise<EvolutionRe
       }
     }
     for (const mig of migs) {
+      // The diagram wants EVERY current table, touched or not — a module
+      // with no steps still contributes its (untouched) tables.
+      for (const t of mig.next.tables) tables.push(tableView(mig.module, t));
       if (mig.steps.length === 0) continue; // clean regen ⇒ no-op, don't list
       const isDestructive = destructiveByModule.has(mig.module);
       migrations.push({
         module: mig.module,
         name: mig.name,
         version: mig.version,
-        steps: mig.steps.map((s) => ({ op: s.op, sql: renderPgStep(s) })),
+        steps: mig.steps.map((s) => ({ op: s.op, sql: renderPgStep(s), table: stepTable(s) })),
         destructive: isDestructive,
         destructiveMessage: destructiveByModule.get(mig.module),
       });
@@ -229,8 +239,48 @@ export async function runEvolution(params: EvolutionParams): Promise<EvolutionRe
     ok: true,
     hasBaseline,
     migrations,
+    tables,
     wireChanges,
     breaking,
     diagnostics: curDiags,
+  };
+}
+
+/** The bare table a migration step targets, or `undefined` for the ops that
+ *  have none (`sqlComment`, `sqlExec`) or target an index by name only
+ *  (`renameIndex`).  `renameTable` reports the NEW name — that's the node the
+ *  diagram draws. */
+export function stepTable(step: MigrationStep): string | undefined {
+  switch (step.op) {
+    case "createTable":
+      return step.table.name;
+    case "dropTable":
+      return step.name;
+    case "renameTable":
+      return step.to;
+    case "addIndex":
+      return step.index.table;
+    case "addColumn":
+    case "dropColumn":
+    case "renameColumn":
+    case "alterColumnNullable":
+    case "alterColumnType":
+    case "dropIndex":
+    case "backfillColumn":
+      return step.table;
+    case "renameIndex":
+    case "sqlComment":
+    case "sqlExec":
+      return undefined;
+  }
+}
+
+function tableView(module: string, t: TableShape): SchemaTableView {
+  return {
+    module,
+    name: t.name,
+    schema: t.schema,
+    columns: t.columns.map((c) => c.name),
+    refs: [...new Set(t.foreignKeys.map((fk) => fk.refTable))],
   };
 }

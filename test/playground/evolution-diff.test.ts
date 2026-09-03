@@ -116,6 +116,23 @@ describe("runEvolution", () => {
     expect(ok.wireChanges.some((c) => /phone/i.test(`${c.entity}.${c.field}`))).toBe(true);
   });
 
+  it("carries the current schema's tables and tags every step with its table (M-T8.22)", async () => {
+    // The Migrations tab tints a schema diagram by the diff, so the DTO has
+    // to carry EVERY current table (untouched ones included) plus the table
+    // each step targets — `migration-tint.test.ts` covers the tint itself.
+    const edited = SALES.replace("email: string", "email: string phone: string");
+    const r = (await runEvolution({ baseline: tree(SALES), current: tree(edited) })) as EvolutionOk;
+    expect(r.ok).toBe(true);
+    const names = r.tables.map((t) => t.name);
+    expect(names).toContain("customers");
+    expect(names).toContain("products");
+    const customers = r.tables.find((t) => t.name === "customers")!;
+    expect(customers.columns).toContain("phone");
+    expect(customers.module.length).toBeGreaterThan(0);
+    const addColumn = r.migrations.flatMap((m) => m.steps).find((s) => s.op === "addColumn");
+    expect(addColumn?.table).toBe("customers");
+  });
+
   it("no baseline ⇒ hasBaseline false, no contract noise", async () => {
     const r = await runEvolution({ baseline: null, current: tree(SALES) });
     expect(r.ok).toBe(true);

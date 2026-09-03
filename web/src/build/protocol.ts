@@ -79,9 +79,24 @@ export interface MigrationView {
    *  name (`"AddOrderStatus"`). */
   name: string;
   version: string;
-  steps: { op: string; sql: string }[];
+  /** Each step carries the bare table name it targets (when the op has one —
+   *  `sqlComment` / `sqlExec` / `renameIndex` don't), so the Migrations tab
+   *  can tint the schema diagram per table without re-parsing the SQL. */
+  steps: { op: string; sql: string; table?: string }[];
   destructive: boolean;
   destructiveMessage?: string;
+}
+
+/** One table of the CURRENT schema (the `next` snapshot every module's
+ *  migration is derived towards) — the nodes of the Migrations tab's
+ *  schema diagram.  `refs` are the bare names of the tables this one's
+ *  foreign keys point at. */
+export interface SchemaTableView {
+  module: string;
+  name: string;
+  schema?: string;
+  columns: string[];
+  refs: string[];
 }
 
 /** One wire-contract change, classified breaking vs additive by
@@ -102,6 +117,11 @@ export interface EvolutionOk {
    *  migration reads `"Initial"`. */
   hasBaseline: boolean;
   migrations: MigrationView[];
+  /** Every table the current source describes, across modules — including
+   *  the untouched ones, which is what lets the diagram dim them (audit
+   *  M8 / M-T8.22).  Tables the change DROPS are not here; the tint map
+   *  recovers them from the `dropTable` steps. */
+  tables: SchemaTableView[];
   wireChanges: WireChangeView[];
   /** Any breaking wire change OR any destructive migration. */
   breaking: boolean;

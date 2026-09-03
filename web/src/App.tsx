@@ -64,6 +64,7 @@ import {
   type ApiEndpoint,
   type OpenApiDoc,
 } from "./backend/openapi";
+import { aggregateRequestTraces } from "./backend/route-match";
 import { buildTree } from "./preview/file-tree";
 import { useWorkspace } from "./workspace/use-workspace";
 import { useWorkspaceSources } from "./workspace/use-workspace-sources";
@@ -1005,6 +1006,13 @@ export default function App(): JSX.Element {
   const persistent = selBootPersistent(pipeline);
   const migrated = selBootMigrated(pipeline);
   const bootErrorMessage = selBootError(pipeline);
+  // Requests served, per operation (M-T8.22) — derived, not stored: the
+  // runtime log already carries every `request_end` line and the spec is
+  // already fetched, so the aggregate is a pure fold over both.
+  const requestTraces = useMemo(
+    () => aggregateRequestTraces(backendLog, apiEndpoints),
+    [backendLog, apiEndpoints],
+  );
   const dispatchSlot = pipeline.dispatch.kind === "result" ? pipeline.dispatch.result : null;
 
   // Memoised: this is a fresh object per render otherwise, which would make
@@ -2076,6 +2084,7 @@ export default function App(): JSX.Element {
       reqPath,
       reqBody,
       apiEndpoints,
+      requestTraces,
       selectedOpId,
       selectedEndpoint,
       pathParamValues,
@@ -2150,6 +2159,7 @@ export default function App(): JSX.Element {
       reqPath,
       reqBody,
       apiEndpoints,
+      requestTraces,
       selectedOpId,
       selectedEndpoint,
       pathParamValues,

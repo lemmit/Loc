@@ -58,7 +58,11 @@ export function HistoryBody({
   const [loaded, setLoaded] = useState(false);
   const [hideAutosaves, setHideAutosaves] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
-  const [changes, setChanges] = useState<Record<string, CommitFileChange[]>>({});
+  // Per-commit file changes, with a FAILURE branch (audit M18): a git read
+  // that rejects shows an error row + Retry instead of "Loading changes…"
+  // forever.
+  type ChangesSlot = { kind: "ok"; files: CommitFileChange[] } | { kind: "error"; message: string };
+  const [changes, setChanges] = useState<Record<string, ChangesSlot>>({});
   // Inline "restore this version" confirm + in-flight state, keyed by oid.
   const [confirmOid, setConfirmOid] = useState<string | null>(null);
   const [restoringOid, setRestoringOid] = useState<string | null>(null);
@@ -116,13 +120,29 @@ export function HistoryBody({
     [commits, hideAutosaves],
   );
 
+  const loadChanges = (oid: string): void => {
+    if (!store) return;
+    setChanges((prev) => {
+      const next = { ...prev };
+      delete next[oid];
+      return next;
+    });
+    void store
+      .commitChanges(oid)
+      .then((fc) => {
+        setChanges((prev) => ({ ...prev, [oid]: { kind: "ok", files: fc } }));
+      })
+      .catch((err: unknown) => {
+        setChanges((prev) => ({
+          ...prev,
+          [oid]: { kind: "error", message: err instanceof Error ? err.message : String(err) },
+        }));
+      });
+  };
+
   const toggle = (oid: string): void => {
     setExpanded((cur) => (cur === oid ? null : oid));
-    if (!changes[oid] && store) {
-      void store.commitChanges(oid).then((fc) => {
-        setChanges((prev) => ({ ...prev, [oid]: fc }));
-      });
-    }
+    if (!changes[oid]) loadChanges(oid);
   };
 
   const restore = (oid: string): void => {
@@ -254,13 +274,27 @@ export function HistoryBody({
                           Loading changes…
                         </Text>
                       </Group>
-                    ) : fc.length === 0 ? (
+                    ) : fc.kind === "error" ? (
+                      <Group gap={8} py={2} wrap="wrap" data-testid="history-changes-error">
+                        <Text size="xs" c="red" style={{ flex: 1, minWidth: 160 }}>
+                          Could not read this commit's changes — {fc.message}
+                        </Text>
+                        <Button
+                          size="compact-xs"
+                          variant="subtle"
+                          onClick={() => loadChanges(c.oid)}
+                          data-testid="history-changes-retry"
+                        >
+                          Retry
+                        </Button>
+                      </Group>
+                    ) : fc.files.length === 0 ? (
                       <Text size="xs" c="dimmed">
                         No tracked file changes.
                       </Text>
                     ) : (
                       <Stack gap={1}>
-                        {fc.map((f) => (
+                        {fc.files.map((f) => (
                           <Group key={f.path} gap={6} wrap="nowrap">
                             <Badge size="xs" variant="light" color={STATUS_COLOR[f.status]}>
                               {f.status[0]!.toUpperCase()}
