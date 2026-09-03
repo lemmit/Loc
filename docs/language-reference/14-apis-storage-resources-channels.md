@@ -195,7 +195,7 @@ volumes:
   blobs-data: {}
 ```
 
-> **Generator support is narrower than the grammar.** Only `postgres` / `inMemory` have full backend codegen, plus `s3` and `localDisk` (object-store clients), `rabbitmq` and `kafka` (queue / channel transports), `redis` (broadcast channel transport), `restApi` (http api client) and `smtp` / `ses` / `sendgrid` (mailer clients). `mysql` / `sqlite` bind kinds in the registry but have no shipped backend emitter; `nats`, `elastic`, `meilisearch`, `clickhouse` and `bigquery` parse and validate but bind no kind and emit nothing — an honest forward-compat gap. (`nats` is *not* a channel transport: `CHANNEL_COMPATIBILITY` in `src/util/channels.ts` lists only `inMemory` / `redis` / `rabbitmq` / `kafka`.)
+> **Generator support is narrower than the grammar.** Only `postgres` / `inMemory` have full backend codegen, plus `s3` and `localDisk` (object-store clients), `rabbitmq` and `kafka` (queue / channel transports), `redis` (broadcast channel transport), `restApi` (http api client) and `smtp` / `ses` / `sendgrid` (mailer clients). `mysql` / `sqlite` bind the relational kinds in the registry, but every shipped SQL emitter targets Postgres — a `state` binding on either still generates Postgres wiring; `nats`, `elastic`, `meilisearch`, `clickhouse` and `bigquery` parse and validate but bind no kind and emit nothing — an honest forward-compat gap. (`nats` is *not* a channel transport: `CHANNEL_COMPATIBILITY` in `src/util/channels.ts` lists only `inMemory` / `redis` / `rabbitmq` / `kafka`.)
 
 ### Connection sources
 
@@ -214,9 +214,13 @@ The four forms lower to a `ConnectionSourceIR` (`kind: service | env | secret | 
 ## `resource`
 
 ```
-Resource:       'resource' name=LooseName '{' ('for' ':' [BoundedContext]) ('kind' ':' DataSourceKind) ('use' ':' [Storage]) … '}'
+Resource:       'resource' name=LooseName '{' ('for' ':' [BoundedContext])? ('kind' ':' DataSourceKind)?
+                    ('use' ':' [ResourceTarget])? … ('index' ':' '[' IndexSpec+ ']')? ('config' ':' '{' … '}')? '}'
 DataSourceKind: state | eventLog | snapshot | cache | replica | objectStore | queue | api | mailer
+IndexSpec:      entity=ID '.' ( columns+=LooseName | '(' columns+=LooseName (',' columns+=LooseName)* ')' )
 ```
+
+`use:` resolves to a `ResourceTarget` — a `storage`, **or an `api` declared in this same system** (the typed in-system client, below).
 
 A `resource` (formerly `dataSource` — the deployable's `dataSources:` *clause* keeps the old name) is the **configured binding**: it says context `for:` needs data of role `kind:`, served by storage `use:`. A backend deployable lists the resources it wires under `dataSources:`.
 
@@ -241,7 +245,7 @@ resource ordersState {
 | `snapshot` | event-sourced snapshot | postgres, mysql, sqlite, inMemory |
 | `cache` | derived cache | redis, inMemory |
 | `replica` | read replica | postgres, mysql, sqlite |
-| `objectStore` | blob storage | s3 |
+| `objectStore` | blob storage | s3, localDisk |
 | `queue` | message queue | rabbitmq |
 | `api` | external HTTP API | restApi |
 | `mailer` | outbound email | smtp, ses, sendgrid |
@@ -266,6 +270,64 @@ Each optional knob is gated to the kinds / storage types where it's meaningful (
 | `isolationLevel` | `readUncommitted` … `serializable` | relational, non-`cache` |
 | `readonly` | read-only binding | — |
 | `shape` | `relational` \| `embedded` \| `document` saving shape | — |
+| `index` | manual performance indexes, `[Entity.col, Entity.(a, b)]` | `kind: state` only (`loom.resource-index-non-state`); unknown entity / column is `loom.resource-index-unknown-entity` / `-unknown-column` |
+| `config` | vendor parameters, validated against the sourceType's config schema | per sourceType (`loom.config-key-unknown`, …) |
+
+### Manual indexes
+
+An index is infrastructure, not a domain fact, so it lives on the binding and names its entity explicitly (an aggregate **or** one of its contained parts — each has its own table). Always non-unique: uniqueness is the domain `unique (...)` invariant ([Invariants](07-invariants-derived-functions.md)).
+
+```ddd
+resource ordersState {
+  for: Orders, kind: state, use: primary, schema: "orders"
+  index: [Order.code, Order.(status, code)]
+}
+```
+
+```sql
+-- orders_svc/db/migrations/20260101000000_sales_initial.sql
+CREATE INDEX "orders_code_idx" ON "orders"."orders" ("code");
+CREATE INDEX "orders_status_code_idx" ON "orders"."orders" ("status", "code");
+```
+
+### `use: <Api>` — the typed in-system client
+
+Bind an `api` instead of a `storage` on a `kind: api` resource and the caller gets a **typed** client for a sibling deployable — named operations, derived request/response types, and a compose address derived from the servers' service slug + port (no `baseUrl` is authored). Binding an api on any other kind is `loom.resource-api-target-kind`; the api must be served by exactly one backend deployable (`loom.resource-api-unserved` / `loom.resource-api-ambiguous-server`), and a deployable may not wire a resource pointing at an api it serves itself (`loom.resource-api-self-call` — call the context in-process). An operation the caller's platform emits no client for is `loom.remote-api-op-unsupported`; the untyped `get` / `post` verbs over a `storage restApi` binding are the escape hatch.
+
+```ddd
+resource orders { for: Shipping, kind: api, use: OrdersApi }
+```
+
+```python
+# ship_svc/app/resources/api_clients.py — generated typed client
+_orders_base_url = os.environ.get("ORDERS_URL", "http://localhost:3000")
+
+async def orders_create_order(body: object) -> OrderCreated:
+    async with httpx.AsyncClient(base_url=_orders_base_url) as client:
+        res = await client.request("POST", "/api/orders", json=body)
+```
+
+```yaml
+# docker-compose.yml — the address is derived, and startup ordered after the callee
+  ship_svc:
+    environment:
+      ORDERS_URL: "http://orders_svc:3000"
+    depends_on:
+      orders_svc: { condition: service_healthy }
+```
+
+### `File` fields need an object store
+
+A `File`-typed aggregate field ([Type system](04-type-system.md)) stores its bytes in an object store and a `FileRef` (`{ url, key, contentType, size }`) in a JSONB column. A deployable hosting such an aggregate must wire an `objectStore` resource or it is `loom.file-field-needs-object-storage`. With one wired, the backend emits the store client plus multipart upload/download routes:
+
+```ts
+// orders_svc/http/index.ts
+app.post("/files", async (c) => { /* multipart → ordersFiles$putBytes(key, bytes, contentType) */ });
+app.get("/files/:key", async (c) => { /* → ordersFiles$getBytes(key) */ });
+
+// orders_svc/resources/localDisk.ts — the `type: localDisk` client
+export const ordersFilesDir = process.env.ORDERS_FILES_URL_DIR ?? path.join(process.cwd(), "data", "ordersFiles");
+```
 
 The `state` resource above drives the schema-migration owner and the connection wiring for its backend; the `objectStore` / `queue` / `api` / `mailer` kinds are *consumed* from workflow bodies via an ambient handle and a closed per-kind verb vocabulary (`files.put(…)`, `jobs.enqueue(…)`, `api.get(…)`, `mail.send(to, subject, body)`) — that surface is documented in [`../resources.md`](../resources.md) ("Consuming a resource from a workflow"); see also [Workflows](13-workflows.md).
 

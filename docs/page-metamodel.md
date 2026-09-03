@@ -1044,19 +1044,43 @@ the same page render blank on the JSX frontends and raise on LiveView.
 
 ---
 
-## 10. `scaffold` — the one macro
+## 10. `scaffold` — the macro family
 
-Single fixed pre-codegen pass. Not user-extensible. Hierarchical:
+Scaffolding is **not** a `ui` member keyword.  It is a macro applied through the
+universal `with` clause, expanded in AST phase ② — either on the `ui`
+declaration or as a `with …` line inside it:
+
+```ddd
+ui SalesAdmin with scaffold(aggregates: [Customer], workflows: [placeOrder]) {
+  api Sales: SalesApi
+  page Home { route: "/"  body: Heading { "Welcome", level: 1 } }
+}
+```
+
+The four selector arguments are `subdomains:`, `contexts:`, `aggregates:`,
+`workflows:` (ref-lists; a wrong-kind ref is `loom.macro-arg-kind-mismatch`, a
+wrong host is `loom.macro-target-mismatch`).  There is no `modules:` selector —
+the subdomain-level spelling is `subdomains:`.  It fans out hierarchically:
 
 ```
-scaffold subdomains: A, B, …    →  ∪  scaffold contexts:   <each context in each subdomain>
-scaffold contexts:   X, Y, …    →  ∪ {
-                                       scaffold aggregates: <each aggregate in X>,
-                                       scaffold workflows:  <each workflow in X>
-                                     }
-scaffold aggregates: Order, …   →  page <Order>List + <Order>New + <Order>Detail
-scaffold workflows:  placeOrder, … → page PlaceOrderWorkflow  (+ shared WorkflowsIndex)
+scaffold(subdomains: [A])   →  scaffoldSubdomain(of: A)  → one scaffoldContext per context
+scaffold(contexts:   [X])   →  scaffoldContext(of: X)    → scaffoldAggregate / scaffoldWorkflow per member
+scaffold(aggregates: [Order]) →  area Order { page List, page New, page Detail }
+scaffold(workflows: [placeOrder]) → page PlaceOrderWorkflow (+ the shared WorkflowsIndex)
 ```
+
+Siblings in the family, documented in [`scaffold-macros.md`](scaffold-macros.md):
+`scaffoldSubdomain` / `scaffoldContext` / `scaffoldAggregate` / `scaffoldWorkflow`
+(the ui-side composers and leaves), `scaffoldApi` / `scaffoldHandlers` /
+`scaffoldPaged` / `scaffoldPagedApi` (the api/context side), and
+**`scaffoldDashboard`** (target `context`), which emits one singleton query-time
+`projection` per aggregate — a row count plus a sum per numeric/money field,
+aggregated in SQL — while the ui-side `scaffold` grows `Home` a matching row of
+`Stat` tiles bound to it (a money tile through `Money`).  Both halves derive the
+projection name in `_dashboard-shared.ts`.
+
+`scaffoldView` is **gone** with the `view` declaration it scaffolded (#2200);
+read models are `projection`s now.
 
 ### What each scaffolded page contains
 
@@ -1066,7 +1090,7 @@ identical to one the user could hand-write. The contract per page:
 
 | Page | Body |
 |---|---|
-| `<Agg>List` | Breadcrumbs · Toolbar (heading + "New" button) · `QueryView { of: api.<Agg>.all }` → `Table` with one `Column` per **non-collection** scalar field (`IdLink` / `EnumBadge` / `DateDisplay` / text by type), per-row testid. |
+| `<Agg>List` | Breadcrumbs · Toolbar (heading + "New" button) · optional **filter bar** · `QueryView { of: api.<Agg>.all(page, size, sortKey, sortDir), paged: true }` → server-paged `Table` with one `Column` per **non-collection** scalar field (`IdLink` / `EnumBadge` / `DateDisplay` / text by type), per-row testid. The filter bar binds one input per parameter of the aggregate's parameterised finds — `string` / `guid` / `datetime` / `bool` / enum / id params all render; a parameter shape with no input is the honest gate `loom.scaffold-filter-param-unsupported` rather than a silently dropped filter. |
 | `<Agg>New` | Breadcrumbs · heading · `Card { CreateForm { of: <Agg> } }` — RHF + Zod + `useCreate<Agg>`, one input per required field. A field's declared default (`field: T = <expr>`) seeds that input when it is client-evaluable (constant / enum member); otherwise the input starts at the type-zero placeholder. |
 | `<Agg>Detail` | Breadcrumbs · heading · `QueryView { of: api.<Agg>.byId(id), single: true }` whose data card holds **three** sections: ① `KeyValueRow` per scalar field; ② one **operation control** per `public operation` — a button that opens a `Modal` hosting an auto-generated `OperationForm { data.<operation> }` (the operation referenced through the loaded record) bound to the `use<Op><Agg>` mutation hook (params dispatched by the same type rules as `CreateForm { of: }`); ③ one **related-entity list** per `contains` collection — a titled `Card { Table }` over `data.<containment>` with a `Column` per part field. |
 | `<Workflow>Workflow` | Breadcrumbs · heading · `Card { WorkflowForm { runs: <wf> } }`. |
@@ -1076,16 +1100,15 @@ platform-completeness proof for the modal/disclosure and nested-table
 primitives: if `scaffold` can emit them, an explicit `page` can too
 (see `examples/acme-order-explicit.ddd`).
 
-Multiple `scaffold` directives stack. No `except` clause — list what you
-want, not what you don't.
+Multiple `scaffold` calls stack (`with a(...), b(...)`, or several `with` lines).
+No `except` clause — list what you want, not what you don't.
 
 ```ddd
-ui SalesAdmin {
-  scaffold subdomains: [Catalog]             // bulk
-  scaffold aggregates: Customer, Product     // a la carte
-  scaffold workflows:  placeOrder
+ui SalesAdmin with scaffold(subdomains: [Catalog]),
+                   scaffold(aggregates: [Customer, Product], workflows: [placeOrder]) {
+  api Sales: SalesApi
   page OrderList   { ... }                   // custom
-  page OrderDetail { ... }
+  page OrderDetail(id: Order id) { ... }
 }
 ```
 
@@ -1102,8 +1125,10 @@ Three layered scales of override, all the same mechanism — explicit
 
 ### Validator obligations
 
-- Each `scaffold <kind>: <name>` resolves to an existing declaration of
-  that kind, reachable through the deployable's `targets`.
+- Each selector entry resolves to an existing declaration of that kind
+  (`loom.macro-arg-kind-mismatch`), reachable through the deployable's `targets`.
+- A `with scaffold(...)` clause that survives into lowering unexpanded is
+  `loom.scaffold-unexpanded`.
 - Stacked `scaffold` directives may not double-scaffold the same construct.
 - Two `scaffold` directives may not produce pages with identical generated
   names; explicit `page <Name>` overrides exactly one source.

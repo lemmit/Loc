@@ -128,7 +128,7 @@ money ÷ {int|long|decimal}   → money
 anything else involving money → rejected
 ```
 
-A bare numeric **literal** beside a money operand is promoted to `money` first, so `price * 2` is rejected today as `money × money` — write `price * decimal(2)` or bind the scalar to a typed field/parameter. (`decimal ÷ decimal` and `money % x` are outside the vocabulary.)
+A bare numeric **literal** beside a money operand is promoted to `money` first, so `price * 2` is rejected today as `money × money` — write `price * decimal(2)` or bind the scalar to a typed field/parameter. (`money × money`, `money ÷ money` and `money % x` are all rejected — `Operator '/' has incompatible operand types: left is 'money', right is 'money'`; plain `decimal ÷ decimal` is ordinary arithmetic and stays admitted.)
 
 Each backend keeps **one representation rule** for the two types, and the rendered arithmetic follows from it:
 
@@ -466,7 +466,7 @@ def has_tag(self) -> bool: return "vip" in self._notes
 ```
 ::: end
 
-`.first` / `.firstOrNull` → `[0]` / `[0] ?? null` (TS), `.First()` / `.FirstOrDefault()` (.NET), `stream().findFirst().orElse(null)` (Java), `xs[0] if xs else None` (Python), `List.first` (Elixir). Money-typed lambdas ride the money rules above (Java `compareTo`, TS `.gt`, Elixir `Decimal.compare`), so a `.sum` over money seeds `new Decimal(0)` / `BigDecimal.ZERO` / `Decimal(0)` rather than `0`.
+`.first` / `.firstOrNull` diverge per backend: `xs[0]` / `(xs[0] ?? null)` (TS), `.First()` / `.FirstOrDefault()` (.NET), `xs.get(0)` / `xs.stream().findFirst().orElse(null)` (Java), `xs[0]` / `(xs[0] if xs else None)` (Python), `List.first(xs)` for both (Elixir). Money-typed lambdas ride the money rules above (Java `compareTo`, TS `.gt`, Elixir `Decimal.compare`), so a `.sum` over money seeds `new Decimal(0)` / `BigDecimal.ZERO` / `Decimal(0)` rather than `0`.
 
 ### `.contains` — membership over a reference collection
 
@@ -539,7 +539,7 @@ renders the lambda inline in each backend's collection-op call — `(l) => l.amo
 
 ## Temporal arithmetic — `duration`
 
-`days(n)`, `hours(n)`, `minutes(n)` (and the other unit constructors of the ambient `temporal` prelude, see [`../stdlib.md`](../stdlib.md)) build a `duration`, a closed temporal algebra with `datetime`: `datetime ± duration → datetime`, `datetime − datetime → duration`, `duration ± duration → duration`, `duration × int → duration`. The constructor takes exactly one `int` (`loom.duration-arity`; `days(1.5)` is `loom.duration-arg-type` — write the finer unit, `hours(36)`). The `DURATION` token (`15s`, `5m`) is only the `every:` cadence of a `timerSource`, not an expression literal.
+`days(n)`, `hours(n)`, `minutes(n)` — the **three** unit constructors of the ambient `temporal` prelude ([`src/util/temporal.ts`](../../src/util/temporal.ts)) — build a `duration`, a closed temporal algebra with `datetime`: `datetime ± duration → datetime`, `datetime − datetime → duration`, `duration ± duration → duration`, `duration × int → duration`. The constructor takes exactly one `int` (`loom.duration-arity`; `days(1.5)` is `loom.duration-arg-type` — write the finer unit, `hours(36)`). There is no `months`/`years`: a `duration` is an **absolute** millisecond span with a fixed width per unit, so every backend renders it without calendar arithmetic; calendar-relative offsets would need a distinct type. The constructors are not keywords either — they are free calls that become `duration` nodes only when the name resolves to nothing else, so a user `function days(...)` shadows the builtin. `duration` is expression-only: it is not in the grammar's `PrimitiveType` rule, so there are no `duration` fields. The `DURATION` token (`15s`, `5m`) is only the `every:` cadence of a `timerSource`, not an expression literal.
 
 ```ddd
 aggregate Order {
@@ -685,4 +685,4 @@ Three identifiers resolve specially in expression position, plus the implicit `t
 
 ---
 
-Filters in repository `find` clauses, criteria, and projections are this same expression language under a different validator lens (they must be *queryable* — translatable to SQL/Ecto; a non-queryable intrinsic there is `loom.intrinsic-not-queryable`). See [`../criterion.md`](../criterion.md) for the predicate-specification surface and the queryability rules; [Statements](06-behavior-and-statements.md) for the `:=` / `+=` / `let` / `emit` forms that expressions appear inside.
+Filters in repository `find` clauses, criteria, and projections are this same expression language under a different validator lens (they must be *queryable* — translatable to SQL/Ecto; a non-queryable predicate is `loom.find-where-not-queryable` / `loom.retrieval-where-not-queryable` / `loom.projection-where-not-queryable`, one code per read surface). See [`../criterion.md`](../criterion.md) for the predicate-specification surface and the queryability rules; [Statements](06-behavior-and-statements.md) for the `:=` / `+=` / `let` / `emit` forms that expressions appear inside.
