@@ -1,5 +1,5 @@
-import { Box, Button, Group as MGroup, SegmentedControl, Text, UnstyledButton } from "@mantine/core";
-import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
+import { Box, Button, Group as MGroup, SegmentedControl, Switch, Text, UnstyledButton } from "@mantine/core";
+import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from "react";
 
 // The visual Builder pulls in craft.js + a main-thread Langium parse; lazily
 // loaded so neither lands in the main chunk until the Builder tab is opened.
@@ -17,7 +17,8 @@ import {
 import { EditorPane } from "./EditorPane";
 import { PreviewPane } from "./PreviewPane";
 import { DevToolsDock } from "./DevToolsDock";
-import { ExplorerTree } from "../preview/ExplorerTree";
+import { ExplorerTree, type RowMark } from "../preview/ExplorerTree";
+import { constructHue } from "../build/correspondence";
 import { LazyFileViewer } from "./lazy-panels";
 import { SourceFilesTree } from "./SourceFilesTree";
 import { PaneErrorBoundary } from "../PaneErrorBoundary";
@@ -25,7 +26,15 @@ import { ExamplesPane } from "./ExamplesPane";
 import { FirstRunCard } from "./FirstRunCard";
 import { type CenterView, type ExplorerMode, modeLabel, type LayoutCtx } from "./ctx";
 import { ApiPane, DiagramsPane, TraceabilityPane } from "./LoomViewsPane";
-import { EXPLORER_VIEW, nextStep, nextStepMid, PANE, STAGE } from "./vocabulary";
+import {
+  CORRESPONDENCE,
+  EXPLORER_VIEW,
+  nextStep,
+  nextStepMid,
+  OUTPUT_DIFF,
+  PANE,
+  STAGE,
+} from "./vocabulary";
 
 // The Explorer switcher, in the order a reader walks them: your source, the
 // emitted tree, the three `.loom/`-bundle views over it (M-T8.20), then the
@@ -84,6 +93,27 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
   // the dock — History's "diff as baseline" — can reveal a sibling tab
   // (Migrations) with context.  The legacy-alias coercion moved to App.
   const { dockTab, setDockTab } = ctx;
+
+  // Per-row decoration for the generated tree: what CHANGED in this generate
+  // (slice 2) and what the declaration under the cursor PRODUCED (slice 3).
+  // One map so a row can carry both — a file can be freshly changed AND part
+  // of the hovered declaration's output, and that combination is exactly what
+  // a reader wants to see.
+  const { outputDiff, correspondence } = ctx;
+  const rowMarks = useMemo(() => {
+    const out = new Map<string, RowMark>();
+    for (const [path, status] of outputDiff.byPath) {
+      // A removed file has no row to mark — it is gone from the tree.  The
+      // count still reaches the reader through the banner's summary.
+      if (status === "removed") continue;
+      out.set(path, { status });
+    }
+    const hue = correspondence?.construct ? constructHue(correspondence.construct) : undefined;
+    for (const file of correspondence?.files ?? []) {
+      out.set(file.file, { ...out.get(file.file), corresponds: true, hue });
+    }
+    return out;
+  }, [outputDiff, correspondence]);
 
   const onPickGenerated = (path: string): void => {
     const file = files.find((f) => f.path === path);
@@ -262,11 +292,18 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
                           </Button>
                         </Box>
                       )}
+                      <ExplorerBanner ctx={ctx} />
                       <ExplorerTree
                         nodes={tree.children}
                         selectedPath={generatedSelection}
                         onActivateFile={onPickGenerated}
                         emptyHint={`No files yet — ${nextStepMid("generate", true)}.`}
+                        marks={rowMarks}
+                        onHoverFile={(path) =>
+                          ctx.setReverseHover(
+                            path === null ? null : { file: path, line: 1 },
+                          )
+                        }
                       />
                     </Box>
                   ) : (
@@ -430,6 +467,77 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
         )}
       </Panel>
     </Group>
+  );
+}
+
+/** The one line above the generated tree.
+ *
+ *  It answers whichever question is live: while a declaration is hovered in
+ *  the editor it names that declaration and how many files it produced (the
+ *  correspondence banner); otherwise it summarises what the last generate
+ *  changed.  Both are transient state the tree rows also carry — the banner
+ *  exists because a virtualized tree only mounts the rows in view, so a match
+ *  (or a change) further down would otherwise be invisible. */
+function ExplorerBanner({ ctx }: { ctx: LayoutCtx }): JSX.Element | null {
+  const { correspondence, outputDiff, colourMap, setColourMap } = ctx;
+  const hasDiff = outputDiff.any;
+  if (!correspondence && !hasDiff) {
+    return (
+      <Box px="xs" py={2} style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}>
+        <ColourMapSwitch on={colourMap} onChange={setColourMap} />
+      </Box>
+    );
+  }
+  return (
+    <Box
+      px="xs"
+      py={2}
+      style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}
+      data-testid="explorer-banner"
+    >
+      {correspondence ? (
+        <Text
+          size="xs"
+          truncate
+          data-testid="correspondence-banner"
+          data-files={correspondence.files.length}
+          data-construct={correspondence.construct}
+          style={{
+            color: correspondence.construct
+              ? `hsl(${constructHue(correspondence.construct)}, 70%, 70%)`
+              : undefined,
+          }}
+        >
+          {CORRESPONDENCE.from(correspondence.construct ?? "?", correspondence.files.length)}
+        </Text>
+      ) : (
+        <Text size="xs" c="dimmed" truncate data-testid="output-diff-summary">
+          {OUTPUT_DIFF.summary(outputDiff.added, outputDiff.changed, outputDiff.removed)}{" "}
+          {OUTPUT_DIFF.sinceLast}
+        </Text>
+      )}
+      <ColourMapSwitch on={colourMap} onChange={setColourMap} />
+    </Box>
+  );
+}
+
+function ColourMapSwitch({
+  on,
+  onChange,
+}: {
+  on: boolean;
+  onChange: (v: boolean) => void;
+}): JSX.Element {
+  return (
+    <Switch
+      size="xs"
+      checked={on}
+      onChange={(e) => onChange(e.currentTarget.checked)}
+      label={CORRESPONDENCE.colourMap}
+      title={CORRESPONDENCE.colourMapHint}
+      data-testid="colour-map-toggle"
+      styles={{ label: { fontSize: 11, color: "var(--mantine-color-dimmed)" } }}
+    />
   );
 }
 

@@ -13,11 +13,18 @@ import {
   UnstyledButton,
 } from "@mantine/core";
 import { useEffect, useMemo, useState } from "react";
+import {
+  type ChangeStatus,
+  generatedChangesOf,
+  groupByDeployable,
+} from "../build/output-diff";
 import { type CommitFileChange, type CommitInfo, commitOnSave } from "../workspace/git";
+import { GENERATED_PREFIX } from "../workspace/git/refs";
 import { readOnlyMessage } from "../workspace/workspace-sources";
 import { InlineConfirm, confirmSites } from "../util/confirm";
 import type { LayoutCtx } from "./ctx";
 import { classifyCommit, formatRelativeTime, shortOid } from "./history-format";
+import { OUTPUT_DIFF } from "./vocabulary";
 
 // "History" dock tab — a visible timeline of the git-backed workspace.
 // Commits accrue from the debounced autosave ("autosave workspace"),
@@ -293,18 +300,28 @@ export function HistoryBody({
                         No tracked file changes.
                       </Text>
                     ) : (
-                      <Stack gap={1}>
-                        {fc.files.map((f) => (
-                          <Group key={f.path} gap={6} wrap="nowrap">
-                            <Badge size="xs" variant="light" color={STATUS_COLOR[f.status]}>
-                              {f.status[0]!.toUpperCase()}
-                            </Badge>
-                            <Text size="xs" c="dimmed" truncate>
-                              {f.path.replace(WORKSPACE_PREFIX, "")}
-                            </Text>
-                          </Group>
-                        ))}
-                      </Stack>
+                      <>
+                        <Stack gap={1}>
+                          {/* Sources only.  A regenerate commit touches a
+                              hundred generated files; listing them flat here
+                              buried the one `.ddd` edit that caused them, so
+                              the generated half moved to the grouped
+                              "what changed in the output" section below. */}
+                          {fc.files
+                            .filter((f) => !f.path.startsWith(GENERATED_PREFIX))
+                            .map((f) => (
+                              <Group key={f.path} gap={6} wrap="nowrap">
+                                <Badge size="xs" variant="light" color={STATUS_COLOR[f.status]}>
+                                  {f.status[0]!.toUpperCase()}
+                                </Badge>
+                                <Text size="xs" c="dimmed" truncate>
+                                  {f.path.replace(WORKSPACE_PREFIX, "")}
+                                </Text>
+                              </Group>
+                            ))}
+                        </Stack>
+                        <OutputChanges files={fc.files} />
+                      </>
                     )}
                     {/* One-click "diff against this milestone": pin this
                         commit as the evolution baseline and jump to the
@@ -363,4 +380,59 @@ export function HistoryBody({
       </ScrollArea>
     </Box>
   );
+}
+
+/** *What changed in the output* — the generated half of one commit, folded by
+ *  deployable (M-T8.20 slice 2, research §4 #17).
+ *
+ *  History already recorded the generated tree (the regenerate merge commits
+ *  it under `/workspace/generated/`); nothing rendered it as OUTPUT, so
+ *  "did that edit reach the frontend?" had no answer short of reading a
+ *  hundred flat paths.  Collapsed by default — the source diff is the review
+ *  unit, the output is the consequence you can inspect. */
+function OutputChanges({ files }: { files: CommitFileChange[] }): JSX.Element | null {
+  const [open, setOpen] = useState(false);
+  const groups = useMemo(() => groupByDeployable(generatedChangesOf(files)), [files]);
+  const total = groups.reduce((n, g) => n + g.changes.length, 0);
+  if (total === 0) return null;
+  return (
+    <Box mt={6} data-testid="output-changes">
+      <UnstyledButton onClick={() => setOpen((v) => !v)} data-testid="output-changes-toggle">
+        <Text size="xs" fw={600} c="dimmed">
+          {open ? "▾" : "▸"} {OUTPUT_DIFF.heading} ({total})
+        </Text>
+      </UnstyledButton>
+      {open && (
+        <Stack gap={2} mt={4}>
+          {groups.map((group) => (
+            <Box key={group.name || "__root__"} data-testid="output-changes-group">
+              <Text size="xs" fw={600}>
+                {OUTPUT_DIFF.group(group.name || OUTPUT_DIFF.rootGroup, group.changes.length)}
+              </Text>
+              {group.changes.map((change) => (
+                <Group key={change.path} gap={6} wrap="nowrap" pl={8}>
+                  <Badge
+                    size="xs"
+                    variant="light"
+                    color={STATUS_COLOR[toCommitStatus(change.status)]}
+                  >
+                    {change.status[0]!.toUpperCase()}
+                  </Badge>
+                  <Text size="xs" c="dimmed" truncate>
+                    {change.path}
+                  </Text>
+                </Group>
+              ))}
+            </Box>
+          ))}
+        </Stack>
+      )}
+    </Box>
+  );
+}
+
+/** `OutputChange` speaks "changed"; the commit badge palette is keyed by
+ *  git's "modified".  One place converts, rather than widening either type. */
+function toCommitStatus(status: ChangeStatus): CommitFileChange["status"] {
+  return status === "changed" ? "modified" : status;
 }
