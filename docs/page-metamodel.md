@@ -372,10 +372,65 @@ state {
 
 Each field is `name: TypeRef ('=' init=Expression)?`. Init optional;
 omitted fields default to `null` for optionals, zero/empty for non-optionals.
-Writes use `:=` (already a Loom statement form).
+Writes use `:=` (already a Loom statement form), and only inside an `action`
+(§8).
 
-URL synchronisation deferred to a later revision. v0 state is in-memory
-only.
+A sibling `derived <name>: <T> = <expr>` declares a computed binding over
+params / state / other deriveds — it is read-only, so it needs no action.
+
+### `store` — shared state across pages, and its lifetime
+
+A `store` is a `ui`-level member holding the same `state { }` + `action`s a page
+does, referenced from any page or component by **dotted name** — there is no
+`use` clause and no per-page binding; the dependency is derived from the refs.
+
+```ddd
+store Cart persist: local {
+  state { lines: string[] = [ ]  step: int = 0 }
+  action add(id: string) { lines += id }
+  action clear() { lines := [ ] }
+}
+
+page Home {
+  route: "/"
+  body: Stack { Text { Cart.step }, Button { "Clear cart", onClick: Cart.clear } }
+}
+```
+
+generates (React, `src/stores/cart.ts` — zustand + the `persist` middleware):
+
+```ts
+export const useCart = create<CartState>()(
+  persist(
+    (set) => ({
+      lines: [],
+      step: 0,
+      add: (id) => set((s) => ({ lines: [...s.lines, id] })),
+      clear: () => set(() => ({ lines: [] })),
+    }),
+    { name: "loom.store.Cart", storage: createJSONStorage(() => localStorage) },
+  ),
+);
+```
+
+**`persist:` is the lifetime ladder** — `memory` (default), `local`, `session`,
+`url`.  It answers the v0 "URL synchronisation deferred" note: URL-synced state
+ships, as `persist: url`.  The value is parsed as an identifier, not a keyword,
+so `url` / `local` / `session` stay usable as ordinary field names.
+
+Its gates, all in the catalog:
+
+| Rule | Diagnostic |
+|---|---|
+| The lifetime must be one of the four | `loom.store-lifetime-invalid` |
+| `persist: url` fields must be scalar (string/number/bool/enum/id) — structural state needs `persist: local` | `loom.store-url-field-invalid` |
+| A page/component action may not write store state inline (`Cart.step := 1`) — mutate through a store action | `loom.store-state-inline-write` |
+| A store action may not run a view effect (`navigate` / `toast`) — a store has no router | `loom.store-action-view-effect` |
+| Store actions must compose acyclically | `loom.store-action-cycle` |
+| On `phoenixLiveView` a store is a server-side per-process struct: no browser storage, no URL ownership | `loom.store-lifetime-liveview-invalid`, `loom.store-cross-store-on-liveview-invalid` |
+| Feliz / Flutter persist through a typed codec, so a field of an uncovered type can't cross | `loom.store-lifetime-target-unsupported` |
+
+Stores emit on all six `walkBody` frontends (react/vue/svelte/angular/feliz/flutter).
 
 ---
 
@@ -386,12 +441,21 @@ the expression engine and is usable anywhere an expression appears.
 
 ```ddd
 body: match {
-  step == 0 => Form { fields: [customerId], onSubmit: toItems }
-  step == 1 => Form { fields: [items],      onSubmit: toReview }
-  step == 2 => Review(draft,              onSubmit: submitOrder)
-  else      => Empty {}
+  step == 0 => Stack { Field { "Customer", bind: customerName },
+                       Button { "Continue", onClick: toReview } }
+  step == 1 => Stack { KeyValueRow { "Customer", customerName },
+                       Button { "Place order", onClick: submit } }
+  else      => Empty { "Unknown step" }
 }
 ```
+
+> **Known emitter gap (2026-09-03).**  A page whose `body:` is a *top-level*
+> `match { … }` is silently **dropped** by the React and Svelte page emitters —
+> no file, no route, no diagnostic — because `isWalkableLayoutBody`
+> (`src/generator/_walker/walker-core.ts`) admits only a `call` or `ternary`
+> body, even though the walker itself renders `match` fine.  Vue, Angular and
+> the other targets emit the page.  Until that is fixed, wrap the `match` in a
+> layout container (`body: Stack { match { … } }`) or use a ternary.
 
 Reusable across the language, not just in page bodies:
 
@@ -404,7 +468,29 @@ derived display: string = match {
 }
 ```
 
-Validator may warn on non-exhaustive matches that lack `else`.
+### Variant `match` — over a union subject
+
+The second shape discriminates a union (an operation's `T or E` result, a
+`payload` union, a `T option`) by **variant arms**:
+
+```ddd
+match outcome {
+  Order o    => Text { o.status }
+  Rejected r => Alert { r.reason }
+  else       => Empty { "unknown" }
+}
+```
+
+- The subject must be a simple ref or let-bound name, not a call
+  (`loom.match-subject-not-simple`) — the one exception being the `await`-marked
+  call of `match await` (§8).
+- Arms name variants of the subject's union (`loom.match-unknown-variant`,
+  `loom.match-duplicate-variant`, `loom.match-non-union-subject`); a variant
+  match that covers neither every variant nor an `else` is
+  `loom.match-non-exhaustive`.
+
+`match` is also a **statement** (`MatchStmt`, with statement-block arms), which
+is what an `action` body uses (§8).
 
 ---
 
@@ -427,10 +513,10 @@ page PlaceOrderWizard {
     tags  -= oldTag                    // collection remove
     count += 1                         // scalar increment
   }
-  body: match {
-    step == 0 => Form { fields: [customerId], onSubmit: toItems }
-    else      => Empty {}
-  }
+  body: Stack { match {
+    step == 0 => Field { "Customer", bind: customerName }
+    else      => Empty { "done" }
+  } }
 }
 ```
 
@@ -440,6 +526,36 @@ composition (§8.1). The split is **read vs write** — a render-tree lambda may
 read `state`/`store`/props and compute freely, but only an `action` may write —
 tabulated allowed/rejected in
 [`docs/actions.md` → "What belongs in a lambda vs an action"](actions.md).
+
+### `match await` and the effect marker
+
+A **remote, mutating** command called bare in an action body has an invisible
+async boundary, so the validator asks for the effect marker —
+`loom.missing-effect-marker` — pointing at the `match await` form that handles
+the returned union:
+
+```ddd
+page OrderDetail(id: Order id) {
+  route: "/orders/:id"
+  state { message: string = "" }
+  action confirmOrder() {
+    match await Sales.Order.confirm() {
+      Order o    => { message := o.status }
+      Rejected r => { message := r.reason }
+    }
+  }
+  body: Stack { Button { "Confirm", onClick: confirmOrder } }
+}
+```
+
+Reads (`byId`, finders), sibling-action calls, and the view effects `navigate` /
+`toast` are not flagged — and there is **no** "spurious marker" diagnostic in
+the catalog, so an `await` you didn't strictly need is never an error.  An
+instance-op `match await` needs the page's route `:id` record
+(`loom.instance-effect-needs-route-id`); the arg list must match the operation
+signature (`loom.match-await-arg-mismatch` / `loom.match-await-arg-type`).
+Full treatment, with the generated client- and LiveView-side output, in
+[`actions.md`](actions.md).
 
 State-mutation lowering across the frontends (inside an `action` body):
 
@@ -530,14 +646,22 @@ index). Before the table was shared, a page body emitted the raw JS spelling
 and those two were **silently wrong**: the same expression computed one thing
 in an aggregate `derived` and another in the page.
 
-Two limits:
+Two earlier limits are now closed, and one rule is worth knowing:
 
-- **`money.min` / `money.max` / `money.round`** need `decimal.js`'s `Decimal`
-  constructor in scope, which the page emitters don't yet import — they still
-  emit verbatim. Every other intrinsic (including `money.abs` / `.floor()` /
-  `.ceil()`, which are methods on the value) renders.
-- **Feliz and Flutter** have no intrinsic table on the walker path yet, so a
-  page-body intrinsic still emits verbatim there.
+- **`money.min` / `money.max` / `money.round` render.**  The page shells detect
+  a `Decimal`-binding intrinsic (`usesDecimalBinding`, `_expr/js-intrinsics.ts`)
+  and pull `decimal.js` into scope, so `Money { amount.min(money("2.00")) }`
+  emits `<MoneyValue value={ Decimal.min(amount, new Decimal("2.00")) } />`.
+- **Feliz and Flutter have their own intrinsic tables** on the walker path —
+  `renderIntrinsic` is a `WalkerTarget` seam, fed by `feliz/fs-expr.ts`
+  (`"string.toUpper": recv => (recv.ToUpper())`) and `flutter/dart-expr.ts`.  A
+  page-body intrinsic no longer emits verbatim there.
+- **A nullable receiver is rejected** (#2711, `loom.intrinsic-nullable-receiver`):
+  every backend emits a bare dereference, so `nick.toUpper()` on a `string?` is
+  an error — guard it with a null-narrowing ternary
+  (`nick != null ? nick.toUpper() : ""`), which the checker treats as narrowing.
+  Arity and argument types are checked too (`loom.intrinsic-arity`,
+  `loom.intrinsic-arg-type`, `loom.intrinsic-unknown`).
 
 ### 8.2 Dependent / conditional form validation — use `state`
 

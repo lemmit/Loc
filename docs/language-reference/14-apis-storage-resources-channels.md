@@ -2,7 +2,7 @@
 
 The infrastructure surface that sits *between* the pure domain and the deployment topology: the `api` contract a subdomain exposes, the physical `storage` instances a system declares, the `resource` bindings that wire a context's data needs to that storage, and the `channel` / `channelSource` pair that realises event pub/sub. Reach for this chapter when you're deciding *what store backs which context*, *how a backend connects to it*, and *how carried events leave the process*.
 
-> **Grammar:** `Api`, `ApiStatus`, `Storage`, `StorageType`, `ConnectionSource`, `Resource`, `DataSourceKind`, `Channel`, `ChannelSource` · **Validators:** `checkDataSource` / `checkChannels` (`src/language/validators/{datasource,channel}.ts`), `loom.kind-incompatible`, `loom.channelsource-incompatible`, `loom.channel-key-missing-field` · **Docs:** [`../resources.md`](../resources.md), [`../architecture.md`](../architecture.md), [`../auth.md`](../auth.md)
+> **Grammar:** `Api`, `ApiStatus`, `Route`, `HttpMethod`, `HandlerRef`, `CommandHandler` / `QueryHandler`, `Storage`, `StorageType`, `ConnectionSource`, `Resource`, `DataSourceKind`, `IndexSpec`, `Channel`, `ChannelSource` · **Validators:** `checkDataSource` / `checkChannels` (`src/language/validators/{datasource,channel}.ts`), `api-checks.ts` / `system-checks.ts` · **Codes:** `loom.route-handler-unresolved`, `loom.duplicate-handler`, `loom.command-handler-multi-aggregate`, `loom.query-handler-saves`, `loom.handler-*`, `loom.resource-index-*`, `loom.resource-api-*`, `loom.remote-api-op-unsupported`, `loom.file-field-needs-object-storage`, `loom.channelsource-*`, `loom.channel-key-missing-field`, `loom.deployable-channel-unrelated`, `loom.channel-consumer-unwired`, `loom.relay-target-not-subscribed` · **Docs:** [`../resources.md`](../resources.md), [`../channels.md`](../channels.md), [`../architecture.md`](../architecture.md)
 
 The model is a three-link chain — *storage* is the physical instance, *resource* is the configured binding, and the context's data *need* is derived from its aggregates, never authored:
 
@@ -19,8 +19,12 @@ Everything below was generated from one scratch `system Shop` (one `Orders` cont
 ## `api`
 
 ```
-Api:       'api' name=ID 'from' source=[Subdomain:ID] ('{' ('urlStyle' ':' …)? ApiStatus* '}')?
-ApiStatus: 'httpStatus' error=ID '->' code=INT
+Api:        'api' name=ID withClause=WithClause? ('from' source=[Subdomain:ID])?
+                ('{' ('urlStyle' ':' ('literal'|'resource'))? ApiStatus* Route* '}')?
+ApiStatus:  'httpStatus' error=ID '->' code=INT
+Route:      'route' method=HttpMethod path=STRING '->' target=HandlerRef
+HttpMethod: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+HandlerRef: context=[BoundedContext:ID] '.' handler=ID
 ```
 
 An `api` is a **derived contract**, not a hand-written one — it names a *subdomain*, and the operation/query/create/destroy declarations inside that subdomain's aggregates become its HTTP surface. The block is optional; the bare `api OrdersApi from Sales` form derives everything. A backend deployable exposes a contract with `serves: OrdersApi`.

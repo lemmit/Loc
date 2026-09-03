@@ -109,7 +109,7 @@ workflow placeOrder {
 }
 ```
 
-The handler builds each repository, runs the body, `save`s in declaration order, then drains workflow-level events.
+The handler builds each repository, logs `workflow_started`, runs the body, `save`s in declaration order, drains workflow-level events, and logs `workflow_completed` ([Observability](20-observability-provenance.md)).
 
 ::: tabs backend
 == node
@@ -521,7 +521,7 @@ await db.transaction(async (tx) => {
 == dotnet
 ```csharp
 // Application/Workflows/TransferCreditHandler.cs
-await using var tx = await _db.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+await using var tx = await _uow.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
 try
 {
     if (!(command.Amount > 0)) throw new DomainException("Precondition failed: amount > 0");
@@ -623,3 +623,9 @@ public void archiveOrder(ArchiveOrderRequest request) {
 ::: end
 
 The dev `docker-compose` gains a sidecar per object-store / queue / smtp-mailer storage (MinIO for `s3`, `rabbitmq`, **Mailpit** for `smtp`); deployables with no such resource are byte-identical. See [`../resources.md`](../resources.md) for the kind × verb × backend matrix and interface selection.
+
+## Reaching a workflow from elsewhere
+
+- **From a page.** A page drives a workflow through `WorkflowForm` / an `action` body ([UI primitives](16-ui-walker-primitives.md)); a `match await` on an *aggregate instance* operation needs the page's route `:id` to identify the record — a paramless page is `loom.instance-effect-needs-route-id`.
+- **From a projection.** A `projection` is the passive read-half — state fields plus pure `on(e: Event)` folds over foreign events, `keyed by` an explicit column, with no command side. It can fold the events a workflow emits; see [Repositories, queries & projections](10-repositories-and-queries.md#projection--the-read-model).
+- **From another deployable.** Events leave the process over a `channel` (and its `channelSource` binding); a workflow reactor whose event no channel carries never fires (`loom.reactor-event-uncarried`, a warning) — [APIs, storage, resources & channels](14-apis-storage-resources-channels.md#channel--channelsource).

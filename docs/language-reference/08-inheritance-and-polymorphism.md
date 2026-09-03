@@ -8,7 +8,7 @@ All examples are generated from one scratch `system` (`Parties` TPH + `Assets` T
 
 ## `abstract aggregate` — the base
 
-`abstract aggregate <Name>` is a base that is never instantiated. It owns **no table, repository, controller, or routes** — only the shared fields the subtypes inherit. It may not declare lifecycle behaviour (`create` / `destroy` / `operation` → `loom.abstract-aggregate-behavior`), may not `contains` a part (`loom.abstract-aggregate-contains` — the base has no reader or writer for the part's table), and no `repository` may target it (`loom.abstract-repository`). A `seed` row on it is rejected too (`loom.seed-abstract-aggregate`).
+`abstract aggregate <Name>` is a base that is never instantiated. It declares **no repository of its own** and gets no write surface — only the shared fields the subtypes inherit. (It is not entirely invisible at the edges: under TPH the shared table is *named for the base* and .NET/Java/Elixir map it through a base entity/schema, and Phoenix additionally mounts read-only base routes — see the polymorphic reader below.) It may not declare lifecycle behaviour (`create` / `destroy` / `operation` → `loom.abstract-aggregate-behavior`), may not `contains` a part (`loom.abstract-aggregate-contains` — the base has no reader or writer for the part's table), and no `repository` may target it (`loom.abstract-repository`). A `seed` row on it is rejected too (`loom.seed-abstract-aggregate`).
 
 ```ddd
 abstract aggregate Party inheritanceUsing: sharedTable {
