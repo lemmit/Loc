@@ -1,5 +1,6 @@
 import { unionInstanceName } from "../../ir/stdlib/unions.js";
 import type { BinOp, ExprIR, LiteralKind, TypeIR } from "../../ir/types/loom-ir.js";
+import { walkExprDeep } from "../../ir/util/walk.js";
 import { bodyTypeOf } from "../../util/expr-body-type.js";
 import { intrinsicKey } from "../../util/intrinsics.js";
 import { escapePythonIdent, snake, upperFirst, workflowFnSnake } from "../../util/naming.js";
@@ -195,33 +196,41 @@ export function renderPyNegatedGuard(e: ExprIR, ctx: PyRenderContext = DEFAULT):
  * datetime`).
  */
 export function collectPyExprImports(e: ExprIR, into: Set<string> = new Set()): Set<string> {
-  switch (e.kind) {
+  walkExprDeep(e, (x) => addPyExprImport(x, into));
+  return into;
+}
+
+/** The per-kind side effect `collectPyExprImports` applies at each node —
+ *  factored out (no recursion of its own, wave-2 packet 2.3 / M-T6.50 class)
+ *  so `collectStmtExprImports` / `collectBlockStmtExprImports` can drive it
+ *  from `walkStmtExprsDeep`'s single traversal instead of visiting every
+ *  sub-expression twice. The switch this replaced skipped a block-body
+ *  lambda's statements, so a triggering literal/call hidden inside one never
+ *  reached its import — `walkExprDeep` closes that gap. */
+export function addPyExprImport(x: ExprIR, into: Set<string>): void {
+  switch (x.kind) {
     case "literal":
-      if (e.lit === "money") into.add("decimal");
-      if (e.lit === "now") into.add("datetime");
-      return into;
+      if (x.lit === "money") into.add("decimal");
+      if (x.lit === "now") into.add("datetime");
+      break;
     case "method-call":
       if (
-        e.member === "matches" &&
-        e.receiverType.kind === "primitive" &&
-        e.receiverType.name === "string" &&
-        e.args.length === 1
+        x.member === "matches" &&
+        x.receiverType.kind === "primitive" &&
+        x.receiverType.name === "string" &&
+        x.args.length === 1
       ) {
         into.add("re");
       }
-      if (e.receiverType.kind === "primitive") {
-        const needs = PY_INTRINSIC_IMPORTS[intrinsicKey(e.receiverType.name, e.member)];
+      if (x.receiverType.kind === "primitive") {
+        const needs = PY_INTRINSIC_IMPORTS[intrinsicKey(x.receiverType.name, x.member)];
         if (needs) into.add(needs);
       }
       // A money `sum` renders an explicit `Decimal(0)` start (fleet-bug-hunt
       // B4), so the module needs the `Decimal` import even when no money
       // LITERAL appears in the expression.
-      if (e.member === "sum" && e.isCollectionOp && sumIsMoney(e)) into.add("decimal");
-      collectPyExprImports(e.receiver, into);
-      for (const a of e.args) collectPyExprImports(a, into);
-      return into;
-    case "member":
-      return collectPyExprImports(e.receiver, into);
+      if (x.member === "sum" && x.isCollectionOp && sumIsMoney(x)) into.add("decimal");
+      break;
     case "binary":
       // A money-scaling binary lifts its `decimal` operand through
       // `Decimal(str(…))` (renderBinary / `moneyScalarCoercionSide`), so the
@@ -229,49 +238,17 @@ export function collectPyExprImports(e: ExprIR, into: Set<string> = new Set()): 
       // expression — `price * rate` off two refs would otherwise emit an
       // undefined `Decimal` (F821 / NameError).  Same mirror duty as the
       // money-`sum` arm above.
-      if (moneyScalarCoercionSide(e)) into.add("decimal");
-      collectPyExprImports(e.left, into);
-      return collectPyExprImports(e.right, into);
-    case "unary":
-      return collectPyExprImports(e.operand, into);
-    case "paren":
-      return collectPyExprImports(e.inner, into);
-    case "ternary":
-      collectPyExprImports(e.cond, into);
-      collectPyExprImports(e.then, into);
-      return collectPyExprImports(e.otherwise, into);
-    case "call":
-      if (e.callKind === "value-object-ctor") {
-        // VO ctor calls don't import here — the emitter resolves VO
-        // imports from the type graph — but `money(...)` style converts do.
-      }
-      for (const a of e.args) collectPyExprImports(a, into);
-      return into;
+      if (moneyScalarCoercionSide(x)) into.add("decimal");
+      break;
     case "convert":
-      if (e.target === "money") into.add("decimal");
-      collectPyExprImports(e.value, into);
-      return into;
+      if (x.target === "money") into.add("decimal");
+      break;
     case "duration":
       // A5 temporal — an absolute constructor renders `timedelta(...)`.
       into.add("timedelta");
-      return collectPyExprImports(e.amount, into);
-    case "lambda":
-      if (e.body) collectPyExprImports(e.body, into);
-      return into;
-    case "new":
-    case "object":
-      for (const f of e.fields) collectPyExprImports(f.value, into);
-      return into;
-    case "match":
-      for (const arm of e.arms) {
-        collectPyExprImports(arm.cond, into);
-        collectPyExprImports(arm.value, into);
-      }
-      if (e.otherwise) collectPyExprImports(e.otherwise, into);
-      return into;
+      break;
     default:
-      // this | id | ref — leaves with no sub-expressions.
-      return into;
+      break;
   }
 }
 

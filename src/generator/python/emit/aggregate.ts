@@ -22,6 +22,7 @@ import {
 } from "../../../ir/types/loom-ir.js";
 import { directParentName, partsChildrenFirst } from "../../../ir/util/containment-parent.js";
 import { operationBody, operationBodyUsesCurrentUser } from "../../../ir/util/op-gates.js";
+import { walkStmtExprsDeep } from "../../../ir/util/walk.js";
 import { lines } from "../../../util/code-builder.js";
 import { snake } from "../../../util/naming.js";
 import {
@@ -32,6 +33,7 @@ import { provColumn, provenancedFieldsOf } from "../emit/provenance.js";
 import { externHookCall, externHookModuleName } from "../extern-builder.js";
 import { emptyPyTypeImports, visitPyTypeImports } from "../py-type-imports.js";
 import {
+  addPyExprImport,
   collectPyExprImports,
   renderPyExpr,
   renderPyNegatedGuard,
@@ -319,34 +321,17 @@ export function renderPyAggregate(
   );
 }
 
-/** Recursive import collection over a statement's expressions. */
+/** Import collection over a statement's expressions.
+ *
+ *  Rides `walkStmtExprsDeep` (M-T6.50 class, wave-2 packet 2.3): the switch
+ *  it replaced had no `variant-match` arm — the same gap wave 1 found and
+ *  fixed in the near-identical, separately-named `collectStmtExprImports`
+ *  in `emit/domain-service.ts` (M-T6.50 (c)) — so an import-triggering
+ *  expression nested inside a `variant-match` arm/else body never reached
+ *  `collectPyExprImports` from an operation body (this copy is aggregate
+ *  operations; the domain-service one is workflow `on()` handlers). */
 function collectStmtExprImports(st: OperationIR["statements"][number], into: Set<string>): void {
-  switch (st.kind) {
-    case "precondition":
-    case "requires":
-      collectPyExprImports(st.expr, into);
-      return;
-    case "let":
-      collectPyExprImports(st.expr, into);
-      return;
-    case "assign":
-    case "add":
-    case "remove":
-      collectPyExprImports(st.value, into);
-      return;
-    case "emit":
-      for (const f of st.fields) collectPyExprImports(f.value, into);
-      return;
-    case "call":
-      for (const a of st.args) collectPyExprImports(a, into);
-      return;
-    case "expression":
-      collectPyExprImports(st.expr, into);
-      return;
-    case "return":
-      collectPyExprImports(st.value, into);
-      return;
-  }
+  walkStmtExprsDeep(st, (e) => addPyExprImport(e, into));
 }
 
 /** The provenanced fields on an entity shape (root only — provenance targets
