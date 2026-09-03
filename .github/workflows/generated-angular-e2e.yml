@@ -46,6 +46,7 @@ on:
       - 'designs/**'
       - 'api/**'
       - 'docker/**'
+      - 'angular/**'
       - 'stacks/**'
       - 'test/e2e/generated-angular-e2e.test.ts'
       - 'package.json'
