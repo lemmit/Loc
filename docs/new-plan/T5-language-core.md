@@ -140,3 +140,43 @@ Same model, same intent, opposite data — decided by where in the clause list t
 **Verification when it lands.** A negative parse/validate test per admissible-but-illegal position; mutation-proved by deleting the gate and watching the fixture above go quiet again. Add the legal-position witness to the projection fixture so the *working* spelling is pinned too.
 
 Sources: [generator-code-review-2026-08-24](../audits/generator-code-review-2026-08-24.md) §Follow-up register (2026-08-30) row 13. Relates to M-T4.2 (query-time projections), `named-filter-bypass.md` §11.
+
+## M-T5.26 — The guarded-optional form the validator itself recommends compiles on one of five backends — `open` · **M** · P1 ⚠ verify-first
+
+Found 2026-09-03 by the language-docs audit ([F2](../audits/2026-09-03-language-docs-audit-findings.md), P0). `src/language/validators/types.ts:281` sanctions `x != null ? x.trim() : …` as *the fix* for `loom.intrinsic-nullable-receiver` — and then the guarded call is emitted verbatim rather than through the host idiom. From `note2: string?`, `derived safeNote = note2 != null ? note2.toUpper() : "none"` emits `this._note2.toUpper()` (node), `this.note2.toUpper()` (java), `self._note2.to_upper()` (python), `record.note2.to_upper()` (elixir) — none compile; .NET emits culture-sensitive `ToUpper()` where an unguarded receiver gets `ToUpperInvariant()`. The intrinsic arms of `src/ir/lower/lower-expr.ts` never unwrap the optional receiver the way `checkIntrinsicCalls` does.
+
+**The fix:** unwrap the guarded receiver in the intrinsic lowering arms so the recommended form lowers to each host's idiom, and settle the .NET `ToUpper`/`ToUpperInvariant` inconsistency in the same PR.
+
+**Verification when it lands.** The validator's own recommended form compiles on all five backends; the new lowering arm mutation-proved by file-copy revert.
+
+Sources: [language-docs-audit-2026-09-03](../audits/2026-09-03-language-docs-audit-findings.md) F2, [wave plan](../audits/2026-09-03-language-docs-audit-findings.waves.md) packet **W1.1** (`src/ir/lower/lower-expr.ts`, `src/generator/dotnet/render-expr.ts`, `test/ir/**`). Shares `src/ir/lower/` with M-T5.27 — different files, do not let either widen.
+
+## M-T5.27 — Two valid inputs throw instead of diagnosing: a bare abstract `seed` and a ui-e2e `expect` over a create result — `open` · **M** · P1 ⚠ verify-first
+
+Found 2026-09-03 by the language-docs audit ([F5](../audits/2026-09-03-language-docs-audit-findings.md), [F6](../audits/2026-09-03-language-docs-audit-findings.md), both P0). `seed Party { name: "x" }` on an abstract base dies with `TypeError: Cannot read properties of undefined (reading 'fields')` in `lowerSeed` (`src/ir/lower/lower.ts`) *before* `loom.seed-abstract-aggregate` can fire — the same model as `seed default { Party { … } }` reports the diagnostic correctly. And `expect(<create-result>.<field>).toHaveText("…")` inside `test e2e … against <frontend>` validates clean, then throws `expect requires a matcher` from `renderExpectStmt` (`src/system/expect-stmt.ts:21`, via `src/system/ui-e2e-render.ts:217`); binding the read with `getById` first works.
+
+**The fix:** F5 is ordering — the abstract-seed gate must run before the lowerer dereferences `fields`. F6 is a fork with two acceptable ends: the matcher survives the ui-e2e path, or a `loom.*` code rejects the shape. An internal throw is neither.
+
+**Verification when it lands.** Both inputs produce a diagnostic (or output) rather than a stack trace; each gate mutation-proved by file-copy revert.
+
+Sources: [language-docs-audit-2026-09-03](../audits/2026-09-03-language-docs-audit-findings.md) F5/F6, [wave plan](../audits/2026-09-03-language-docs-audit-findings.waves.md) packet **W1.4** (`src/ir/lower/lower.ts`, `src/system/expect-stmt.ts`, `src/system/ui-e2e-render.ts`).
+
+## M-T5.28 — `variant-match` off a page crashes all five backends; `for`/`if let` off a workflow emits `this.<unknown>()` — neither is gated — `open` · **M** · P1 ⚠ verify-first, carries a design fork
+
+Found 2026-09-03 by the language-docs audit ([F1](../audits/2026-09-03-language-docs-audit-findings.md), [F4](../audits/2026-09-03-language-docs-audit-findings.md), both P0). A `match` over a union in a domain body reports `0 error(s)` and then throws `variant-match statement is frontend-only; it must not reach the <X> backend` from `src/generator/_stmt/target.ts:160` on node, dotnet, java, python and elixir alike — no IR check covers `variant-match` outside a page (`src/ir/validate/checks/store-checks.ts` handles only the page case), and non-exhaustive arms are unchecked too. Symmetrically, `src/ir/lower/lower-stmt.ts` has no arm for `ForStmt`/`IfLetStmt` outside a workflow and no validator rejects them: `operation touch() { for n in notes { owner := n } }` reports `0 error(s), 0 warning(s)` and emits `this.<unknown>();`.
+
+**Resolve the fork before coding.** Each shape can be *gated* or *lowered*. The default is **gate** — both are frontend/workflow-only by design per the source comments, and a gate is S where lowering is L. If the design pass concludes lowering is right, that is a `language-feature-developer` mission: split it out and say so rather than widening this one. Mints codes in `src/diagnostics/messages.ts` — the only Wave-3 packet that may.
+
+**Verification when it lands.** Both shapes raise a `loom.*` code with the offending span; each gate mutation-proved by file-copy revert, reading *which* assertion fails.
+
+Sources: [language-docs-audit-2026-09-03](../audits/2026-09-03-language-docs-audit-findings.md) F1/F4 + "Cross-cutting reading" §2, [wave plan](../audits/2026-09-03-language-docs-audit-findings.waves.md) packet **W3.1**.
+
+## M-T5.29 — Two `system` blocks with no top-level members pass validation — `open` · **S** · P2 ⚠ verify-first
+
+Found 2026-09-03 by the language-docs audit ([F36](../audits/2026-09-03-language-docs-audit-findings.md), P3). `composition.ts:120-137` only fires when a top-level member must fold into a system, so a source declaring two member-less `system` blocks validates clean; `generate system` then writes only the root artefacts. There is no direct "exactly one `system`" gate.
+
+**The fix:** a direct arity check in `src/language/validators/composition.ts`, independent of whether anything needs folding.
+
+**Verification when it lands.** A negative validator test for the two-system source; mutation-proved by file-copy revert of the check.
+
+Sources: [language-docs-audit-2026-09-03](../audits/2026-09-03-language-docs-audit-findings.md) F36, [wave plan](../audits/2026-09-03-language-docs-audit-findings.waves.md) packet **W3.2**. Relates to M-T5.13 (the zero-system synthesis decision — the other end of the same arity question).

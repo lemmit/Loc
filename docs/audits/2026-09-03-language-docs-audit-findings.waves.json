@@ -3,6 +3,7 @@
   "plan": "docs/audits/2026-09-03-language-docs-audit-findings.waves.md",
   "drawnAgainst": "651388d",
   "drawnOn": "2026-09-03",
+  "missions": "Every packet carries its minted mission id (see each packet's `mission`); docs/new-plan/ owns status from here, and is dispositioned in docs/new-plan/coverage.md.",
   "protocol": {
     "reVerifyFirst": "Every packet re-checks its findings on fresh main before writing code; a finding already fixed closes the row with a note and no PR.",
     "claim": "Draft PR naming the packet id before implementing, listing the findings claimed and the file trees touched.",
@@ -20,6 +21,8 @@
         {
           "id": "W1.1",
           "name": "optional-receiver-lowering",
+          "mission": "M-T5.26",
+          "missionTrack": "docs/new-plan/T5-language-core.md",
           "findings": ["F2"],
           "size": "M",
           "confidence": "proven",
@@ -32,6 +35,8 @@
         {
           "id": "W1.2",
           "name": "react-flutter-page-shell",
+          "mission": "M-T1.28",
+          "missionTrack": "docs/new-plan/T1-ui-frontend.md",
           "findings": ["F3", "F9"],
           "size": "M",
           "confidence": "proven",
@@ -44,6 +49,8 @@
         {
           "id": "W1.3",
           "name": "python-client-elixir-fn",
+          "mission": "M-T6.53",
+          "missionTrack": "docs/new-plan/T6-backend-parity.md",
           "findings": ["F7", "F8"],
           "size": "S",
           "confidence": "proven",
@@ -56,6 +63,8 @@
         {
           "id": "W1.4",
           "name": "lowerer-and-system-crashes",
+          "mission": "M-T5.27",
+          "missionTrack": "docs/new-plan/T5-language-core.md",
           "findings": ["F5", "F6"],
           "size": "M",
           "confidence": "proven",
@@ -76,6 +85,8 @@
         {
           "id": "W2.1",
           "name": "walkable-match-body",
+          "mission": "M-T1.29",
+          "missionTrack": "docs/new-plan/T1-ui-frontend.md",
           "findings": ["F10"],
           "size": "M",
           "confidence": "proven",
@@ -88,6 +99,8 @@
         {
           "id": "W2.2",
           "name": "element-position-walk",
+          "mission": "M-T1.30",
+          "missionTrack": "docs/new-plan/T1-ui-frontend.md",
           "findings": ["F12"],
           "size": "S",
           "confidence": "proven",
@@ -100,6 +113,8 @@
         {
           "id": "W2.3",
           "name": "walker-honest-gates",
+          "mission": "M-T1.31",
+          "missionTrack": "docs/new-plan/T1-ui-frontend.md",
           "findings": ["F11", "F17"],
           "size": "M",
           "confidence": "proven",
@@ -119,6 +134,8 @@
         {
           "id": "W3.1",
           "name": "statement-scope-gates",
+          "mission": "M-T5.28",
+          "missionTrack": "docs/new-plan/T5-language-core.md",
           "findings": ["F1", "F4"],
           "size": "M",
           "confidence": "proven",
@@ -132,6 +149,8 @@
         {
           "id": "W3.2",
           "name": "single-system-gate",
+          "mission": "M-T5.29",
+          "missionTrack": "docs/new-plan/T5-language-core.md",
           "findings": ["F36"],
           "size": "S",
           "confidence": "proven",
@@ -152,6 +171,8 @@
         {
           "id": "W4.1",
           "name": "catalog-gate-extension",
+          "mission": "M-T9.44",
+          "missionTrack": "docs/new-plan/T9-toolchain-health.md",
           "findings": ["F25", "F26", "F30"],
           "size": "M",
           "confidence": "proven",
@@ -164,6 +185,8 @@
         {
           "id": "W4.2",
           "name": "stale-message-text",
+          "mission": "M-T9.45",
+          "missionTrack": "docs/new-plan/T9-toolchain-health.md",
           "findings": ["F27", "F28", "F29", "F31", "F32", "F33", "F34", "F35"],
           "size": "M",
           "confidence": "proven",
@@ -185,6 +208,8 @@
         {
           "id": "W5.1",
           "name": "java-filter-and-invariant",
+          "mission": "M-T6.54",
+          "missionTrack": "docs/new-plan/T6-backend-parity.md",
           "findings": ["F18", "F19"],
           "size": "M",
           "confidence": "proven",
@@ -197,6 +222,8 @@
         {
           "id": "W5.2",
           "name": "elixir-enforcement",
+          "mission": "M-T6.55",
+          "missionTrack": "docs/new-plan/T6-backend-parity.md",
           "findings": ["F14", "F15", "F24"],
           "size": "M",
           "confidence": "proven",
@@ -209,6 +236,8 @@
         {
           "id": "W5.3",
           "name": "elixir-wire-and-heex",
+          "mission": "M-T6.56",
+          "missionTrack": "docs/new-plan/T6-backend-parity.md",
           "findings": ["F16", "F20", "F22", "F23"],
           "size": "M",
           "confidence": "proven",
@@ -221,6 +250,8 @@
         {
           "id": "W5.4",
           "name": "envelope-parity",
+          "mission": "M-T6.57",
+          "missionTrack": "docs/new-plan/T6-backend-parity.md",
           "findings": ["F21"],
           "size": "S",
           "confidence": "proven",
@@ -241,6 +272,8 @@
         {
           "id": "W6.1",
           "name": "workflow-handle-entrypoints",
+          "mission": "M-T6.58",
+          "missionTrack": "docs/new-plan/T6-backend-parity.md",
           "findings": ["F13"],
           "size": "L",
           "confidence": "proven",
@@ -261,6 +294,8 @@
         {
           "id": "W7.1",
           "name": "per-feature-doc-drift",
+          "mission": "M-T9.46",
+          "missionTrack": "docs/new-plan/T9-toolchain-health.md",
           "findings": ["F37", "F38", "F39", "F40", "F41", "F42", "F43", "F44", "F45", "F46"],
           "size": "M",
           "confidence": "proven",
@@ -275,6 +310,8 @@
         {
           "id": "W7.2",
           "name": "docs-heading-slugger",
+          "mission": "M-T9.47",
+          "missionTrack": "docs/new-plan/T9-toolchain-health.md",
           "findings": ["F47"],
           "size": "S",
           "confidence": "proven",

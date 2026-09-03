@@ -42,18 +42,18 @@ The unsupported-diagnostic register (`src/diagnostics/unsupported-register.ts`) 
 
 | Track | Theme | Live | Archived | Weight |
 |---|---|---|---|---|
-| [T1 — UI & frontend ceiling](T1-ui-frontend.md) | Data-heavy tables, upload, forms tail, state/async, i18n, a11y, extern parity, navigation, the numeric/money frontend seams | 22 | 5 | **P1 — highest product ROI** |
+| [T1 — UI & frontend ceiling](T1-ui-frontend.md) | Data-heavy tables, upload, forms tail, state/async, i18n, a11y, extern parity, navigation, the numeric/money frontend seams | 26 | 5 | **P1 — highest product ROI** |
 | [T2 — Data & schema evolution](T2-data-evolution.md) | Rename intent, data migrations, baseline safety, seeding/uniqueness tails, storage config tail | 8 | 6 | **P1 — the "silent data loss" class** |
 | [T3 — Security, tenancy & governance](T3-security-governance.md) | `organizationContext`, OIDC depth, sensitivity, versioned-on, the read surface, lifecycle-gate goldens | 12 | 5 | **P1 — secure-by-default** |
 | [T4 — Eventing, workflow & temporal](T4-eventing-temporal.md) | Projections, channels/brokers, outbox completion, saga hardening, realtime contract, email/storage batteries — **scheduling is done** (`timerSource` `every:`/`cron:` on all five backends, M-T4.1 archived 2026-09-02; don't re-propose "temporal" features) | 8 | 4 | P2 |
-| [T5 — Language core & type system](T5-language-core.md) | Exception-less A4–A6, criterion/retrieval tails, payload P3/P5, stdlib tail, inheritance I4, lifecycle 3–5, surface hygiene, numeric RS-rulings | 19 | 6 | P2 |
-| [T6 — Backend parity & generated-code quality](T6-backend-parity.md) | Phoenix gaps register, adapter subsets, numeric ingress, saga/workflow emission holes, ES seeding | 14 | 38 | P1/P2 (small missions, wrong failure modes today) |
+| [T5 — Language core & type system](T5-language-core.md) | Exception-less A4–A6, criterion/retrieval tails, payload P3/P5, stdlib tail, inheritance I4, lifecycle 3–5, surface hygiene, numeric RS-rulings | 23 | 6 | P2 |
+| [T6 — Backend parity & generated-code quality](T6-backend-parity.md) | Phoenix gaps register, adapter subsets, numeric ingress, saga/workflow emission holes, ES seeding | 20 | 38 | P1/P2 (small missions, wrong failure modes today) |
 | [T7 — Deployment & operations](T7-deployment-ops.md) | k8s hardening, proxy/networking, terraform, PaaS deploy | 8 | 1 | P2 |
 | [T8 — DX, tooling & the AI platform](T8-dx-tooling-ai.md) | Debugger frontier, sourcemaps, LSP tail, playground chat/agent loop, builder, packaging split, mutation testing | 13 | 2 | P2/P3 |
-| [T9 — Toolchain & process health](T9-toolchain-health.md) | Per-PR boot gates, test-coverage phases, the numeric wire-codec seam, `RouteTarget`, doc hygiene, the recurring sweeps | 24 | 9 | **P1 — prerequisite to trusting the matrix** |
+| [T9 — Toolchain & process health](T9-toolchain-health.md) | Per-PR boot gates, test-coverage phases, the numeric wire-codec seam, `RouteTarget`, doc hygiene, the recurring sweeps | 28 | 9 | **P1 — prerequisite to trusting the matrix** |
 | [T10 — New targets](T10-new-targets.md) | Go/PHP/NestJS/Blazor/HTMX/Next.js studies **retired to design-record**; **matrix frozen — decided 2026-07-17, no more targets** | 7 (all `frozen`) | 0 | — (closed) |
 
-Live = every heading that is not closed (`open` 51 · `partial` 63 · `in-flight` 4 · `blocked` 6 · `plan`/`deferred`/`recurring` 4 · `frozen` 7 — 135 in all, 2026-09-02 count; regenerate with `grep -c '^## M-T' docs/new-plan/T*.md`).
+Live = every heading that is not closed (`open` 69 · `partial` 63 · `in-flight` 4 · `blocked` 6 · `plan`/`deferred`/`recurring` 4 · `frozen` 7 — 153 in all, 2026-09-03 count; regenerate with `grep -c '^## M-T' docs/new-plan/T*.md`). *The 2026-09-03 jump is the [language-docs audit](../audits/2026-09-03-language-docs-audit-findings.md): 18 missions minted from its 47 findings — M-T5.26–M-T5.29, M-T1.28–M-T1.31, M-T6.53–M-T6.58, M-T9.44–M-T9.47, one per packet of its [wave plan](../audits/2026-09-03-language-docs-audit-findings.waves.md).*
 
 ## Sequencing — the load-bearing dependencies
 

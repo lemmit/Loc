@@ -382,3 +382,45 @@ LiveView needs the same `handle_event` + form-binding half `renderModal` owns).
 Sources: ledger `G2646-open-heex-in-component-degradation`
 ([targets-completeness-2026-08-30](../audits/targets-completeness-2026-08-30.md)),
 PR #2704. Builds directly on #2646.
+
+## M-T1.28 — `toast()` emits an undefined symbol on React, and a `derived` reading a store field emits an unbound identifier on React and Flutter — `open` · **M** · P1 ⚠ verify-first
+
+Found 2026-09-03 by the language-docs audit ([F3](../audits/2026-09-03-language-docs-audit-findings.md), [F9](../audits/2026-09-03-language-docs-audit-findings.md), both P0). An action body or `Action { …, then: toast("x") }` renders `toast("Draft saved");` into the page or component TSX with no import and no definition anywhere in the generated project — Svelte emits `src/lib/toast.svelte.ts` and elixir maps to `put_flash`, but `src/generator/react/**` has no handling, so the generated app does not type-check. Separately, a `derived` that reads a store field drops the receiver: `store Cart persist: local { state { count: int = 0 } }` + `derived count: int = Cart.count` emits `const count = useMemo(() => count, []);` (`src/generator/react/walker/page-shell.ts:248`, component twin at `:979`), and renaming the derived proves it is a drop rather than shadowing (`derived itemCount = Cart.count` → `useMemo(() => count, [])` with `count` undeclared). Flutter interpolates the same bare identifier. `loom.unresolved-page-ref` covers rendered slots only, not `derived` initialisers.
+
+**The fix:** give React a real toast surface, mirroring Svelte's `src/lib/toast.svelte.ts` as the reference implementation; resolve the store receiver in a `derived` initialiser and hoist the subscription (React and Flutter).
+
+**Verification when it lands.** The generated web project type-checks with a toast action and a store-reading `derived`; per-target walker tests mutation-proved by file-copy revert. Prefer a build-matrix example carrying both shapes, so the gate reaches them forever.
+
+Sources: [language-docs-audit-2026-09-03](../audits/2026-09-03-language-docs-audit-findings.md) F3/F9, [wave plan](../audits/2026-09-03-language-docs-audit-findings.waves.md) packet **W1.2** (`src/generator/react/**`, `src/generator/flutter/**`).
+
+## M-T1.29 — A page whose `body:` is a bare `match` is dropped entirely on React and Svelte, while Vue renders it — `open` · **M** · P1 ⚠ verify-first
+
+Found 2026-09-03 by the language-docs audit ([F10](../audits/2026-09-03-language-docs-audit-findings.md), P1) — independently by three auditors, and `page-metamodel.md` §7/§12 documented `body: match` as the wizard pattern. `isWalkableLayoutBody` (`src/generator/_walker/walker-core.ts:367`) admits only `call` and `ternary`, though the walker has full `match` arms: no file, no route, no diagnostic. Wrapping the same body in `Stack { match { … } }` emits it, and **Vue emits the bare form correctly** — one `.ddd`, three different frontend outcomes.
+
+**The fix:** the predicate, not new rendering — admit `variant-match` in `isWalkableLayoutBody`. Vue is the control: assert its output is unchanged.
+
+**Verification when it lands.** Mutation-proved on React *and* Svelte (the page vanishes again when the predicate is reverted by file copy), with a Vue byte-identity assertion beside it.
+
+Sources: [language-docs-audit-2026-09-03](../audits/2026-09-03-language-docs-audit-findings.md) F10 + "Cross-cutting reading" §1, [wave plan](../audits/2026-09-03-language-docs-audit-findings.waves.md) packet **W2.1**. Adopts the walker invariant proposed by whichever of M-T1.29/M-T1.30/M-T1.31 lands first (see M-T1.31).
+
+## M-T1.30 — A method call in a `KeyValueRow` value slot silently degrades to a comment — `open` · **S** · P1 ⚠ verify-first
+
+Found 2026-09-03 by the language-docs audit ([F12](../audits/2026-09-03-language-docs-audit-findings.md), P1). `emitKeyValueRow` (`src/generator/_walker/primitives/text.ts:299-338`) routes the value through element-position `walk`, which has no method-call arm: `KeyValueRow { "Note", note.toUpper() }` emits `{/* unsupported expr: method-call */}` — the value vanishes — while `Text { note.toUpper() }` emits `note.toUpperCase()`. Same expression, same page, two answers.
+
+**The fix:** give element-position `walk` the method-call arm it lacks, so a `KeyValueRow` value behaves like a `Text` value; audit the other primitives routing through the same path while in the file.
+
+**Verification when it lands.** A walker test per affected primitive asserting the rendered call (and the *absence* of the `unsupported expr` comment); mutation-proved by file-copy revert.
+
+Sources: [language-docs-audit-2026-09-03](../audits/2026-09-03-language-docs-audit-findings.md) F12 + "Cross-cutting reading" §1, [wave plan](../audits/2026-09-03-language-docs-audit-findings.waves.md) packet **W2.2**. Adopts the walker invariant from M-T1.31.
+
+## M-T1.31 — `DestroyForm` over a record binding and Flutter's missing extern hatch both vanish with no diagnostic — `open` · **M** · P1 ⚠ verify-first, carries the walker invariant
+
+Found 2026-09-03 by the language-docs audit ([F11](../audits/2026-09-03-language-docs-audit-findings.md), [F17](../audits/2026-09-03-language-docs-audit-findings.md), both P1). `DestroyForm { of: <record> }` resolves `of:` through `ctx.aggregatesByName` (`src/generator/_walker/primitives/forms.ts:137`), so a `QueryView` binding renders `DestroyForm(of: p): aggregate not found` on every target and the delete button silently disappears. Flutter renders `const SizedBox.shrink() /* unknown layout component: X */` for an `extern` component where the other frontends have a hatch — again with no validator.
+
+**The fix:** these are the two that should stay *refusals* rather than become features — both raise a `loom.*` code naming the legal spelling. Mints codes in `src/diagnostics/messages.ts`; it is the only packet in its wave permitted to touch that file, so sequence against M-T1.29/M-T1.30 rather than stacking edits there.
+
+**Carries the wave's shared deliverable:** the invariant that *the walker must never decline to render a declared element without a diagnostic* — a `_walker` conformance test enumerating the dispatch predicates is the obvious home. Whichever of the three walker missions finishes first proposes where it lives; the other two adopt it. That assertion, not the three individual fixes, is what stops a fifth instance ([F10](../audits/2026-09-03-language-docs-audit-findings.md), F11, F12, F17 are one defect in four costumes).
+
+**Verification when it lands.** A negative validator test per shape; each gate mutation-proved by file-copy revert, reading *which* assertion fails.
+
+Sources: [language-docs-audit-2026-09-03](../audits/2026-09-03-language-docs-audit-findings.md) F11/F17 + "Cross-cutting reading" §1, [wave plan](../audits/2026-09-03-language-docs-audit-findings.waves.md) packet **W2.3**. Relates to M-T1.20 (the frontend per-target refusal register — a new code lands a row there).
