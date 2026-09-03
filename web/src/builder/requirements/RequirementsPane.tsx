@@ -306,7 +306,8 @@ export default function RequirementsPane({ ctx }: { ctx: LayoutCtx }): JSX.Eleme
   // spliced candidate is re-parsed by the harness before it commits — a reprint
   // that would leave the file unparseable is refused, not written.
   const apply = (originalNode: AstNode, newText: string): void => {
-    harness.applyOrRefuse(spliceNodeIfParses(ctx.getSource(), originalNode, newText));
+    const what = `${originalNode.$type} ${(originalNode as { name?: string }).name ?? ""}`.trim();
+    harness.on(what).applyOrRefuse(spliceNodeIfParses(ctx.getSource(), originalNode, newText));
   };
 
   /** Append a fresh top-level block to the end of the source.  We don't
@@ -370,7 +371,7 @@ export default function RequirementsPane({ ctx }: { ctx: LayoutCtx }): JSX.Eleme
     <Group px="xs" py={2} bg="dark.7" gap="xs" style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}>
       <UndoRedo handleRef={ctx.editorHandleRef} testidPrefix="requirements" />
     </Group>
-    <RefusalLine refused={refusal.refused} />
+    <RefusalLine refusal={refusal} />
     <Box
       style={{
         flex: 1,

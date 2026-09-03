@@ -302,7 +302,7 @@ export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     const page = collectBodies(fresh.ast).find((p) => p.name === current.name);
     if (!page) return;
     const emitted = emitBody(fromCraft(nodes));
-    harness.applyOrRefuse(spliceNodeIfParses(source, page.expr, emitted));
+    harness.on(`page ${current.name} body`).applyOrRefuse(spliceNodeIfParses(source, page.expr, emitted));
   };
 
   return (
@@ -340,7 +340,7 @@ export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
           </>
         )}
       </Group>
-      <RefusalLine refused={refusal.refused} />
+      <RefusalLine refusal={refusal} />
       <Box style={{ flex: 1, minHeight: 0 }}>
         <PageBuilder
           // `mountKey` (page : Apply-rev : annotation-set) — remounting the
