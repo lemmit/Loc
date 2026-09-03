@@ -23,6 +23,7 @@
 //     client never learns it existed.  Nothing to render, by construction.
 
 import type { ExprIR } from "../../../ir/types/loom-ir.js";
+import { giveUp } from "../give-up.js";
 import { namedArgValue, positionalArgs } from "../shared/args.js";
 import type { WalkContext } from "../walker-core.js";
 import { emitExpr, testidAttr } from "../walker-core.js";
@@ -38,7 +39,7 @@ export function emitTimeline(
   if (override != null) return override;
 
   const entriesArg = namedArgValue(call, "of") ?? positionalArgs(call)[0];
-  if (!entriesArg) return ctx.target.renderComment("Timeline: missing entries");
+  if (!entriesArg) return giveUp(ctx.target, "Timeline: missing entries");
   const entries = guardedList(emitExpr(entriesArg, ctx));
   const testid = testidAttr(call, ctx);
 
@@ -52,7 +53,7 @@ export function emitTimeline(
     case "angular":
       return angularTimeline(entries, testid);
     default:
-      return ctx.target.renderComment(`Timeline: not yet supported on ${ctx.target.framework}`);
+      return giveUp(ctx.target, `Timeline: not yet supported on ${ctx.target.framework}`);
   }
 }
 

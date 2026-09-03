@@ -274,6 +274,6 @@ describe("QueryView macro", () => {
       }`),
     );
     const tsx = files.get("web/src/pages/orders_list.tsx")!;
-    expect(tsx).toMatch(/\{\/\* QueryView: missing 'of:' query expression \*\/\}/);
+    expect(tsx).toMatch(/\{\/\* loom:unrendered QueryView: missing 'of:' query expression \*\/\}/);
   });
 });

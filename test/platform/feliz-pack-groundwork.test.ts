@@ -28,7 +28,7 @@ import { felizPack } from "../../src/generator/feliz/pack.js";
 // dotnet SDK.
 // ---------------------------------------------------------------------------
 
-const MISSING = /^\(\* feliz pack: no renderer/;
+const MISSING = /^\(\* loom:unrendered feliz pack: no renderer/;
 
 describe("feliz pack format groundwork", () => {
   it("feliz required set is the JSX-family display + input surface minus form-of (forms render inline)", () => {

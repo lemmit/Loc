@@ -20,6 +20,7 @@
 
 import type { ExprIR } from "../../../ir/types/loom-ir.js";
 import { PROVENANCE_LINEAGE_FIELD } from "../../_payload/provenanced-wire.js";
+import { giveUp } from "../give-up.js";
 import { namedArgValue, positionalArgs, stringNamed } from "../shared/args.js";
 import type { WalkContext } from "../walker-core.js";
 import { emitExpr, testidAttr } from "../walker-core.js";
@@ -36,7 +37,7 @@ export function emitProvenanceInfo(
   const recordArg = namedArgValue(call, "of") ?? positionalArgs(call)[0];
   const field = stringNamed(call, "field");
   if (!recordArg || !field) {
-    return ctx.target.renderComment("ProvenanceInfo: missing record or field");
+    return giveUp(ctx.target, "ProvenanceInfo: missing record or field");
   }
   // `<record>.<field>.lineage` — the lineage half of the `Provenanced<T>` wire
   // carrier the response schema now carries (M-T6.12); the value half is
@@ -58,7 +59,8 @@ export function emitProvenanceInfo(
     default:
       // Schema not wired on this frontend yet — comment out so the scaffolded
       // provenanced field still compiles (the value renders without the "?").
-      return ctx.target.renderComment(
+      return giveUp(
+        ctx.target,
         `ProvenanceInfo: provenance disclosure not yet supported on ${ctx.target.framework} (value renders without the "?")`,
       );
   }

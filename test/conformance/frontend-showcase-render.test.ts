@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
+import { GIVE_UP_SENTINEL } from "../../src/generator/_walker/give-up.js";
 import { analyzeFlutterParity } from "../../src/generator/flutter/parity.js";
 import { repoRoot } from "../_helpers/examples.js";
 import { generateSystemFiles } from "../_helpers/generate.js";
@@ -86,76 +87,21 @@ const UIS: Record<string, { bind: string; selfBind: string; api: string }> = {
   Admin: { bind: "ui: Admin", selfBind: "ui: Admin", api: "honoApi" },
 };
 
-/** Silent-degradation markers the shared/per-frontend walkers emit when they
- *  cannot render a construct (the fail-fast path THROWS instead).  The Feliz
- *  procedural pack emits `(* feliz pack: no renderer for "X" *)` — a compile-clean
- *  F# block comment — when its `RENDERERS` table lacks a primitive; catching that
- *  substring here is what makes a silently-dropped Feliz primitive fail this
- *  matrix (the load-time `REQUIRED_PRIMITIVES` gate never runs for the procedural
- *  pack — see `feliz-pack-groundwork.test.ts` for its structural sibling).
+/** The ONE marker every walker give-up carries (`_walker/give-up.ts`).
  *
- *  `\w+ pack: no renderer` also covers Flutter's identical fallback
- *  (`// flutter pack: no renderer for "X"`, `flutter/pack.ts`). */
-const FALLBACK_MARKERS = [
-  "not supported",
-  "unsupported expr",
-  "unknown layout component",
-  "pack: no renderer",
-];
-
-/**
- * What keeps `FALLBACK_MARKERS` HONEST — every give-up wording it is meant to
- * read, pinned to the emitter that writes it.
+ *  This used to be a hand-kept list of four give-up WORDINGS, and it saw one of
+ *  the thirty-six the walkers actually emit.  `Timeline: not yet supported on …`
+ *  does not contain the substring `"not supported"` it looked for; the `Icon`
+ *  fallback is built from a variable, so it has no static wording to list at
+ *  all; the rest were simply never added.  Every give-up now routes through
+ *  `giveUp(...)`, which prefixes the sentinel, so this matches on STRUCTURE
+ *  rather than on a copy of an emitter's prose — the failure mode the old list's
+ *  own header warned about (#2642 reworded an arm and the list stopped matching
+ *  in silence).
  *
- * A marker is a copy of an emitter's wording living in a second file, so the
- * dangerous failure is not "the substring is wrong" but "the emitter was
- * reworded and the list silently stopped matching" — which reads as a green
- * gate over output it can no longer recognise.  #2642 hit exactly this: the
- * `not supported by the React walker` arm was reworded to drop React's name.
- *
- * Each entry names the emitter source and the EXACT template literal; the test
- * below asserts BOTH directions — the template is still in that file, and some
- * `FALLBACK_MARKERS` entry still matches what it renders to.
- *
- * The Phoenix entry is why the HEEx row needs no scanner of its own: LiveView's
- * parallel engine has exactly ONE give-up arm, and its wording is a superset of
- * the shared `"not supported"` marker.  (Deliberately NOT pinned: HEEx's benign
- * `<%!-- <op> has no parameters --%>` note, which is information rather than
- * degradation, and the `For:` / `Chart:` shape guards, which no valid showcase
- * body can reach — a pattern nothing in this matrix can trip proves nothing.)
- */
-const MARKER_ORIGINS: ReadonlyArray<{ label: string; file: string; template: string }> = [
-  {
-    label: "shared walker: registered primitive with no renderer on this target",
-    file: "src/generator/_walker/walker-core.ts",
-    template: "`${call.name}: not supported by the walker yet`",
-  },
-  {
-    label: "shared walker: name resolves to no primitive or component",
-    file: "src/generator/_walker/walker-core.ts",
-    template: "`unknown layout component: ${call.name}`",
-  },
-  {
-    label: "shared walker: expression kind with no frontend rendering",
-    file: "src/generator/_walker/walker-core.ts",
-    template: "`unsupported expr: ${expr.kind}`",
-  },
-  {
-    label: "HEEx engine: registered primitive with no `heex` renderer",
-    file: "src/generator/elixir/heex-walker-core.ts",
-    template: "`<%!-- ${expr.name}: not supported by Phoenix LiveView target --%>`",
-  },
-  {
-    label: "Feliz pack: primitive missing from the RENDERERS table",
-    file: "src/generator/feliz/pack.ts",
-    template: '`(* feliz pack: no renderer for "${name}" *)`',
-  },
-  {
-    label: "Flutter pack: primitive missing from the RENDERERS table",
-    file: "src/generator/flutter/pack.ts",
-    template: '`// flutter pack: no renderer for "${name}"`',
-  },
-];
+ *  `walker-give-up-routing.test.ts` is what keeps this honest: it fails if any
+ *  walker file emits a degradation without going through the helper. */
+const FALLBACK_MARKERS = [GIVE_UP_SENTINEL];
 
 /** `flutterTarget.renderComment` — the shape EVERY Flutter walker fallback
  *  takes, and the reason `analyzeFlutterParity` can be trusted as this row's
@@ -235,8 +181,8 @@ const FRONTENDS: ReadonlyArray<Frontend> = [
     // project would therefore report a permanent false gap.  Scope to what the
     // HEEx walker + design pack actually render.
     //
-    // No `extraScan`: the parallel HEEx engine's single give-up arm already
-    // spells a `FALLBACK_MARKERS` substring, and `MARKER_ORIGINS` pins it there.
+    // No `extraScan`: the parallel HEEx engine's single give-up arm carries the
+    // same sentinel the shared walker's do (`heex-walker-core.ts`).
     rendered: /_live\.ex$|\.heex$|_web\/components\//,
   },
 ];
@@ -291,39 +237,34 @@ async function renderCell(frontend: Frontend, ui: string): Promise<string | null
 
 describe("frontend showcase render matrix", () => {
   // -------------------------------------------------------------------------
-  // THE GATE ON THE GATE — can `FALLBACK_MARKERS` still read the emitters?
+  // THE GATE ON THE GATE — can the scan still fire?
   //
-  // Every marker is a copy of an emitter's wording kept in this file, so the
-  // dangerous failure is "the emitter was reworded" (the scan keeps passing
-  // over output it can no longer read), not "the substring is wrong".  Two
-  // assertions per origin, one per direction:
+  // The old version of this test pinned six copied WORDINGS to the emitters
+  // that wrote them, because the marker list was prose duplicated in this file
+  // and its dangerous failure was a silent rewording (#2642).  The sentinel
+  // removes that class: there is one marker, it is imported from the emitter
+  // side, and `walker-give-up-routing.test.ts` fails if a give-up skips it.
   //
-  //   1. the template is still IN that file        (the emitter still says it)
-  //   2. some marker matches what it RENDERS to    (the list still reads it)
-  //
-  // (2) substitutes every `${…}` with a concrete word, which is what the
-  // `pack: no renderer` marker's quoted-name shape is matched against.
-  //
-  // The Flutter row is the one that does NOT rely on a copied wording — it
-  // reuses the emitter's own scanner — so what is pinned for it is instead the
-  // comment SHAPE that scanner keys on (next test).
+  // What still needs proving is that a give-up REACHES the output at all — a
+  // marker no emitted file can ever contain is a green gate over nothing.  So
+  // this renders a construct no target can render (`Icon` with a name the
+  // builtin registry does not have — deliberately the case the old wording list
+  // could never cover, since that fallback's text is built from a variable) and
+  // asserts the scan sees it.
   // -------------------------------------------------------------------------
-  it("the fallback markers can still fire — every marker matches its own emitter", () => {
-    const broken: string[] = [];
-    for (const { label, file, template } of MARKER_ORIGINS) {
-      if (!fs.readFileSync(file, "utf8").includes(template)) {
-        broken.push(`${label}: ${file} no longer contains ${template}`);
-        continue;
-      }
-      const rendered = template.replaceAll("`", "").replace(/\$\{[^}]*\}/g, "Widget");
-      if (!FALLBACK_MARKERS.some((m) => rendered.includes(m)))
-        broken.push(`${label}: no FALLBACK_MARKERS entry matches its own output \`${rendered}\``);
-    }
+  it("the give-up scan can still fire — an unrenderable construct carries the sentinel", async () => {
+    const emitted = await generateSystemFiles(
+      base.replace('Icon { name: "arrow-right" }', 'Icon { name: "no-such-icon-in-the-registry" }'),
+    );
+    const hit = [...emitted].some(
+      ([, content]) => typeof content === "string" && content.includes(GIVE_UP_SENTINEL),
+    );
     expect(
-      broken,
-      "a degradation marker has drifted from the emitter it was copied from — the matrix " +
-        `is reading output it can no longer recognise:\n${broken.join("\n")}`,
-    ).toEqual([]);
+      hit,
+      "an unknown icon name emitted no give-up the matrix can see — either the walker " +
+        "stopped marking degradations, or `giveUp()` no longer carries the sentinel; " +
+        "either way every cell below is now passing over output it cannot read",
+    ).toBe(true);
   });
 
   it("the Flutter parity scan can still fire — the comment shape is unchanged", () => {

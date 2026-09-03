@@ -56,7 +56,9 @@ async function landingHeex(): Promise<string> {
 describe("HEEx unsupported-primitive fallthrough", () => {
   it("emits an EEx-native comment, never an EEx-wrapped HTML comment", async () => {
     const heex = await landingHeex();
-    expect(heex).toContain("<%!-- Tab: not supported by Phoenix LiveView target --%>");
+    expect(heex).toContain(
+      "<%!-- loom:unrendered Tab: not supported by Phoenix LiveView target --%>",
+    );
     // The exact uncompilable shape the old fallthrough produced.
     expect(heex).not.toContain("<%= <!--");
     // And no bare HTML comment form survives to be wrapped by a future caller.
@@ -66,7 +68,9 @@ describe("HEEx unsupported-primitive fallthrough", () => {
     // registered primitive out of expression position, not just the ones with
     // a HEEx renderer.
     expect(heex).not.toContain("<%= <%!--");
-    expect(heex).toMatch(/^\s*<%!-- Tab: not supported by Phoenix LiveView target --%>\s*$/m);
+    expect(heex).toMatch(
+      /^\s*<%!-- loom:unrendered Tab: not supported by Phoenix LiveView target --%>\s*$/m,
+    );
     // The surrounding children still render.
     expect(heex).toContain("before");
     expect(heex).toContain("after");

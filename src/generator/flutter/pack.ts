@@ -31,6 +31,7 @@
 
 import { lowerFirst } from "../../util/naming.js";
 import type { LoadedPack } from "../_packs/loader.js";
+import { GIVE_UP_SENTINEL } from "../_walker/give-up.js";
 
 type Ctx = Record<string, string | number | boolean | readonly string[] | undefined>;
 
@@ -884,7 +885,7 @@ export function flutterPack(): LoadedPack {
     setChromeI18n() {},
     render(name: string, context: unknown): string {
       const fn = RENDERERS[name];
-      if (!fn) return `// flutter pack: no renderer for "${name}"`;
+      if (!fn) return `// ${GIVE_UP_SENTINEL} flutter pack: no renderer for "${name}"`;
       return fn((context ?? {}) as Ctx);
     },
   };
