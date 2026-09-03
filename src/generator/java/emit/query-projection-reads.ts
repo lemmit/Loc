@@ -51,7 +51,13 @@ import { workflowStateClass } from "./workflow-state.js";
 // an `X id` FK, so the follow is an explicit map load — the analogue of Hono
 // `findManyByIds` / Python `find_many_by_ids` / the Elixir bulk-load map), and
 // each `select f = <expr>` projects one row.  A `select` that reads a join
-// alias (`c.name`) rewrites to `<mapVar>.get(<key>).name()`.
+// alias (`c.name`) rewrites to a null-guarded `<mapVar>.get(<key>) == null ?
+// null : <mapVar>.get(<key>).name()` — LEFT JOIN semantics (G2667-D3,
+// `docs/conformance-semantics.md`): the joined aggregate's own capability
+// filters (soft-delete, tenancy, an ordinary dangling reference) can leave it
+// absent from the bulk-loaded map, and the source row survives with the
+// joined field carrying wire `null` rather than an unguarded `.get(...)`
+// throwing a `NullPointerException` on data the model permits.
 //
 // One `<Ctx>QueryProjections` @Service + a `<Ctx>QueryProjectionsController`
 // exposing `GET /projections/<slug>` per projection (sibling of the folded
@@ -536,7 +542,7 @@ export function renderJavaQueryProjections(
               const sel = selectByField.get(f.name);
               if (!sel) return `null`;
               collectJavaExprImports(sel.expr, imports);
-              return domainToWire(f.type, renderSelect(sel.expr, aliasMap));
+              return renderSelectWire(f.type, sel.expr, aliasMap);
             });
 
       methods.push(
@@ -709,10 +715,6 @@ export function renderJavaQueryProjections(
   return out;
 }
 
-/** Render a `select` expression against the source row `a` and the join alias
- *  maps.  A member read on a join alias (`c.name`) rewrites to
- *  `<mapVar>.get(<key>).name()` — the loaded-by-id aggregate for this row.
- *  Source-candidate reads (`o.id`, bare `lineCount`) render off `a`. */
 /** The JPQL aggregate call for one `select`.  `count` counts ROWS (no column);
  *  the rest take the aggregated column off the entity alias `e`. */
 function jpqlAggregate(agg: ProjectionAggregateIR): string {
@@ -838,12 +840,28 @@ function groupKeyCoerce(
   );
 }
 
-function renderSelect(expr: ExprIR, aliasMap: Map<string, JoinMap>): string {
+/** Render one `select` expression as the row's declared WIRE value.
+ *
+ *  A member read through a join alias (`c.name`) is LEFT-JOIN semantics
+ *  (G2667-D3, `docs/conformance-semantics.md`): `join <Agg> as c on <idRef>`
+ *  bulk-loads the target through its OWN (tenancy-/capability-scoped)
+ *  `findAll()`, so a soft-deleted target, an out-of-tenant target, or an
+ *  ordinary dangling reference is simply ABSENT from `<mapVar>` — the source
+ *  row survives, and the joined field carries wire `null`. Indexing the map
+ *  directly (the pre-fix shape) was a `NullPointerException` 500 on data the
+ *  model permits. The guard sits OUTSIDE `domainToWire` — not inside it — so
+ *  a joined `money`/`decimal`/`datetime` field's non-null narrowing
+ *  (`.setScale(…)`, `.doubleValue()`, `.toString()`) never runs on the absent
+ *  row; only a present join target's value is coerced. */
+function renderSelectWire(t: TypeIR, expr: ExprIR, aliasMap: Map<string, JoinMap>): string {
   if (expr.kind === "member" && expr.receiver.kind === "ref") {
     const alias = aliasMap.get(expr.receiver.name);
-    if (alias) return `${alias.mapVar}.get(${alias.keyExpr}).${expr.member}()`;
+    if (alias) {
+      const lookup = `${alias.mapVar}.get(${alias.keyExpr})`;
+      return `${lookup} == null ? null : ${domainToWire(t, `${lookup}.${expr.member}()`)}`;
+    }
   }
-  return renderJavaExpr(expr, { thisName: "a", accessorProps: true });
+  return domainToWire(t, renderJavaExpr(expr, { thisName: "a", accessorProps: true }));
 }
 
 function repoField(aggName: string): string {

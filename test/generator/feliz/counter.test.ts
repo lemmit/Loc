@@ -77,7 +77,7 @@ describe("feliz Counter", () => {
     expect(app).toContain("string model.Count");
     expect(app).not.toContain("String(");
     // MVU wiring.
-    expect(app).toContain("Program.mkProgram init update view");
+    expect(app).toContain("Program.mkProgram init update safeView");
     expect(app).toContain('Program.withReactSynchronous "root"');
   });
 
@@ -108,6 +108,6 @@ describe("feliz Counter", () => {
     const files = await generateSystemFiles(COUNTER);
     const appFs = [...files.entries()].find(([p]) => p.endsWith("src/App.fs"));
     expect(appFs).toBeDefined();
-    expect(appFs![1]).toContain("Program.mkProgram init update view");
+    expect(appFs![1]).toContain("Program.mkProgram init update safeView");
   });
 });

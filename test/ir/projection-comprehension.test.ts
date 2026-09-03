@@ -342,8 +342,12 @@ describe("projection comprehension — Hono emission", () => {
     // `join Customer as c on o.customerId` → a bulk-load-by-id Map…
     expect(svc).toContain("var customerById = customersRepository.findAll().stream()");
     expect(svc).toContain(".collect(Collectors.toMap(__a -> __a.id().value(), __a -> __a));");
-    // …and `select customerName = c.name` reads through the loaded map.
-    expect(svc).toContain("customerById.get(a.customerId().value()).name()");
+    // …and `select customerName = c.name` reads through the loaded map —
+    // LEFT-JOIN shape (wave 1/2, G2667-D3): a null-guarded lookup, wire `null`
+    // when the join target is absent (soft-deleted / out-of-tenant / dangling).
+    expect(svc).toContain(
+      "customerById.get(a.customerId().value()) == null ? null : customerById.get(a.customerId().value()).name()",
+    );
     // The synthesised find lands on the Order repository with the inlined `where`.
     const repo = [...files.entries()].find(([p]) => p.endsWith("OrderJpaRepository.java"))?.[1];
     expect(repo).toContain("List<Order> ordersView();");

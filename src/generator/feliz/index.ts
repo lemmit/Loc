@@ -1677,9 +1677,38 @@ function renderAppFs(
     "",
     views.join("\n"),
     "",
+    // M-T1.8 — global error boundary + failure sink (feliz arm).  Elmish/Feliz
+    // has no React class-component machinery to hook `componentDidCatch` the
+    // way the JSX frontends' `ErrorBoundary` does, so the render-time half
+    // wraps `view` — always the literal function `Program.mkProgram` mounts,
+    // whether it's the plain page-dispatch root (ungated) or the auth GATE
+    // (`Checking`/`Anon`/`Authed -> appView`, under `authUi`) — in an ordinary
+    // `try`/`with`.  Wrapping `view` rather than `rootFn` keeps the gate
+    // itself inside the guard too, and reaches the same outcome (a broken
+    // page renders a fallback panel, not a blank screen) through F#'s own
+    // exception handling instead of a React lifecycle hook.  The
+    // `update`-phase failure sink underneath is Elmish's own
+    // `Program.withErrorHandler`, the MVU analogue of an unhandled-promise-
+    // rejection handler: an exception raised while processing a dispatched
+    // `Msg` (including an async effect's continuation) is caught centrally
+    // instead of crashing the whole program silently. Both log through the
+    // same sink (`Fable.Core.JS.console.error`, always available —
+    // `Fable.Core` is an unconditional package reference, so this needs no
+    // new dependency and no extra `open`).
+    "let private safeView (model: Model) (dispatch: Msg -> unit) =",
+    "  try",
+    "    view model dispatch",
+    "  with ex ->",
+    '    Fable.Core.JS.console.error ("Uncaught render error:", ex)',
+    '    Html.div [ prop.role "alert"; prop.className "p-4"; prop.children [',
+    '      Html.h2 [ prop.className "text-red-700 font-semibold"; prop.text "Something went wrong." ]',
+    '      Html.pre [ prop.className "text-red-700 whitespace-pre-wrap"; prop.text ex.Message ]',
+    "    ] ]",
+    "",
     // A persisting app runs `updateWithPersist` — `update` plus the storage /
     // URL mirror — in place of `update`.
-    `Program.mkProgram init ${persistedStores.length > 0 ? "updateWithPersist" : "update"} view`,
+    `Program.mkProgram init ${persistedStores.length > 0 ? "updateWithPersist" : "update"} safeView`,
+    '|> Program.withErrorHandler (fun (msg, ex) -> Fable.Core.JS.console.error ($"Unhandled error in {msg}:", ex))',
     // `Sub<'msg>` is a LIST of (id, start) pairs, so two subscriptions compose by
     // concatenation — `withSubscription` itself takes only one.
     hasRealtime && storeUrlSub
