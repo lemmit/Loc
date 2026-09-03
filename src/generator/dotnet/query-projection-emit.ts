@@ -260,10 +260,39 @@ function renderHandler(
     projection = `new ${rowName}(${projectEntityArgs("d", sourceAgg, ctx)})`;
   } else {
     const selectByField = new Map((proj.query!.selects ?? []).map((s) => [s.field, s] as const));
+    // One `out var` per join-alias read, unique inside the projecting lambda
+    // (two selects off the same alias are two declarations in ONE scope, which
+    // would be CS0128).
+    let joinTmp = 0;
     const args = (proj.wireShape ?? []).map((f) => {
       const sel = selectByField.get(f.name);
       if (!sel) return "default!";
-      return projectToResponse(renderSelect(sel.expr, aliasMap), f.type, ctx);
+      // A select reading a JOIN alias goes through a TOTAL lookup (G2667-D3).
+      // The bulk load is `FindManyByIdsAsync` THROUGH the joined aggregate's
+      // repository, so its capability filters apply: a soft-deleted or
+      // out-of-tenant target simply is not in the dictionary, and so does the
+      // ordinary dangling reference.  Indexing it directly threw
+      // `KeyNotFoundException` — a 500 on data the model permits, from a read
+      // that is not even about the missing row.
+      //
+      // The semantics chosen here is LEFT JOIN: the source row survives and the
+      // joined field carries the wire type's empty value (`default!` — null for
+      // a reference-typed field, the type default for a value-typed one), the
+      // same `default!` this map already emits for a wire field no `select`
+      // covers.  The alternative — dropping the source row — would make a
+      // filtered-out join target silently delete a row that the source
+      // aggregate's own list still shows, trading one silent failure for
+      // another; and the row count of a projection would then depend on a
+      // FOREIGN aggregate's filters.  The whole wire projection sits INSIDE the
+      // guarded branch so a `.ToString(...)`/`.ToWire()` wrap never runs on the
+      // absent row.
+      const joined = joinAliasRead(sel.expr, aliasMap);
+      if (joined) {
+        const tmp = `__j${joinTmp++}`;
+        const value = projectToResponse(`${tmp}.${upperFirst(joined.member)}`, f.type, ctx);
+        return `(${joined.map.mapVar}.TryGetValue(${joined.map.keyExpr}, out var ${tmp}) ? ${value} : default!)`;
+      }
+      return projectToResponse(renderCsExpr(sel.expr, { thisName: "d" }), f.type, ctx);
     });
     projection = `new ${rowName}(${args.join(", ")})`;
   }
@@ -1418,12 +1447,15 @@ function csLeafIsValueType(t: TypeIR): boolean {
  *  maps.  A member read on a join alias (`c.name`) rewrites to
  *  `<mapVar>[<key>].Name` — the loaded-by-id aggregate for this row.
  *  Source-candidate reads (`o.id`, bare `lineCount`) render off `d`. */
-function renderSelect(expr: ExprIR, aliasMap: Map<string, JoinMap>): string {
+function joinAliasRead(
+  expr: ExprIR,
+  aliasMap: Map<string, JoinMap>,
+): { map: JoinMap; member: string } | undefined {
   if (expr.kind === "member" && expr.receiver.kind === "ref") {
-    const alias = aliasMap.get(expr.receiver.name);
-    if (alias) return `${alias.mapVar}[${alias.keyExpr}].${upperFirst(expr.member)}`;
+    const map = aliasMap.get(expr.receiver.name);
+    if (map) return { map, member: expr.member };
   }
-  return renderCsExpr(expr, { thisName: "d" });
+  return undefined;
 }
 
 function renderController(ctx: BoundedContextIR, ns: string, routePrefix?: string): string {

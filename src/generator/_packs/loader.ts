@@ -196,6 +196,69 @@ export interface LoadedPack {
  *  other's. */
 type HbsEnv = ReturnType<typeof Handlebars.create>;
 
+/** True when `expr` is EXACTLY a canonical JSON string literal — i.e. it
+ *  round-trips through `JSON.parse`/`JSON.stringify` unchanged.
+ *
+ *  `Image`/`Avatar`'s `src:`/`alt:` values reach the Vue/Angular templates
+ *  as plain rendered-JS-expression text (`src/generator/_walker/primitives
+ *  /text.ts`'s `attrArgValue`): a LITERAL argument is always produced by
+ *  `JSON.stringify` (`navArgValue`'s literal branch), and a DYNAMIC one is
+ *  arbitrary rendered JS (`emitExpr`) — a member access, a concatenation, a
+ *  call.  The two shapes are distinguished here, by content, rather than by
+ *  a flag the template layer doesn't receive: a dynamic expression can only
+ *  pass this round-trip if it is, character for character, ALSO a bare
+ *  quoted string — in which case treating it as a literal is still CORRECT
+ *  (both shapes evaluate to the identical value), so there is no unsafe
+ *  case, only an occasionally-cosmetic one. */
+function isJsonStringLiteral(expr: string): boolean {
+  if (!expr.startsWith('"') || !expr.endsWith('"')) return false;
+  try {
+    const parsed: unknown = JSON.parse(expr);
+    return typeof parsed === "string" && JSON.stringify(parsed) === expr;
+  } catch {
+    return false;
+  }
+}
+
+/** Quote a JS expression for splicing into an HTML attribute value, picking
+ *  the delimiter the expression itself doesn't use — mirrors `quoteAttrExpr`
+ *  in `src/generator/vue/walker/vue-target.ts` (and the inline equivalent in
+ *  `src/generator/angular/walker/angular-target.ts`) for `renderAttrBinding`:
+ *  an expression carrying BOTH quote kinds is entity-escaped (`"`→`&quot;`)
+ *  under a double-quote delimiter, never rejected — Vue and Angular both
+ *  decode HTML entities in an attribute value before compiling the bound
+ *  expression, so the entity round-trips to a literal `"` in the expression. */
+function quoteJsExprForAttr(expr: string): string {
+  const hasDouble = expr.includes('"');
+  const hasSingle = expr.includes("'");
+  if (!hasDouble) return `"${expr}"`;
+  if (!hasSingle) return `'${expr}'`;
+  return `"${expr.replace(/&/g, "&amp;").replace(/"/g, "&quot;")}"`;
+}
+
+/** Render a `src`/`alt`-shaped attribute for Vue (`:name="…"`) or Angular
+ *  (`[name]="…"`) — the markup-attribute half of M-T1.26's vue/angular
+ *  residue (see `docs/new-plan/waves/handoffs/wave-1-python-macros.md`): a
+ *  LITERAL value renders exactly as every pack has always emitted it (the
+ *  plain, unbound attribute — byte-identical), and a DYNAMIC value binds
+ *  properly instead of splicing raw JS text into a plain attribute, which
+ *  either silently drops the binding (Vue) or produces a broken/no-op
+ *  attribute (Angular). Returns the fragment WITH a leading space (or
+ *  nothing when `value` is absent), the same calling convention as
+ *  `navAttrFragment`'s `{{{navAttr "to"}}}`. */
+function bindableAttrFragment(
+  kind: "vue" | "angular",
+  name: unknown,
+  value: unknown,
+): Handlebars.SafeString {
+  const attrName = String(name);
+  const expr = String(value);
+  if (isJsonStringLiteral(expr)) return new Handlebars.SafeString(` ${attrName}=${expr}`);
+  const quoted = quoteJsExprForAttr(expr);
+  const bound = kind === "vue" ? `:${attrName}=${quoted}` : `[${attrName}]=${quoted}`;
+  return new Handlebars.SafeString(` ${bound}`);
+}
+
 /** Register IR-semantic helpers on ONE pack environment — naming utilities +
  *  a `lookup`-by-default-key helper.  Helpers are NOT pack-overridable:
  *  they're invariants of the IR contract, not theme decisions (a pack can't
@@ -247,6 +310,16 @@ function registerCoreHelpers(Handlebars: HbsEnv): void {
     if (!Number.isFinite(count) || count <= 0) return [];
     return Array.from({ length: Math.floor(count) }, (_, i) => i);
   });
+  // `Image`/`Avatar` `src:`/`alt:` binding for Vue/Angular (M-T1.26) — see
+  // `bindableAttrFragment` above.  `{{{vueAttr "src" src}}}` /
+  // `{{{ngAttr "src" src}}}` replace the templates' hardcoded ` src={{{src}}}`
+  // so a computed value binds instead of being spliced as a plain attribute.
+  Handlebars.registerHelper("vueAttr", (name: unknown, value: unknown) =>
+    bindableAttrFragment("vue", name, value),
+  );
+  Handlebars.registerHelper("ngAttr", (name: unknown, value: unknown) =>
+    bindableAttrFragment("angular", name, value),
+  );
 }
 
 /** Register pack-declared lookup-table helpers.  Each entry in the

@@ -197,6 +197,38 @@ describe.skipIf(!RUN)(
         // Unauthenticated hitting the gated route → 401 (authn precedes authz;
         // the unscoped call is rejected before the gate is even reached).
         expect((await fetch(`${API_BASE}/api/tickets/admin_scoped`)).status).toBe(401);
+
+        // --- Realtime stream authentication (M-T4.12), the two plan rules
+        // (src/ir/util/realtime-rooms.ts) exercised against the live backend.
+        //
+        // RULE 1 — the SSE route inherits the deployable's auth mode: it is on
+        // no bypass list, so an uncredentialed stream is 401'd like any read.
+        expect((await fetch(`${API_BASE}/api/realtime/events`)).status).toBe(401);
+
+        // RULE 2 — it authenticates by the HttpOnly `session` cookie, which is
+        // the ONLY credential a browser `EventSource` can present (it cannot
+        // set an Authorization header by construction), and is what the emitted
+        // client's `withCredentials: true` attaches.  A header-only verifier —
+        // which is what node shipped — 401s here, so no generated SPA could
+        // connect on any `auth: required` deployable.
+        const cookie = { cookie: `session=${token}` };
+        const meByCookie = await fetch(`${API_BASE}/api/auth/me`, { headers: cookie });
+        expect(meByCookie.status).toBe(200);
+        expect(((await meByCookie.json()) as { roles?: string[] }).roles).toContain("agent");
+
+        // …and the stream itself opens on that same cookie.  Abort as soon as
+        // the headers land — an SSE response never completes.
+        const streamAbort = new AbortController();
+        try {
+          const stream = await fetch(`${API_BASE}/api/realtime/events`, {
+            headers: cookie,
+            signal: streamAbort.signal,
+          });
+          expect(stream.status).toBe(200);
+          expect(stream.headers.get("content-type") ?? "").toContain("text/event-stream");
+        } finally {
+          streamAbort.abort();
+        }
       } catch (err) {
         console.error(`\n===== compose logs =====\n${composeLogs()}\n========================\n`);
         throw err;
