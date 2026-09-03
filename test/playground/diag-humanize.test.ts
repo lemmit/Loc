@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { CRASH_REASONS } from "../../web/src/util/diagnostics.js";
 import {
   DIAG_REASON_SENTENCE,
   diagBadgeText,
   humanizeDiagReason,
   humanizeHashLen,
 } from "../../web/src/util/diag-humanize.js";
+import { CRASH_REASONS } from "../../web/src/util/diagnostics.js";
 
 // The Diagnostics stream's sentences (M-T8.22 slice 5, audit M10).  The ring
 // keys are the contract with `crash-report.ts` and the boundaries; this map
@@ -35,7 +35,9 @@ describe("humanizeDiagReason", () => {
       expect(v).not.toBe(k);
       expect(v.length).toBeGreaterThan(20);
     }
-    expect(humanizeDiagReason("something-new")).toBe("Diagnostics snapshot recorded (something-new).");
+    expect(humanizeDiagReason("something-new")).toBe(
+      "Diagnostics snapshot recorded (something-new).",
+    );
   });
 });
 
