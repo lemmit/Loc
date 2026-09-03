@@ -129,9 +129,15 @@ export function renderCriterionFn(
   return `const ${criterionFnName(c.name)} = (${params}) => ${lowered.expr};`;
 }
 
-/** A `kind` discriminator predicate scoping reads to this concrete's rows in
- *  the shared TPH table, or null when `agg` is not a TPH concrete. */
-function kindPredicate(
+/** A `kind` discriminator predicate scoping a query to this concrete's rows in
+ *  the shared TPH table, or null when `agg` is not a TPH concrete.
+ *
+ *  Exported because the WRITE paths need the same predicate: a concrete's
+ *  `delete` and `save` are handed raw ids (the polymorphic reader launders a
+ *  base id into every concrete's branded id by design), so without it
+ *  `carRepo.delete(truckId)` deletes the truck and `carRepo.save(x)` on a
+ *  truck's id takes the UPDATE branch and rewrites that row's `kind`. */
+export function kindPredicate(
   agg: EnrichedAggregateIR,
   ctx: BoundedContextIR,
   tableName: string,
@@ -141,7 +147,7 @@ function kindPredicate(
 }
 
 /** Combine an id/param filter with the optional `kind` predicate. */
-function withKind(filter: string, kindPred: string | null): string {
+export function withKind(filter: string, kindPred: string | null): string {
   return kindPred ? `and(${filter}, ${kindPred})` : filter;
 }
 

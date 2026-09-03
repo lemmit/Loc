@@ -149,6 +149,23 @@ function saveTxBody(agg: EnrichedAggregateIR, ctx: BoundedContextIR, emitTrace: 
   // stamping.  A non-audited aggregate's upsert is byte-identical to before.
   const audited = aggregateIsAudited(agg);
 
+  // TPH: the row this repository is allowed to REWRITE is not "the row with
+  // this id" — it is "the row with this id AND this concrete's `kind`".  Every
+  // read on the shared table already scopes that way; the writes did not, and
+  // the polymorphic reader hands each concrete repo a base id cast to that
+  // concrete's branded id, so `carRepo.save(x)` on a Truck's id took the
+  // UPDATE branch and flipped that row's `kind` to "Car" while leaving the
+  // truck's own columns populated (review-B D1).
+  //
+  // The EXISTENCE PROBE stays unscoped on purpose: it decides insert-vs-update,
+  // and that is a PRIMARY-KEY question about the whole shared table — a
+  // kind-scoped probe would answer "no row" for a foreign id and then INSERT a
+  // duplicate id.  The guard belongs on the WRITE, so a foreign-subtype id
+  // matches nothing, changes nothing, and raises the same ConcurrencyError the
+  // lost-race path raises.  `null` for a non-TPH aggregate ⇒ byte-identical.
+  const kind = discriminatorValue(agg, ctx.aggregates);
+  const kindPred = kind ? `eq(schema.${tableName}.kind, ${JSON.stringify(kind)})` : null;
+
   // Optimistic concurrency (`versioned` capability, versioned-capability.ts):
   // the unconditional `insert...onConflictDoUpdate` upsert becomes a guarded
   // write.  No existing row → plain insert seeding `version: 1` (a fresh
@@ -178,7 +195,7 @@ function saveTxBody(agg: EnrichedAggregateIR, ctx: BoundedContextIR, emitTrace: 
       `      if (existingRow.length === 0) {`,
       `        await tx.insert(schema.${tableName}).values(${insertValues});`,
       `      } else {`,
-      `        const updated = await tx.update(schema.${tableName}).set(${updateSet}).where(and(eq(schema.${tableName}.id, aggregate.id), eq(schema.${tableName}.version, expected))).returning({ id: schema.${tableName}.id });`,
+      `        const updated = await tx.update(schema.${tableName}).set(${updateSet}).where(and(eq(schema.${tableName}.id, aggregate.id), eq(schema.${tableName}.version, expected)${kindPred ? `, ${kindPred}` : ""})).returning({ id: schema.${tableName}.id });`,
       `        if (updated.length === 0) throw new ConcurrencyError("${agg.name}", aggregate.id as string);`,
       `      }`,
       ...containBlocks,
@@ -191,6 +208,16 @@ function saveTxBody(agg: EnrichedAggregateIR, ctx: BoundedContextIR, emitTrace: 
   const updateSet = audited ? "stampUpdate(rootRow)" : "rootRow";
   return [
     `      const rootRow = ${rootProjection(agg, "aggregate", ctx)};`,
+    // NOTE: this unversioned arm is UNREACHABLE today and deliberately carries
+    // no `kind` guard.  `applyDefaultVersioning` (macros/expander.ts) tags every
+    // aggregate `versioned` except `persistedAs: eventLog`, and an eventLog
+    // aggregate routes to `buildEventSourcedRepositoryFile` instead of here — so
+    // `aggregateIsVersioned` is true for everything that reaches this function.
+    // Were default versioning ever narrowed, this line would need the same
+    // guard the branch above carries (`setWhere: eq(schema.<t>.kind, "<C>")`,
+    // which drizzle's `onConflictDoUpdate` accepts) or the TPH corruption
+    // returns; it is left unwritten rather than shipped untested, because
+    // nothing today can exercise it.
     `      await tx.insert(schema.${tableName}).values(${insertValues}).onConflictDoUpdate({ target: schema.${tableName}.id, set: ${updateSet} });`,
     ...containBlocks,
     ...assocBlocks,
