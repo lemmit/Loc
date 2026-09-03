@@ -349,9 +349,14 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
         </Box>
       </Panel>
 
-      <Handle orientation="horizontal" />
+      {/* An `#embed=1` link drops the dock entirely (M-T8.23 slice 2): an
+          iframe-sized playground has no room for Problems / Tests / History,
+          and a collapsed-but-present dock would eat the little height there
+          is.  `#view=1` keeps it — a read-only reader still wants Problems. */}
+      {!ctx.embedMode && <Handle orientation="horizontal" />}
 
       {/* BOTTOM — Dev Tools dock */}
+      {!ctx.embedMode && (
       <Panel
         panelRef={bottomRef}
         collapsible
@@ -373,6 +378,7 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
           <DevToolsDock ctx={ctx} tab={dockTab} setTab={setDockTab} />
         )}
       </Panel>
+      )}
     </Group>
   );
 }

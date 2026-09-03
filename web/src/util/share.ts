@@ -158,7 +158,10 @@ export function readHashSource(): string | null {
  *  what's already in the hash. */
 export function writeHashProject(project: SharedProject): void {
   if (typeof window === "undefined") return;
-  const desired = `#${hashKeyValueFor(project)}`;
+  // Carry the render flags across the rewrite: the hash is re-written on a
+  // debounce as the source changes, and dropping `view=1`/`embed=1` here would
+  // silently promote a read-only link to an editable one on the first sync.
+  const desired = `#${flagPrefix(readViewFlags())}${hashKeyValueFor(project)}`;
   if (window.location.hash === desired) return;
   const url = new URL(window.location.href);
   url.hash = desired;
@@ -190,14 +193,70 @@ function hashKeyValueFor(project: SharedProject): string {
 
 /** Build a full shareable URL for the given project — used by the
  *  "copy link" button so the user gets a clean link in their
- *  clipboard regardless of where the cursor is on the page. */
-export function buildShareUrl(textOrProject: string | SharedProject): string {
+ *  clipboard regardless of where the cursor is on the page.
+ *
+ *  `flags` adds the read-only / embed modes below.  There is deliberately no
+ *  link SHORTENER behind any of these: the playground is a static site with no
+ *  server, so a short link would need one (M-T8.23 §3 slice 2 — decision
+ *  recorded in the mission entry). */
+export function buildShareUrl(
+  textOrProject: string | SharedProject,
+  flags: ViewFlags = { view: false, embed: false },
+): string {
   if (typeof window === "undefined") return "";
   const project: SharedProject =
     typeof textOrProject === "string"
       ? { files: { [MAIN_PATH]: textOrProject }, active: MAIN_PATH }
       : textOrProject;
   const url = new URL(window.location.href);
-  url.hash = hashKeyValueFor(project);
+  url.hash = `${flagPrefix(flags)}${hashKeyValueFor(project)}`;
   return url.toString();
+}
+
+// ---------------------------------------------------------------------------
+// View / embed flags (M-T8.23 slice 2)
+// ---------------------------------------------------------------------------
+
+const HASH_KEY_VIEW = "view";
+const HASH_KEY_EMBED = "embed";
+
+/** How a link asks to be RENDERED, as opposed to what it carries.
+ *
+ *   `view`  — read-only: no editing chrome, and the tab never opens a
+ *             workspace store or takes the writer lock, so opening a shared
+ *             link cannot steal a colleague's session or persist anything.
+ *   `embed` — `view`, and without the bottom dock: sized for an iframe.
+ *
+ *  `embed` IMPLIES `view` on read (an embed that could be typed into would be
+ *  a lie about the mode), so a consumer only ever has to check `view`. */
+export interface ViewFlags {
+  view: boolean;
+  embed: boolean;
+}
+
+export const NO_VIEW_FLAGS: ViewFlags = { view: false, embed: false };
+
+/** Read the render flags out of the current URL hash. */
+export function readViewFlags(hash?: string): ViewFlags {
+  const raw = hash ?? (typeof window === "undefined" ? "" : window.location.hash);
+  if (!raw || raw.length < 2) return NO_VIEW_FLAGS;
+  const params = new URLSearchParams(raw.replace(/^#/, ""));
+  const embed = isTruthy(params.get(HASH_KEY_EMBED));
+  return { view: embed || isTruthy(params.get(HASH_KEY_VIEW)), embed };
+}
+
+/** `1` / `true` / a bare present key all mean on; `0` / `false` mean off. */
+function isTruthy(value: string | null): boolean {
+  if (value === null) return false;
+  return value !== "0" && value.toLowerCase() !== "false";
+}
+
+/** The `view=1&`/`embed=1&` prefix a flagged hash carries.  Flags come FIRST
+ *  so the (long) base64 payload stays at the end, where a truncating chat
+ *  client's ellipsis is at least visibly in the payload rather than silently
+ *  eating the mode. */
+function flagPrefix(flags: ViewFlags): string {
+  if (flags.embed) return `${HASH_KEY_EMBED}=1&`;
+  if (flags.view) return `${HASH_KEY_VIEW}=1&`;
+  return "";
 }

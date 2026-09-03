@@ -39,6 +39,7 @@ import type { RequestTraces } from "../backend/route-match";
 import type { TestResult } from "../testing/harness";
 import type { OutputStream } from "./OutputPanel";
 import type { LogLine } from "../util/log-line";
+import type { ViewFlags } from "../util/share";
 
 export type ReactBundleStatus =
   | { kind: "pending" }
@@ -424,7 +425,17 @@ export interface LayoutCtx {
 
   // Share-link feedback
   copied: boolean;
-  copyShareLink: () => void;
+  /** Copy a link that loads the current source.  `flags` picks the render
+   *  mode the recipient lands in (M-T8.23 slice 2). */
+  copyShareLink: (flags?: ViewFlags) => void;
+  /** The same link as a string, for the share dialog's preview field. */
+  buildShareLink: (flags?: ViewFlags) => string;
+
+  // How THIS tab was asked to render (M-T8.23 slice 2).  `#view=1` drops the
+  // editing chrome and takes no workspace writer lock; `#embed=1` implies it
+  // and additionally drops the bottom dock.  Read once from the hash on mount.
+  viewMode: boolean;
+  embedMode: boolean;
 
   // Agent demo (the Agent dock tab) — the deterministic M-T8.3 wedge: a scripted
   // agent turns prose into a validated `.ddd` and a generated stack, running the

@@ -18,8 +18,10 @@ import type { LayoutCtx } from "./ctx";
 import { WorkspaceLockBanner } from "./WorkspaceLockBanner";
 import { HelpMenu, HelpMenuItems } from "./HelpMenu";
 import { PipelineDots, PipelineStrip } from "./PipelineStrip";
+import { ReadOnlyBadge } from "./ReadOnlyBadge";
+import { ShareDialog } from "./ShareDialog";
 import { TargetsDrawer } from "./TargetsDrawer";
-import { AUTO_RUN, AUTO_RUN_HINT, RUN, TARGETS } from "./vocabulary";
+import { AUTO_RUN, AUTO_RUN_HINT, RUN, SHARE, TARGETS } from "./vocabulary";
 
 interface Props {
   ctx: LayoutCtx;
@@ -31,13 +33,40 @@ export function DesktopHeader({ ctx }: Props): JSX.Element {
   const {
     augmentedExamplesList,
     createWorkspaceFromExample,
-    copyShareLink,
-    copied,
     workspace,
     buildClient,
     scheduleAutoGenerate,
+    viewMode,
   } = ctx;
   const [targetsOpen, setTargetsOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  // A `#view=1` link renders the playground WITHOUT the editing chrome: no
+  // workspace switcher, no ⋯ (which owns pack import + the workspace tree),
+  // no targets drawer.  The pipeline strip stays — a read-only visitor should
+  // still be able to generate and look at the output — and so does Share, so
+  // the link can be passed on.  One badge says which read-only this is; every
+  // other surface renders the same one (audit L1).
+  if (viewMode) {
+    return (
+      <Group h="100%" px="md" justify="space-between" wrap="wrap" gap="xs">
+        <Group gap="md" wrap="wrap">
+          <Title order={5}>Loom Playground</Title>
+          <ReadOnlyBadge reason="view" />
+          <Button
+            size="xs"
+            variant="default"
+            onClick={() => setShareOpen(true)}
+            data-testid="btn-share"
+          >
+            {SHARE.label}
+          </Button>
+          <ShareDialog ctx={ctx} opened={shareOpen} onClose={() => setShareOpen(false)} />
+          <HelpMenu ctx={ctx} />
+        </Group>
+        <PipelineStrip ctx={ctx} />
+      </Group>
+    );
+  }
   return (
     <Group h="100%" px="md" justify="space-between" wrap="wrap" gap="xs">
       <Group gap="md" wrap="wrap">
@@ -70,6 +99,7 @@ export function DesktopHeader({ ctx }: Props): JSX.Element {
           {TARGETS.label}
         </Button>
         <TargetsDrawer ctx={ctx} opened={targetsOpen} onClose={() => setTargetsOpen(false)} />
+        <ShareDialog ctx={ctx} opened={shareOpen} onClose={() => setShareOpen(false)} />
         {/* Share link, Import design pack and the imported-pack tree live
             under one ⋯ menu so the header never needs a second row (audit
             H2's follow-up, M3).  `closeOnItemClick={false}` keeps the menu
@@ -83,11 +113,11 @@ export function DesktopHeader({ ctx }: Props): JSX.Element {
           </Menu.Target>
           <Menu.Dropdown>
             <Menu.Item
-              onClick={copyShareLink}
+              onClick={() => setShareOpen(true)}
               data-testid="btn-share"
-              title="Copy a link that loads the current source — works for any other user / browser."
+              title="A link that loads the current source — works for any other user / browser."
             >
-              {copied ? "✓ Copied share link" : "Copy share link"}
+              {SHARE.label}…
             </Menu.Item>
             <Menu.Divider />
             <Menu.Label>Workspace</Menu.Label>
@@ -126,8 +156,6 @@ export function MobileHeader({ ctx }: Props): JSX.Element {
   const {
     augmentedExamplesList,
     createWorkspaceFromExample,
-    copyShareLink,
-    copied,
     workspace,
     buildClient,
     scheduleAutoGenerate,
@@ -145,6 +173,33 @@ export function MobileHeader({ ctx }: Props): JSX.Element {
   const runLoading = pipeline.generating || pipeline.bundling || pipeline.booting;
   const [wsDrawerOpen, setWsDrawerOpen] = useState(false);
   const [targetsOpen, setTargetsOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  // The mobile twin of the desktop view-mode header: title, the one read-only
+  // badge, Share, Run + the strip.  No workspace button, no pack import, no
+  // targets — a read-only link edits nothing.
+  if (ctx.viewMode) {
+    return (
+      <Stack h="100%" px="sm" gap={2} justify="center">
+        <Group justify="space-between" gap="xs" wrap="nowrap">
+          <Group gap="xs" wrap="nowrap" style={{ flex: 1, minWidth: 0 }}>
+            <Title order={6} style={{ flexShrink: 0 }}>Loom</Title>
+            <ReadOnlyBadge reason="view" size="sm" />
+          </Group>
+          <Button
+            size="sm"
+            variant="default"
+            onClick={() => setShareOpen(true)}
+            data-testid="btn-share"
+            px={12}
+          >
+            {SHARE.label}
+          </Button>
+          <ShareDialog ctx={ctx} opened={shareOpen} onClose={() => setShareOpen(false)} />
+        </Group>
+        <PipelineDots ctx={ctx} />
+      </Stack>
+    );
+  }
   return (
     <Stack h="100%" px="sm" gap={2} justify="center">
     <Group justify="space-between" gap="xs" wrap="nowrap">
@@ -203,11 +258,8 @@ export function MobileHeader({ ctx }: Props): JSX.Element {
           <Menu.Dropdown>
             {/* Bundle is not offered here — Run covers it (audit M3); the
                 strip's dots under the row carry the per-stage state. */}
-            <Menu.Item
-              onClick={copyShareLink}
-              data-testid="btn-share"
-            >
-              {copied ? "✓ Copied share link" : "Copy share link"}
+            <Menu.Item onClick={() => setShareOpen(true)} data-testid="btn-share">
+              {SHARE.label}…
             </Menu.Item>
             <Menu.Item onClick={() => setTargetsOpen(true)} data-testid="btn-targets">
               {TARGETS.label}
@@ -257,6 +309,7 @@ export function MobileHeader({ ctx }: Props): JSX.Element {
         onCreateFromExample={createWorkspaceFromExample}
       />
       <TargetsDrawer ctx={ctx} opened={targetsOpen} onClose={() => setTargetsOpen(false)} />
+      <ShareDialog ctx={ctx} opened={shareOpen} onClose={() => setShareOpen(false)} />
     </Group>
     <PipelineDots ctx={ctx} />
     </Stack>

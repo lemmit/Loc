@@ -50,10 +50,19 @@ export const OTHER_TAB_MESSAGE =
 
 /** Why the workspace is read-only, or `null` when it isn't.  Generalises the
  *  old boolean `persistent`: the UI needs to say WHICH read-only it is. */
-export type WorkspaceReadOnlyReason = "ephemeral" | "other-tab";
+export type WorkspaceReadOnlyReason = "ephemeral" | "other-tab" | "view";
+
+/** The sentence a `#view=1` link's read-only mode shows (M-T8.23 slice 2).
+ *  A view link never opens a workspace store and never takes the writer lock,
+ *  so it is read-only by construction — not by a storage failure or a lock
+ *  another tab holds. */
+export const VIEW_MESSAGE =
+  "This is a read-only view link — it opens the shared source without an " +
+  "editor, and never takes over the workspace. Open the playground itself to edit.";
 
 /** The sentence the UI shows for a read-only reason. */
 export function readOnlyMessage(reason: WorkspaceReadOnlyReason): string {
+  if (reason === "view") return VIEW_MESSAGE;
   return reason === "ephemeral" ? EPHEMERAL_MESSAGE : OTHER_TAB_MESSAGE;
 }
 

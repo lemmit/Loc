@@ -7,6 +7,23 @@
 import { expect, test } from "@playwright/test";
 import { readEditorSource, waitForPlaygroundReady } from "./_helpers";
 
+const SHARED = `system Shared {
+  context Sales {
+    aggregate Order {
+      total: Money
+    }
+  }
+}
+`;
+
+function encodeForHash(text: string): string {
+  return Buffer.from(text, "utf-8")
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
 test("the targets drawer lists the system's deployables with their stack", async ({ page }) => {
   await page.goto("/");
   await waitForPlaygroundReady(page);
@@ -78,4 +95,60 @@ test("the drawer offers only frontends to a frontend and only backends to a back
   await page.getByTestId("target-platform-api").click();
   await expect(page.getByRole("option", { name: "java", exact: true })).toBeVisible();
   await expect(page.getByRole("option", { name: "react", exact: true })).toHaveCount(0);
+});
+
+test("#view=1 renders without the editing chrome and refuses edits", async ({ page }) => {
+  await page.goto(`/#view=1&s=${encodeForHash(SHARED)}`);
+  await expect(page.getByRole("heading", { name: /Loom Playground/i })).toBeVisible();
+
+  // The link carried the source.
+  await expect
+    .poll(async () => await readEditorSource(page), { timeout: 45_000 })
+    .toContain("system Shared");
+
+  // ONE read-only explanation, and it says WHICH read-only this is (audit L1).
+  const badge = page.getByTestId("read-only-badge");
+  await expect(badge).toBeVisible();
+  await expect(badge).toHaveAttribute("data-reason", "view");
+  await expect(badge).toHaveCount(1);
+
+  // No editing chrome: no workspace switcher, no overflow menu, no targets.
+  await expect(page.getByTestId("header-menu")).toHaveCount(0);
+  await expect(page.getByTestId("btn-targets")).toHaveCount(0);
+  await expect(page.getByTestId("mobile-workspace-button")).toHaveCount(0);
+
+  // …and the editor refuses typing.
+  const before = await readEditorSource(page);
+  await page.locator(".monaco-editor").first().click();
+  await page.keyboard.type("aggregate Nope {}");
+  await page.waitForTimeout(500);
+  expect(await readEditorSource(page)).toBe(before);
+});
+
+test("#embed=1 is read-only and drops the dock", async ({ page }) => {
+  await page.goto(`/#embed=1&s=${encodeForHash(SHARED)}`);
+  await expect(page.getByRole("heading", { name: /Loom Playground/i })).toBeVisible();
+  await expect(page.getByTestId("read-only-badge")).toHaveAttribute("data-reason", "view");
+  // The dock and its tabs are gone entirely — not merely collapsed.
+  await expect(page.getByTestId("devtools-tab-problems")).toHaveCount(0);
+  await expect(page.getByTestId("dock-toggle")).toHaveCount(0);
+});
+
+test("the share dialog says what the link carries and what it does not", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+
+  await page.getByTestId("header-menu").click();
+  await page.getByTestId("btn-share").click();
+  await expect(page.getByTestId("share-dialog")).toBeVisible();
+
+  await expect(page.getByTestId("share-carries")).toContainText(".ddd source");
+  await expect(page.getByTestId("share-omits")).toContainText("no database rows");
+  // The deliberate absence is stated, not left looking like an oversight.
+  await expect(page.getByTestId("share-no-shortener")).toContainText("no link shortener");
+
+  // The three shapes of the same link, each carrying its render mode.
+  await expect(page.getByTestId("share-url-plain")).toHaveValue(/#(s|p)=/);
+  await expect(page.getByTestId("share-url-view")).toHaveValue(/#view=1&(s|p)=/);
+  await expect(page.getByTestId("share-url-embed")).toHaveValue(/#embed=1&(s|p)=/);
 });

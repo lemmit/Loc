@@ -48,6 +48,7 @@ export function EditorPane({ ctx, border = "none" }: Props): JSX.Element | null 
     sourceError,
     clearSourceError,
     workspace,
+    viewMode,
   } = ctx;
   // Warm the editor chunk the moment a desktop pane exists, rather than when
   // the language client finally resolves — the two would otherwise serialize.
@@ -111,6 +112,7 @@ export function EditorPane({ ctx, border = "none" }: Props): JSX.Element | null 
             onChange={(v) => onSourceChange(v, "editor")}
             onDiagnosticsChange={onDiagnosticsChange}
             activePath={activeSourcePath}
+            readOnly={viewMode}
           />
         </Suspense>
       ) : (
@@ -122,6 +124,7 @@ export function EditorPane({ ctx, border = "none" }: Props): JSX.Element | null 
           initialValue={initialSource}
           handleRef={editorHandleRef}
           onChange={(v) => onSourceChange(v, "editor")}
+          readOnly={viewMode}
         />
       )}
     </Box>

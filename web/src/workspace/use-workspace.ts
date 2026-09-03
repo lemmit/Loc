@@ -114,7 +114,16 @@ export interface WorkspaceState {
   takeOver(): void;
 }
 
-export function useWorkspace(): WorkspaceState {
+export interface UseWorkspaceOptions {
+  /** A `#view=1` render (M-T8.23 slice 2).  The hook then opens NO store and
+   *  acquires NO writer lock, so following a shared link cannot take a
+   *  colleague's session away from them or persist anything into their
+   *  browser — the read-only mode is structural, not a disabled button.
+   *  `readOnlyReason` reads `"view"` so the UI says which read-only it is. */
+  viewOnly?: boolean;
+}
+
+export function useWorkspace({ viewOnly = false }: UseWorkspaceOptions = {}): WorkspaceState {
   const [registry, setRegistry] = useState<WorkspaceRegistry>(() => loadRegistry());
   const registryRef = useRef(registry);
   registryRef.current = registry;
@@ -165,6 +174,13 @@ export function useWorkspace(): WorkspaceState {
     setLoaded(false);
     setPersistedSource(null);
     setOwner(true);
+    // A view link opens nothing: no IndexedDB connection, no writer lock, no
+    // broadcast channel.  `loaded` still flips so every consumer that gates on
+    // "the open-or-fail decision has been made" proceeds.
+    if (viewOnly) {
+      setLoaded(true);
+      return;
+    }
     const dbName = active.gitDb;
     // Mutable, because the async open below and the sync cleanup both need to
     // reach whatever has been created SO FAR (the cleanup can run mid-open).
@@ -291,7 +307,7 @@ export function useWorkspace(): WorkspaceState {
       cancelled = true;
       teardown();
     };
-  }, [active.gitDb]);
+  }, [active.gitDb, viewOnly]);
 
   /** "Take over": steal the writer lock.  The old holder's held request
    *  rejects with `AbortError`, which flips IT to read-only — the point of
@@ -391,9 +407,16 @@ export function useWorkspace(): WorkspaceState {
 
   // Read-only is one CONCEPT with two reasons: no store at all (ephemeral)
   // or another tab holding the writer lock.  Derived, never stamped.
-  const readOnlyReason: WorkspaceReadOnlyReason | null =
-    store === null ? (loaded ? "ephemeral" : null) : owner ? null : "other-tab";
-  const writable = store !== null && owner;
+  const readOnlyReason: WorkspaceReadOnlyReason | null = viewOnly
+    ? "view"
+    : store === null
+      ? loaded
+        ? "ephemeral"
+        : null
+      : owner
+        ? null
+        : "other-tab";
+  const writable = !viewOnly && store !== null && owner;
 
   // Memoised so the returned object has a STABLE identity between renders that
   // changed nothing here.  App.tsx hands this straight through as
