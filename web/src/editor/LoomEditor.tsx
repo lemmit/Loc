@@ -178,6 +178,12 @@ export function LoomEditor(props: LoomEditorProps): JSX.Element {
         setSource: (text: string) => {
           pendingSourceRef.current = text;
         },
+        // No model yet, so no stack: the chrome renders Undo / Redo disabled
+        // rather than swallowing a click.
+        undo: () => {},
+        redo: () => {},
+        canUndo: () => false,
+        canRedo: () => false,
       };
       holder.current = placeholder;
       return () => {
@@ -236,6 +242,18 @@ export function LoomEditor(props: LoomEditorProps): JSX.Element {
           model.pushEditOperations(null, [{ range: model.getFullModelRange(), text }], () => null);
           suppressDispatch = false;
         },
+        // The model's own stack — `pushEditOperations` above already put every
+        // pane write on it.  Undo/redo are NOT suppressed: the resulting
+        // content change is dispatched like a keystroke, which is how the app
+        // and the panes learn the source moved back (M-T8.17).
+        undo: () => {
+          void model.undo();
+        },
+        redo: () => {
+          void model.redo();
+        },
+        canUndo: () => model.canUndo(),
+        canRedo: () => model.canRedo(),
       };
     }
 

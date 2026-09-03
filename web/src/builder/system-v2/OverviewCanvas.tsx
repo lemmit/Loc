@@ -525,7 +525,7 @@ export default function OverviewCanvas({ ctx, onClose, onOpen }: {
   return (
     <Box style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
       {toolbar}
-      <RefusalLine refused={refusal.refused} />
+      <RefusalLine refusal={refusal} />
       <Box style={{ flex: 1, minHeight: 0, display: "flex" }}>
         <Box style={{ flex: 1, minWidth: 0, position: "relative" }} data-testid="c4system-v2-overview-canvas">
           <ReactFlow

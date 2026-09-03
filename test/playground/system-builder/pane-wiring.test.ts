@@ -65,8 +65,9 @@ describe("AddPalette — every v2-only construct kind is creatable", () => {
   });
 
   it("derives each extra's test id from its kind (ids can't drift from the menu)", () => {
-    // Both menus render through the same `c4system-v2-add-${e.kind}` template.
-    const derived = [...PALETTE.matchAll(/data-testid=\{`c4system-v2-add-\$\{e\.kind\}`\}/g)];
+    // Both menus render through the same `c4system-v2-add-${e.kind}` template
+    // (the `Entry` component's `testid` prop lands as the button's data-testid).
+    const derived = [...PALETTE.matchAll(/testid=\{`c4system-v2-add-\$\{e\.kind\}`\}/g)];
     expect(derived.length).toBe(2);
   });
 
@@ -76,7 +77,7 @@ describe("AddPalette — every v2-only construct kind is creatable", () => {
   });
 
   it("adds a permissions block from the subdomain view", () => {
-    expect(PALETTE).toContain('data-testid="c4system-v2-add-permissions"');
+    expect(PALETTE).toContain('testid="c4system-v2-add-permissions"');
     expect(PALETTE).toContain("addPermissionsSource(source, last.name)");
   });
 

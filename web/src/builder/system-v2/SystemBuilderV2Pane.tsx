@@ -104,6 +104,7 @@ import { ExprSlotEditor, type ExprMode } from "../system/ExpressionEditor";
 import { AstUtils, type AstNode } from "langium";
 import { isEventDecl } from "../../../../src/language/generated/ast.js";
 import { RefusalLine } from "../refusal";
+import { UndoRedo, paneUndoKeyHandler } from "../undo-redo";
 import { IDENTIFIER, renameMember } from "../system/rename";
 import AddPalette from "./AddPalette";
 import ConstructNode, { type ConstructNodeData } from "./ConstructNode";
@@ -573,11 +574,13 @@ function toRfEdges(g: ViewGraph): Edge[] {
   });
 }
 
-function Breadcrumb({ path, onJump, onOverview }: {
+function Breadcrumb({ path, onJump, onOverview, trailing }: {
   path: ViewPath;
   onJump: (depth: number) => void;
   /** Only offered at the root — Overview IS the root, seen flat. */
   onOverview?: () => void;
+  /** Right-aligned chrome (the Undo / Redo pair). */
+  trailing?: ReactNode;
 }): JSX.Element {
   return (
     <Group
@@ -589,6 +592,7 @@ function Breadcrumb({ path, onJump, onOverview }: {
       style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}
       data-testid="c4system-v2-breadcrumb"
     >
+      {trailing && <Box style={{ order: 1, marginLeft: "auto" }}>{trailing}</Box>}
       <Button
         size="compact-xs"
         variant="subtle"
@@ -663,7 +667,12 @@ function Inner({ ctx, path, setPath, onOverview }: {
   // unconditionally — so the message renders at the end.
   const harness = usePaneHarness(ctx);
   const { parsed, parseOk, rev, refusal } = harness;
-  const { apply, applyOrRefuse } = harness;
+  // Every mutation writes through a NAMED writer (`on("field total")`), so a
+  // refused write says which construct and why instead of the generic line —
+  // the silent `if (next != null) apply(next)` idiom is gone (H10).  The bare
+  // `apply` survives only for the expression editors' `onCommit`, whose
+  // `false` return already renders an inline "invalid expression".
+  const { apply, on } = harness;
   const graph = useMemo(
     () => (parseOk ? buildViewGraph(parsed.ast, path, { workflowMember: bodyMember }) : EMPTY_GRAPH),
     [parsed, path, parseOk, bodyMember],
@@ -841,12 +850,10 @@ function Inner({ ctx, path, setPath, onOverview }: {
         // them the flow view could only rewrite statements, never reorder or
         // remove one.
         onDelete: () => {
-          const next = deleteStatement(ctx.getSource(), leafLoc, i);
-          if (next != null) apply(next);
+          on(`statement ${i + 1} (${view.kind})`).applyOrRefuse(deleteStatement(ctx.getSource(), leafLoc, i));
         },
         onMove: (dir) => {
-          const next = moveStatement(ctx.getSource(), leafLoc, i, dir);
-          if (next != null) apply(next);
+          on(`statement ${i + 1} (${view.kind})`).applyOrRefuse(moveStatement(ctx.getSource(), leafLoc, i, dir));
         },
         canMoveUp: i > 0,
         canMoveDown: i < views.length - 1,
@@ -872,7 +879,7 @@ function Inner({ ctx, path, setPath, onOverview }: {
                   i,
                   eventName,
                 );
-                if (next != null) apply(next);
+                on(`emit ${eventName}`).applyOrRefuse(next);
               }
             : undefined,
       };
@@ -961,7 +968,7 @@ function Inner({ ctx, path, setPath, onOverview }: {
         const aggName = aggOwner.name;
         const idx = Number(n.id.slice("invariant:".length));
         const onDelete = (): void => {
-          applyOrRefuse(deleteInvariant(ctx.getSource(), aggName, idx));
+          on(`invariant ${idx + 1} of ${aggName}`).applyOrRefuse(deleteInvariant(ctx.getSource(), aggName, idx));
         };
         const { expressionEditor, onToggleExpression } = buildExprToggle(
           { kind: "invariant", owner: aggName, index: idx },
@@ -989,7 +996,7 @@ function Inner({ ctx, path, setPath, onOverview }: {
         const onRename = (next: string): void => {
           if (!IDENTIFIER.test(next) || next === n.name) return;
           void renameMember(ctx.getSource(), "aggregate", aggName, n.name, next)
-            .then(applyOrRefuse)
+            .then(on(`${n.kind} ${n.name} → ${next}`).applyOrRefuse)
             // A failed rename leaves the source untouched; log it rather than
             // letting the rejection surface as `unhandledrejection` noise.
             .catch((e: unknown) => {
@@ -1003,9 +1010,9 @@ function Inner({ ctx, path, setPath, onOverview }: {
                 const agg = findAggregate(parsed.ast, aggName);
                 if (!agg) return;
                 const idx = listFields(agg).findIndex((f) => f.name === n.name);
-                if (idx < 0) return;
-                const next = deleteField(ctx.getSource(), "aggregate", aggName, idx);
-                if (next != null) apply(next);
+                on(`field ${n.name}`).applyOrRefuse(
+                  idx < 0 ? null : deleteField(ctx.getSource(), "aggregate", aggName, idx),
+                );
               }
             : () => {
                 // Containment ids are `containment:<field>` — the display
@@ -1013,14 +1020,13 @@ function Inner({ ctx, path, setPath, onOverview }: {
                 // id keeps the plain field name (see aggregateLayout in
                 // view-graph.ts).
                 const fieldName = n.id.slice("containment:".length);
-                const next = deleteContainment(ctx.getSource(), aggName, fieldName);
-                if (next != null) apply(next);
+                on(`containment ${fieldName}`).applyOrRefuse(deleteContainment(ctx.getSource(), aggName, fieldName));
               };
         // Property TYPE + the modifier clauses (`= default`, `check … message`,
         // `mask unless`, the access keyword, `sensitive(…)`) — v1's collapsible
         // `ƒ` section, now the field node's own collapsed detail block. Every
-        // mutator returns null when the rewrite wouldn't re-parse, which is a
-        // no-op here (the next render re-seeds the input from source).
+        // mutator returns null when the rewrite wouldn't re-parse — refused
+        // visibly, naming the field (the input re-seeds from source).
         let inputs: ConstructNodeData["inputs"];
         let selects: ConstructNodeData["selects"];
         if (n.kind === "field") {
@@ -1029,9 +1035,7 @@ function Inner({ ctx, path, setPath, onOverview }: {
           const info = agg && idx >= 0 ? listFields(agg)[idx] : undefined;
           const mods = agg && idx >= 0 ? listFieldModifiers(agg)[idx] : undefined;
           if (info && mods) {
-            const edit = (next: string | null): void => {
-              if (next != null) apply(next);
-            };
+            const edit = on(`field ${n.name}`).applyOrRefuse;
             inputs = [
               {
                 label: "type",
@@ -1126,7 +1130,7 @@ function Inner({ ctx, path, setPath, onOverview }: {
           ? (next: string) => {
               if (!IDENTIFIER.test(next) || next === n.name) return;
               void renameByAstType(ctx.getSource(), astType, n.name, next)
-                .then(applyOrRefuse)
+                .then(on(`${n.kind} ${n.name} → ${next}`).applyOrRefuse)
                 .catch((e: unknown) => {
                   // eslint-disable-next-line no-console
                   console.error("rename failed:", e);
@@ -1136,7 +1140,7 @@ function Inner({ ctx, path, setPath, onOverview }: {
       const onDelete =
         astType != null
           ? () => {
-              applyOrRefuse(deleteByAstType(ctx.getSource(), astType, n.name));
+              on(`${n.kind} ${n.name}`).applyOrRefuse(deleteByAstType(ctx.getSource(), astType, n.name));
             }
           : undefined;
 
@@ -1161,8 +1165,7 @@ function Inner({ ctx, path, setPath, onOverview }: {
             searchable: true,
             testid: "c4system-v2-storage-type",
             onChange: (v) => {
-              const next = v && setStorageType(ctx.getSource(), storeName, v);
-              if (next) apply(next);
+              if (v) on(`storage ${storeName}`).applyOrRefuse(setStorageType(ctx.getSource(), storeName, v));
             },
           },
         ];
@@ -1177,8 +1180,7 @@ function Inner({ ctx, path, setPath, onOverview }: {
             searchable: true,
             testid: "c4system-v2-deployable-platform",
             onChange: (v) => {
-              const next = v && setDeployablePlatform(ctx.getSource(), depName, v);
-              if (next) apply(next);
+              if (v) on(`deployable ${depName}`).applyOrRefuse(setDeployablePlatform(ctx.getSource(), depName, v));
             },
           },
         ];
@@ -1193,9 +1195,11 @@ function Inner({ ctx, path, setPath, onOverview }: {
             onCommit: (v) => {
               const text = v.trim();
               const port = text === "" ? undefined : Number(text);
-              if (port !== undefined && !Number.isInteger(port)) return;
-              const next = setDeployablePort(ctx.getSource(), depName, port);
-              if (next != null) apply(next);
+              if (port !== undefined && !Number.isInteger(port)) {
+                refusal.refuse({ what: `deployable ${depName}`, why: `port must be an integer, not “${text}”` });
+                return;
+              }
+              on(`deployable ${depName}`).applyOrRefuse(setDeployablePort(ctx.getSource(), depName, port));
             },
           },
         ];
@@ -1218,8 +1222,7 @@ function Inner({ ctx, path, setPath, onOverview }: {
             searchable: true,
             testid: "c4system-v2-rebind",
             onChange: (v) => {
-              const next = v && rebindReference(ctx.getSource(), kind, owner, v);
-              if (next) apply(next);
+              if (v) on(`${kind} ${owner}`).applyOrRefuse(rebindReference(ctx.getSource(), kind, owner, v));
             },
           },
         ];
@@ -1235,8 +1238,7 @@ function Inner({ ctx, path, setPath, onOverview }: {
               data: boundedContextNames(parsed.ast),
               value: deployableContexts(dep),
               onChange: (v) => {
-                const next = setDeployableContexts(ctx.getSource(), depName, v);
-                if (next != null) apply(next);
+                on(`deployable ${depName}`).applyOrRefuse(setDeployableContexts(ctx.getSource(), depName, v));
               },
               testid: "c4system-v2-deployable-contexts",
             },
@@ -1245,8 +1247,7 @@ function Inner({ ctx, path, setPath, onOverview }: {
               data: apiNames(parsed.ast),
               value: deployableServes(dep),
               onChange: (v) => {
-                const next = setDeployableServes(ctx.getSource(), depName, v);
-                if (next != null) apply(next);
+                on(`deployable ${depName}`).applyOrRefuse(setDeployableServes(ctx.getSource(), depName, v));
               },
               testid: "c4system-v2-deployable-serves",
             },
@@ -1271,6 +1272,7 @@ function Inner({ ctx, path, setPath, onOverview }: {
         const surface = findSurface(parsed.ast, repoName, n.name);
         if (surface) {
           const findName = n.name;
+          const find = on(`find ${findName}`);
           // Collapsed: the header clauses plus the signature are five-plus
           // fields, and a repository view stacks its finds — expanded by
           // default they overlap the next find's node.
@@ -1285,8 +1287,7 @@ function Inner({ ctx, path, setPath, onOverview }: {
               // the removal request and returns the source untouched when
               // there was none.
               onCommit: (v) => {
-                const next = setFindGate(ctx.getSource(), repoName, findName, v.trim() || null);
-                if (next != null) apply(next);
+                find.applyOrRefuse(setFindGate(ctx.getSource(), repoName, findName, v.trim() || null));
               },
             },
             {
@@ -1297,8 +1298,7 @@ function Inner({ ctx, path, setPath, onOverview }: {
               onCommit: (v) => {
                 const text = v.trim();
                 const spec = text === "" ? null : text === "*" ? "*" : text.split(",").map((s) => s.trim());
-                const next = setFindIgnoring(ctx.getSource(), repoName, findName, spec);
-                if (next != null) apply(next);
+                find.applyOrRefuse(setFindIgnoring(ctx.getSource(), repoName, findName, spec));
               },
             },
             // The find's SIGNATURE — the surface v1's inspector owned: the
@@ -1310,9 +1310,11 @@ function Inner({ ctx, path, setPath, onOverview }: {
               testid: "c4system-v2-find-return",
               onCommit: (v) => {
                 const text = v.trim();
-                if (!text) return;
-                const next = setFindReturnType(ctx.getSource(), repoName, findName, text);
-                if (next != null) apply(next);
+                if (!text) {
+                  refusal.refuse({ what: `find ${findName}`, why: "a find needs a return type" });
+                  return;
+                }
+                find.applyOrRefuse(setFindReturnType(ctx.getSource(), repoName, findName, text));
               },
             },
             ...surface.params.map((p, i) => ({
@@ -1323,24 +1325,28 @@ function Inner({ ctx, path, setPath, onOverview }: {
               // splices — the rename first, then the retype on its result, so
               // a rejected half leaves the other half applied to nothing.
               onCommit: (v: string): void => {
+                const param = on(`find ${findName} param ${p.name}`);
                 const cut = v.indexOf(":");
-                if (cut < 0) return;
-                const name = v.slice(0, cut).trim();
-                const type = v.slice(cut + 1).trim();
-                if (!name || !type) return;
+                const name = cut < 0 ? "" : v.slice(0, cut).trim();
+                const type = cut < 0 ? "" : v.slice(cut + 1).trim();
+                if (!name || !type) {
+                  refusal.refuse({ what: `find ${findName} param ${p.name}`, why: "expected `name: Type`" });
+                  return;
+                }
                 let src = ctx.getSource();
                 if (name !== p.name) {
                   const renamed = renameFindParam(src, repoName, findName, i, name);
-                  if (renamed == null) return;
+                  if (renamed == null) {
+                    param.applyOrRefuse(null);
+                    return;
+                  }
                   src = renamed;
                 }
                 const retyped = retypeFindParam(src, repoName, findName, i, type);
-                const next = retyped ?? (src === ctx.getSource() ? null : src);
-                if (next != null) apply(next);
+                param.applyOrRefuse(retyped ?? (src === ctx.getSource() ? null : src));
               },
               onDelete: (): void => {
-                const next = deleteFindParam(ctx.getSource(), repoName, findName, i);
-                if (next != null) apply(next);
+                on(`find ${findName} param ${p.name}`).applyOrRefuse(deleteFindParam(ctx.getSource(), repoName, findName, i));
               },
             })),
           ];
@@ -1356,7 +1362,7 @@ function Inner({ ctx, path, setPath, onOverview }: {
                   freshParamName(parsed.ast, repoName, findName),
                   { base: { kind: "primitive", name: "string" }, array: false, optional: false },
                 );
-                if (next != null) apply(next);
+                find.applyOrRefuse(next);
               },
             },
           ];
@@ -1453,10 +1459,10 @@ function Inner({ ctx, path, setPath, onOverview }: {
   );
 
   /** Reset the persisted layout for the current view and re-apply the pure
-   *  computed positions. Behind a `confirm` so a stray tap doesn't wipe the
-   *  user's arrangement. */
+   *  computed positions.  Deliberately NOT behind a confirm: positions are
+   *  cosmetic and re-draggable, and confirming this while declaration
+   *  deletes went unconfirmed was the audit's clearest inversion (H8). */
   const resetLayout = (): void => {
-    if (typeof window !== "undefined" && !window.confirm("Reset positions for this view?")) return;
     clearPersisted(path);
     persistedRef.current = {};
     setPersistedRev((r) => r + 1);
@@ -1543,9 +1549,7 @@ function Inner({ ctx, path, setPath, onOverview }: {
     if (!surface) return null;
     const agg = aggStep.name;
     const op = last.name;
-    const commit = (next: string | null): void => {
-      if (next != null) apply(next);
-    };
+    const commit = on(`operation ${op}`).applyOrRefuse;
     const modifier = (name: "private" | "extern" | "audited", on: boolean): void =>
       commit(setOpModifier(ctx.getSource(), agg, op, name, on));
     return (
@@ -1668,8 +1672,9 @@ function Inner({ ctx, path, setPath, onOverview }: {
   const onReconnect = (oldEdge: Edge, conn: Connection): void => {
     if (!conn.target || conn.source !== oldEdge.source) return;
     const label = typeof oldEdge.label === "string" ? oldEdge.label : "";
-    const next = rebindDeployableEdgeTarget(ctx.getSource(), label, oldEdge.source, conn.target);
-    if (next != null) apply(next);
+    on(`${oldEdge.source} ${label}`).applyOrRefuse(
+      rebindDeployableEdgeTarget(ctx.getSource(), label, oldEdge.source, conn.target),
+    );
   };
 
   // Below every hook, so the gate above can't change the hook order.
@@ -1678,8 +1683,19 @@ function Inner({ ctx, path, setPath, onOverview }: {
   }
 
   return (
-    <Box style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
-      <Breadcrumb path={path} onJump={jumpTo} onOverview={path.length === 0 ? onOverview : undefined} />
+    // `tabIndex={-1}` + the key handler: clicking the canvas focuses the pane
+    // so ⌘Z / ⌘⇧Z reach the editor's undo stack from here.
+    <Box
+      style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, outline: "none" }}
+      tabIndex={-1}
+      onKeyDown={paneUndoKeyHandler(ctx.editorHandleRef)}
+    >
+      <Breadcrumb
+        path={path}
+        onJump={jumpTo}
+        onOverview={path.length === 0 ? onOverview : undefined}
+        trailing={<UndoRedo handleRef={ctx.editorHandleRef} testidPrefix="c4system-v2" />}
+      />
       {bodyMembers.length > 0 && (
         <BodyPicker
           members={bodyMembers}
@@ -1690,8 +1706,13 @@ function Inner({ ctx, path, setPath, onOverview }: {
         />
       )}
       {opInspector}
-      <AddPalette path={path} source={ctx.getSource()} onChange={apply} bodyMember={bodyMember} />
-      <RefusalLine refused={refusal.refused} />
+      <AddPalette
+        path={path}
+        source={ctx.getSource()}
+        onAdd={(what, next) => on(what).applyOrRefuse(next)}
+        bodyMember={bodyMember}
+      />
+      <RefusalLine refusal={refusal} />
       <Box style={{ flex: 1, position: "relative", minHeight: 0 }} data-testid="c4system-v2-pane">
         <ReactFlow
           nodes={nodes}

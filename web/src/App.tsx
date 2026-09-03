@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "r
 import { AppShell } from "@mantine/core";
 import { useMediaQuery } from "@mantine/hooks";
 import type { EditorHandle } from "./editor/editor-handle";
+import { ConfirmHost, confirmSites, requestConfirm } from "./util/confirm";
 // Type-only.  `lsp/client.ts` imports `monaco-languageclient` and
 // `editor/loom-services`, i.e. Monaco — 9.56 MB and three worker realms.  The
 // client is constructed through `await import(...)` below, and only on the
@@ -792,15 +793,16 @@ export default function App(): JSX.Element {
     // Importing overwrites the workspace with the example's file set, so any
     // other source file is deleted.  Confirm ONLY when that would actually
     // lose something — a switch between two single-file examples drops
-    // nothing and must not prompt.  Same idiom as the other destructive file
-    // actions (SourceFilesTree deletes, workspace delete): `window.confirm`.
+    // nothing and must not prompt.  The shared confirm modal (via the
+    // `<ConfirmHost/>` mounted below) lists the files that go.
     const dropped = filesDroppedByExample(sourcesRef.current.files.keys(), ex.files);
-    if (dropped.length > 0 && typeof window !== "undefined") {
-      const list = dropped.map((p) => `  ${p.replace("/workspace/", "")}`).join("\n");
-      const ok = window.confirm(
-        `Loading "${ex.label}" replaces this workspace's files.\n\n` +
-          `${dropped.length} file${dropped.length === 1 ? "" : "s"} will be deleted:\n${list}\n\n` +
-          `Continue?`,
+    if (dropped.length > 0) {
+      const ok = await requestConfirm(
+        confirmSites.exampleImport(
+          ex.label,
+          dropped.map((p) => p.replace("/workspace/", "")),
+        ),
+        { base: "example-import" },
       );
       if (!ok) return;
     }
@@ -2183,6 +2185,7 @@ export default function App(): JSX.Element {
       footer={{ height: isDesktop ? 28 : 0 }}
       padding={0}
     >
+      <ConfirmHost />
       <AppShell.Header>
         {isDesktop ? <DesktopHeader ctx={ctx} /> : <MobileHeader ctx={ctx} />}
       </AppShell.Header>

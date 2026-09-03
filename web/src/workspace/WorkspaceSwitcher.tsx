@@ -11,6 +11,8 @@ import {
 } from "@mantine/core";
 import { defaultExample, type LoomExample } from "../examples";
 import type { WorkspaceState } from "../layout/ctx";
+import { ConfirmModal, confirmSites } from "../util/confirm";
+import { countSourceFiles } from "./workspace-sources";
 
 interface Props {
   workspace: WorkspaceState;
@@ -26,8 +28,9 @@ interface Props {
 // git store; switching reopens its store (App reseats the editor + build
 // worker around it).  Creating a workspace lets you pick the example it
 // starts from (a popover form) — the non-destructive counterpart to the
-// mobile drawer; rename/delete stay on the native prompt/confirm (one-
-// line actions, no modal-form dependency).
+// mobile drawer.  Rename is an inline TextInput in place of the Select (the
+// mobile drawer's pattern); delete is the shared `ConfirmModal`, naming the
+// file count and asking for the workspace name to be typed (M-T8.17, H8).
 export function WorkspaceSwitcher({
   workspace,
   examples,
@@ -50,31 +53,75 @@ export function WorkspaceSwitcher({
     setStartExample(defaultExample.id);
     setCreateOpen(false);
   };
-  const onRename = (): void => {
-    const name = window.prompt("Rename workspace", activeName)?.trim();
-    if (name) renameWorkspace(activeId, name);
+  // Inline rename: the Select gives way to a TextInput seeded with the
+  // current name; Enter / Save commits, Escape / Cancel drops it.
+  const [renaming, setRenaming] = useState(false);
+  const [renameDraft, setRenameDraft] = useState("");
+  const beginRename = (): void => {
+    setRenameDraft(activeName);
+    setRenaming(true);
   };
-  const onDelete = (): void => {
+  const commitRename = (): void => {
+    const name = renameDraft.trim();
+    if (name && name !== activeName) renameWorkspace(activeId, name);
+    setRenaming(false);
+  };
+  // Delete: a modal naming the file count (one store list when the menu item
+  // is clicked — the same walk the file tree does) and gated on typing the
+  // workspace name.
+  const [deleteArmed, setDeleteArmed] = useState(false);
+  const [fileCount, setFileCount] = useState<number | null>(null);
+  const armDelete = (): void => {
     if (workspaces.length <= 1) return;
-    if (window.confirm(`Delete workspace "${activeName}"? Its files are removed.`)) {
-      deleteWorkspace(activeId);
-    }
+    setFileCount(null);
+    setDeleteArmed(true);
+    const store = workspace.store;
+    if (store) void countSourceFiles(store).then(setFileCount, () => setFileCount(null));
+  };
+  const confirmDelete = (): void => {
+    setDeleteArmed(false);
+    deleteWorkspace(activeId);
   };
 
   return (
     <Group gap={4} wrap="nowrap">
-      <Select
-        size={size}
-        value={activeId}
-        onChange={(v) => v && switchWorkspace(v)}
-        data={workspaces.map((w) => ({ value: w.id, label: w.name }))}
-        allowDeselect={false}
-        w={size === "sm" ? 150 : 170}
-        comboboxProps={{ withinPortal: true }}
-        aria-label="Choose workspace"
-        styles={size === "sm" ? { input: { fontSize: 16, minHeight: 36 } } : undefined}
-        data-testid="workspace-select"
-      />
+      {renaming ? (
+        <Group gap={4} wrap="nowrap">
+          <TextInput
+            size={size}
+            autoFocus
+            value={renameDraft}
+            w={size === "sm" ? 150 : 170}
+            aria-label="Workspace name"
+            onChange={(e) => setRenameDraft(e.currentTarget.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") commitRename();
+              else if (e.key === "Escape") setRenaming(false);
+            }}
+            styles={size === "sm" ? { input: { fontSize: 16, minHeight: 36 } } : undefined}
+            data-testid="workspace-rename-input"
+          />
+          <Button size={size} variant="default" onClick={commitRename} data-testid="workspace-rename-save">
+            Save
+          </Button>
+          <Button size={size} variant="subtle" color="gray" onClick={() => setRenaming(false)}>
+            Cancel
+          </Button>
+        </Group>
+      ) : (
+        <Select
+          size={size}
+          value={activeId}
+          onChange={(v) => v && switchWorkspace(v)}
+          data={workspaces.map((w) => ({ value: w.id, label: w.name }))}
+          allowDeselect={false}
+          w={size === "sm" ? 150 : 170}
+          comboboxProps={{ withinPortal: true }}
+          aria-label="Choose workspace"
+          styles={size === "sm" ? { input: { fontSize: 16, minHeight: 36 } } : undefined}
+          data-testid="workspace-select"
+        />
+      )}
       <Popover
         opened={createOpen}
         onChange={setCreateOpen}
@@ -145,19 +192,26 @@ export function WorkspaceSwitcher({
           </ActionIcon>
         </Menu.Target>
         <Menu.Dropdown>
-          <Menu.Item onClick={onRename} data-testid="workspace-rename">
+          <Menu.Item onClick={beginRename} data-testid="workspace-rename">
             Rename…
           </Menu.Item>
           <Menu.Item
             color="red"
-            onClick={onDelete}
+            onClick={armDelete}
             disabled={workspaces.length <= 1}
             data-testid="workspace-delete"
           >
-            Delete
+            Delete…
           </Menu.Item>
         </Menu.Dropdown>
       </Menu>
+      <ConfirmModal
+        opened={deleteArmed}
+        spec={confirmSites.workspaceDelete(activeName, fileCount)}
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteArmed(false)}
+        testids={{ base: "workspace-delete" }}
+      />
     </Group>
   );
 }

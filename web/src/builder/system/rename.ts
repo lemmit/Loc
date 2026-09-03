@@ -31,6 +31,8 @@ const KIND_TO_TYPE: Record<NodeKind, string> = {
 };
 
 export const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
+/** The rule, in words — shown inline when a rename draft breaks it (M-T8.17). */
+export const IDENTIFIER_RULE = "Names use letters, digits and _ and can't start with a digit";
 
 export async function renameConstruct(
   source: string,

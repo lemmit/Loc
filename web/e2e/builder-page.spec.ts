@@ -436,8 +436,10 @@ test("edits a page's state fields from the State panel", async ({ page }) => {
   await expect.poll(model).toContain("field1");
   await expect(page.getByTestId("c4state-field")).toHaveCount(2);
 
-  // Delete the original "step" field → gone from the source, page still valid.
+  // Delete the original "step" field (× → the inline confirm's Yes, M-T8.17)
+  // → gone from the source, page still valid.
   await page.getByTestId("c4state-delete").first().click();
+  await page.getByTestId("c4state-delete-yes").click();
   await expect.poll(model).not.toContain("step");
   await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
 });

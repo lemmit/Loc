@@ -9,6 +9,8 @@ import { parseDdd } from "./parse";
 import { spliceNodeIfParses } from "./edit-engine";
 import { RefusalLine } from "./refusal";
 import { usePaneHarness } from "./pane-harness";
+import { ConfirmAction, confirmSites, type ConfirmSpec } from "../util/confirm";
+import { UndoRedo, paneUndoKeyHandler } from "./undo-redo";
 import { collectBodies } from "./page/bodies";
 import { seedFromBody, emitBody, enumStateFields, type BuilderNode } from "./page/model";
 import { toCraft, fromCraft } from "./page/serialize";
@@ -300,34 +302,45 @@ export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     const page = collectBodies(fresh.ast).find((p) => p.name === current.name);
     if (!page) return;
     const emitted = emitBody(fromCraft(nodes));
-    harness.applyOrRefuse(spliceNodeIfParses(source, page.expr, emitted));
+    harness.on(`page ${current.name} body`).applyOrRefuse(spliceNodeIfParses(source, page.expr, emitted));
   };
 
   return (
-    <Box style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      {ctx.isDesktop && current.page && (
-        <Group px="xs" py={4} bg="dark.7" gap="xs" style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}>
-          <StatePanel page={current.page} getSource={() => ctx.getSource()} types={stateTypes} enumCases={enumCases} onApply={applyState} />
-          {pagePropsInfo && (
-            <PagePropsPanel
-              pageName={current.name}
-              info={pagePropsInfo}
-              layouts={layouts}
-              getSource={() => ctx.getSource()}
-              onApply={applyState}
-            />
-          )}
-          {uiName !== undefined && uiStructure && (
-            <UiStructurePanel
-              uiName={uiName}
-              structure={uiStructure}
-              getSource={() => ctx.getSource()}
-              onApply={applyState}
-            />
-          )}
-        </Group>
-      )}
-      <RefusalLine refused={refusal.refused} />
+    // `tabIndex={-1}` + the key handler: a click anywhere on the canvas
+    // focuses the pane, so ⌘Z / ⌘⇧Z route to the editor's undo stack from
+    // here (text controls keep their own — see `undo-keys.ts`).
+    <Box
+      style={{ display: "flex", flexDirection: "column", height: "100%", outline: "none" }}
+      tabIndex={-1}
+      onKeyDown={paneUndoKeyHandler(ctx.editorHandleRef)}
+      data-testid="c4builder-pane"
+    >
+      <Group px="xs" py={4} bg="dark.7" gap="xs" style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}>
+        <UndoRedo handleRef={ctx.editorHandleRef} testidPrefix="c4builder" />
+        {ctx.isDesktop && current.page && (
+          <>
+            <StatePanel page={current.page} getSource={() => ctx.getSource()} types={stateTypes} enumCases={enumCases} onApply={applyState} />
+            {pagePropsInfo && (
+              <PagePropsPanel
+                pageName={current.name}
+                info={pagePropsInfo}
+                layouts={layouts}
+                getSource={() => ctx.getSource()}
+                onApply={applyState}
+              />
+            )}
+            {uiName !== undefined && uiStructure && (
+              <UiStructurePanel
+                uiName={uiName}
+                structure={uiStructure}
+                getSource={() => ctx.getSource()}
+                onApply={applyState}
+              />
+            )}
+          </>
+        )}
+      </Group>
+      <RefusalLine refusal={refusal} />
       <Box style={{ flex: 1, minHeight: 0 }}>
         <PageBuilder
           // `mountKey` (page : Apply-rev : annotation-set) — remounting the
@@ -517,15 +530,11 @@ function UiStructurePanel({ uiName, structure, getSource, onApply }: {
             >
               + field
             </Button>
-            <Button
-              size="compact-xs"
-              variant="subtle"
-              color="red"
-              data-testid={`uidecl-store-delete-${s.name}`}
-              onClick={() => onApply(deleteStore(getSource(), uiName, s.name))}
-            >
-              ×
-            </Button>
+            <DeleteButton
+              spec={confirmSites.uiMemberDelete("store", s.name)}
+              testid={`uidecl-store-delete-${s.name}`}
+              onConfirm={() => onApply(deleteStore(getSource(), uiName, s.name))}
+            />
           </Group>
         ))}
         <Button
@@ -601,29 +610,22 @@ function UiStructurePanel({ uiName, structure, getSource, onApply }: {
                 data-testid={`uidecl-menu-addlink-${s.label}`}
                 onChange={(v) => v && onApply(addMenuLink(getSource(), uiName, s.label, { page: v }))}
               />
-              <Button
-                size="compact-xs"
-                variant="subtle"
-                color="red"
-                data-testid={`uidecl-menu-delsection-${s.label}`}
-                onClick={() => onApply(deleteMenuSection(getSource(), uiName, s.label))}
-              >
-                ×
-              </Button>
+              <DeleteButton
+                spec={confirmSites.uiMemberDelete("menu section", s.label)}
+                testid={`uidecl-menu-delsection-${s.label}`}
+                onConfirm={() => onApply(deleteMenuSection(getSource(), uiName, s.label))}
+              />
             </Group>
             {s.entries.map((e, i) => (
               <Group key={`${s.label}:${i}:${e.kind === "page" ? e.page : e.url}`} gap={6} pl={14} wrap="nowrap">
                 <Text size="xs" c="dimmed" style={{ flex: 1, fontFamily: "monospace" }} truncate>
                   {e.kind === "page" ? e.page : `${e.label} → ${e.url}`}
                 </Text>
-                <Button
-                  size="compact-xs"
-                  variant="subtle"
-                  color="red"
-                  onClick={() => onApply(deleteMenuLink(getSource(), uiName, s.label, i))}
-                >
-                  ×
-                </Button>
+                <DeleteButton
+                  spec={confirmSites.uiMemberDelete("menu link", e.kind === "page" ? e.page : e.label)}
+                  testid={`uidecl-menu-dellink-${s.label}-${i}`}
+                  onConfirm={() => onApply(deleteMenuLink(getSource(), uiName, s.label, i))}
+                />
               </Group>
             ))}
           </Box>
@@ -651,6 +653,26 @@ function UiStructurePanel({ uiName, structure, getSource, onApply }: {
         </Group>
       </Popover.Dropdown>
     </Popover>
+  );
+}
+
+// A red `×` that arms the shared inline confirm in place (M-T8.17): the row's
+// splice only runs from the confirm's Yes.  `testid` stays on the trigger so
+// the existing selectors still find it; the row derives `${testid}-yes` /
+// `${testid}-cancel`.
+function DeleteButton({ spec, testid, onConfirm }: { spec: ConfirmSpec; testid: string; onConfirm: () => void }): JSX.Element {
+  return (
+    <ConfirmAction
+      spec={spec}
+      onConfirm={onConfirm}
+      testids={{ base: testid }}
+      size="compact-xs"
+      trigger={(arm) => (
+        <Button size="compact-xs" variant="subtle" color="red" data-testid={testid} aria-label={spec.consequence} onClick={arm}>
+          ×
+        </Button>
+      )}
+    />
   );
 }
 

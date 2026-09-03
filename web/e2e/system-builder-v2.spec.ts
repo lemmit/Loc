@@ -139,10 +139,12 @@ test("Model v2 renames and deletes a construct from the node itself", async ({ p
     page.locator('[data-construct-kind="aggregate"][data-construct-name="Order"]'),
   ).toHaveCount(0);
 
-  // Delete OrderX via the `×`; aggregate node count drops by one.
+  // Delete OrderX via the `×` → the inline confirm's Yes (M-T8.17: a
+  // declaration delete asks first); aggregate node count drops by one.
   const renamed = page.locator('[data-construct-kind="aggregate"][data-construct-name="OrderX"]');
   const before = await page.locator('.react-flow__node[data-id^="aggregate:"]').count();
   await renamed.getByTestId("c4system-v2-delete").click();
+  await renamed.getByTestId("c4system-v2-delete-yes").click();
   await expect
     .poll(async () => page.locator('.react-flow__node[data-id^="aggregate:"]').count(), { timeout: 5_000 })
     .toBe(before - 1);
@@ -220,10 +222,9 @@ test("Model v2 renames a context and deletes an operation (v2-only kinds)", asyn
   await page.locator('[data-construct-kind="context"][data-construct-name="Ctx2024"]').click();
   await page.locator('.react-flow__node[data-id="aggregate:Order"]').click();
   const opsBefore = await page.locator('.react-flow__node[data-id^="operation:"]').count();
-  await page
-    .locator('[data-construct-kind="operation"][data-construct-name="confirm"]')
-    .getByTestId("c4system-v2-delete")
-    .click();
+  const confirmOp = page.locator('[data-construct-kind="operation"][data-construct-name="confirm"]');
+  await confirmOp.getByTestId("c4system-v2-delete").click();
+  await confirmOp.getByTestId("c4system-v2-delete-yes").click();
   await expect
     .poll(async () => page.locator('.react-flow__node[data-id^="operation:"]').count(), { timeout: 5_000 })
     .toBe(opsBefore - 1);
@@ -258,10 +259,9 @@ test("Model v2 renames and deletes an aggregate field (renameMember + deleteFiel
 
   // Delete it via the on-node × → field count drops.
   const fieldsBefore = await page.locator('[data-construct-kind="field"]').count();
-  await page
-    .locator('[data-construct-kind="field"][data-construct-name="fieldRenamed"]')
-    .getByTestId("c4system-v2-delete")
-    .click();
+  const renamedField = page.locator('[data-construct-kind="field"][data-construct-name="fieldRenamed"]');
+  await renamedField.getByTestId("c4system-v2-delete").click();
+  await renamedField.getByTestId("c4system-v2-delete-yes").click();
   await expect.poll(async () => page.locator('[data-construct-kind="field"]').count(), { timeout: 5_000 }).toBe(
     fieldsBefore - 1,
   );
@@ -370,9 +370,9 @@ test("Model v2 persists hand-dragged node positions across a reload, and Reset c
   await expect(node).toBeVisible({ timeout: 5_000 });
   await expect.poll(transform, { timeout: 10_000 }).toBe(dragged);
 
-  // Reset layout (auto-accept the `confirm` dialog) → back to the derived
-  // position and the button disappears once nothing is persisted.
-  page.once("dialog", (d) => void d.accept());
+  // Reset layout — no confirm (M-T8.17: positions are cosmetic and
+  // re-draggable) → back to the derived position and the button disappears
+  // once nothing is persisted.
   await page.getByTestId("c4system-v2-reset-layout").click();
   await expect.poll(transform).toBe(derived);
   await expect(page.getByTestId("c4system-v2-reset-layout")).toHaveCount(0);
