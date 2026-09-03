@@ -34,6 +34,14 @@ async function unnamedButtons(page: Page, rootSelector: string): Promise<string[
       if (b.getAttribute("title")?.trim()) continue;
       if (b.querySelector("img[alt]:not([alt=''])")) continue;
       if ((b.querySelector("svg title")?.textContent ?? "").trim()) continue;
+      // Mantine's NumberInput spinners are the one documented exemption: they
+      // carry `tabindex="-1"` by construction, so no keyboard user can reach
+      // them, and the same increment/decrement is on the focused input's arrow
+      // keys.  Mantine v7 exposes no prop to label them (unlike a Select's
+      // clear button, which takes `clearButtonProps` — every one of ours is
+      // labelled).  Narrow by class so a `tabindex="-1"` button of OUR OWN
+      // still fails this walk.
+      if (b.getAttribute("tabindex") === "-1" && b.className.includes("NumberInput-control")) continue;
       out.push(`${b.outerHTML.slice(0, 160)}`);
     }
     return out;

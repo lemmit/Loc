@@ -940,6 +940,7 @@ function RequirementForm({
           onChange={(v) => setForm({ ...form, status: (v as RequirementStatus | null) ?? "" })}
           clearable
           placeholder="(unset)"
+          clearButtonProps={{ "aria-label": "Clear status" }}
           data-testid="req-form-status"
         />
         <NumberInput
@@ -960,6 +961,7 @@ function RequirementForm({
           clearable
           placeholder="(no parent)"
           searchable
+          clearButtonProps={{ "aria-label": "Clear parent" }}
           data-testid="req-form-parent"
         />
       </SimpleGrid>
@@ -1268,6 +1270,7 @@ function CodeRefPicker({
         onChange={onChange}
         searchable
         clearable
+        clearButtonProps={{ "aria-label": "Clear selection" }}
         nothingFoundMessage="No matching code symbol"
         data-testid={testid}
       />
@@ -1443,6 +1446,7 @@ function NewRequirementWizard({
         value={parent || null}
         onChange={(v) => setParent(v ?? "")}
         clearable
+        clearButtonProps={{ "aria-label": "Clear parent" }}
         searchable
         placeholder="(no parent)"
         data-testid="req-wizard-parent"
