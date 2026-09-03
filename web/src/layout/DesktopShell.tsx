@@ -20,12 +20,11 @@ import { DevToolsDock } from "./DevToolsDock";
 import { ExplorerTree } from "../preview/ExplorerTree";
 import { LazyFileViewer } from "./lazy-panels";
 import { SourceFilesTree } from "./SourceFilesTree";
-import { usePersistedState } from "../util/usePersistedState";
 import { PaneErrorBoundary } from "../PaneErrorBoundary";
-import { modeLabel, type LayoutCtx } from "./ctx";
+import { ExamplesPane } from "./ExamplesPane";
+import { FirstRunCard } from "./FirstRunCard";
+import { type CenterView, type ExplorerMode, modeLabel, type LayoutCtx } from "./ctx";
 import { nextStep, nextStepMid, PANE, STAGE } from "./vocabulary";
-
-type ExplorerMode = "user" | "generated";
 
 // The active non-source document in the center area — a file opened
 // from either Explorer view.  `source` (main.ddd) is the other tab.
@@ -64,16 +63,10 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
   // Center area shows either the editable source (main.ddd) or a
   // read-only view of a file opened from the Explorer.  The editor
   // stays mounted underneath so Monaco keeps its model + undo history.
-  const [centerView, setCenterView] = useState<
-    "source" | "secondary" | "builder" | "model" | "requirements"
-  >("source");
+  // Both lifted to the ctx (App) in M-T8.18 so the palette, the Problems
+  // rows and the panes' *Go to line N* can switch them.
+  const { centerView, setCenterView, explorerMode, setExplorerMode, firstRunVisible } = ctx;
   const [secondaryDoc, setSecondaryDoc] = useState<SecondaryDoc | null>(null);
-  const [explorerMode, setExplorerMode] = usePersistedState<ExplorerMode>(
-    "loom.desktop.explorerMode",
-    // Default to your source files — the managed "User code" tree is the
-    // primary explorer now; "Generated" is for browsing emitted output.
-    "user",
-  );
   // Dock-tab state lives on the ctx now (lifted to App), so a panel inside
   // the dock — History's "diff as baseline" — can reveal a sibling tab
   // (Migrations) with context.  The legacy-alias coercion moved to App.
@@ -188,11 +181,16 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
                       data={[
                         { label: "User code", value: "user" },
                         { label: PANE.generated, value: "generated" },
+                        { label: PANE.examples, value: "examples" },
                       ]}
                       data-testid="explorer-mode"
                     />
                   </Box>
-                  {explorerMode === "generated" ? (
+                  {explorerMode === "examples" ? (
+                    // Sample systems by concept, each opening in a NEW
+                    // workspace (M-T8.18, audit H5).
+                    <ExamplesPane ctx={ctx} />
+                  ) : explorerMode === "generated" ? (
                     <Box style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
                       {files.length > 0 && (
                         <Box px="xs" py={4} style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}>
@@ -251,9 +249,7 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
                     <SegmentedControl
                       size="xs"
                       value={centerView === "secondary" ? "" : centerView}
-                      onChange={(v) =>
-                        setCenterView(v as "source" | "builder" | "model" | "requirements")
-                      }
+                      onChange={(v) => setCenterView(v as CenterView)}
                       data={[
                         { value: "source", label: <span data-testid="doc-tab-source">{PANE.source}</span> },
                         { value: "builder", label: <span data-testid="doc-tab-builder">{PANE.builder}</span> },
@@ -270,8 +266,10 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
                   {/* Editor stays mounted (display toggle) so Monaco keeps
                       its model + undo history; the read-only viewer
                       remounts per file via its key. */}
-                  <Box style={{ flex: 1, minHeight: 0, display: centerView === "source" ? "flex" : "none" }}>
+                  <Box style={{ flex: 1, minHeight: 0, display: centerView === "source" ? "flex" : "none", position: "relative" }}>
                     <EditorPane ctx={ctx} />
+                    {/* Three doors over the never-edited editor (M-T8.18). */}
+                    {firstRunVisible && <FirstRunCard ctx={ctx} />}
                   </Box>
                   {/* Lazy-mounted on first activation, then kept mounted via
                       a display toggle (same pattern as the editor above) so

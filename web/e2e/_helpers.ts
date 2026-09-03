@@ -54,6 +54,21 @@ export async function revealTreeRow(
 export async function waitForPlaygroundReady(page: Page): Promise<void> {
   await expect(page.getByRole("heading", { name: /Loom Playground/i })).toBeVisible();
   await expect(page.getByText(/^0 errors$/)).toBeVisible({ timeout: 30_000 });
+  await dismissFirstRun(page);
+}
+
+/** Close the first-run card (M-T8.18) if it is showing — a fresh browser
+ *  profile shows it over the editor on the never-edited default workspace,
+ *  and the *Write .ddd* door is the dismissal that keeps the editor focused.
+ *  The choice persists (`loom.firstRun.dismissed`), so a spec that creates a
+ *  second workspace does not see it again.  Specs that assert on the card
+ *  itself (`problems-and-help.spec.ts`) drive it before calling this. */
+export async function dismissFirstRun(page: Page): Promise<void> {
+  const door = page.getByTestId("first-run-write");
+  if (await door.isVisible().catch(() => false)) {
+    await door.click();
+    await expect(page.getByTestId("first-run-card")).toBeHidden();
+  }
 }
 
 /** Wait until an editor has published the `__loomSetSource`/`__loomGetSource`

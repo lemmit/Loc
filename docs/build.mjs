@@ -56,6 +56,25 @@ marked.use({
   },
 });
 
+// Heading anchors.  GitHub's slug rule (lowercase; keep letters, digits,
+// spaces, hyphens, underscores; each space → hyphen) so one `#anchor` works on
+// GitHub and on the rendered site.  The playground's Problems rows link into
+// `language-reference/<chapter>.html#<slug>` (src/diagnostics/code-docs.ts,
+// which carries the same rule — keep the two in step; the docs-anchors test
+// checks the entries there against the markdown headings).
+const headingSlug = (text) =>
+  text.trim().toLowerCase().replace(/[^\p{L}\p{N} _-]/gu, '').replace(/ /g, '-');
+
+marked.use({
+  renderer: {
+    heading({ tokens, depth }) {
+      const inner = this.parser.parseInline(tokens);
+      const plain = tokens.map((t) => t.text ?? t.raw ?? '').join('');
+      return `<h${depth} id="${escapeAttr(headingSlug(plain))}">${inner}</h${depth}>\n`;
+    },
+  },
+});
+
 const escapeHtml = (s) => s.replace(/[&<>"']/g, (c) => ({
   '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;',
 }[c]));

@@ -25,6 +25,7 @@ export function buildDiagnosticsToLsp(items: readonly BuildDiagnostic[]): Diagno
       severity: d.severity,
       message: d.message,
       source: d.source ?? "loom",
+      code: d.code,
     };
   });
 }

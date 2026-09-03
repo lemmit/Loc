@@ -35,6 +35,20 @@ export function ChatBody({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     ctx;
   const scrollRef = useRef<HTMLDivElement>(null);
   const [input, setInput] = useState("");
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // A prompt handed over from elsewhere — a Problems row's *Ask the agent*,
+  // the first-run card's *Describe a system* (M-T8.18).  Prefill (or, for an
+  // empty request, just focus) and consume it so a re-render doesn't replay.
+  const { agentPrompt, consumeAgentPrompt } = ctx;
+  useEffect(() => {
+    if (!agentPrompt) return;
+    if (agentPrompt.text) setInput(agentPrompt.text);
+    consumeAgentPrompt();
+    // The tab may have just been switched to: focus after the panel paints.
+    const id = window.setTimeout(() => inputRef.current?.focus(), 0);
+    return () => window.clearTimeout(id);
+  }, [agentPrompt, consumeAgentPrompt]);
   // A scripted transport (e2e/manual harness) counts as ready even without a
   // configured key — mirrors the App-side `__loomAgentComplete` seam.
   const injected =
@@ -123,6 +137,7 @@ export function ChatBody({ ctx }: { ctx: LayoutCtx }): JSX.Element {
       <Box style={{ borderTop: "1px solid var(--mantine-color-dark-4)", flexShrink: 0 }} p="sm">
         <Group gap={8} align="flex-end" wrap="nowrap">
           <Textarea
+            ref={inputRef}
             style={{ flex: 1 }}
             autosize
             minRows={1}

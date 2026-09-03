@@ -16,6 +16,7 @@ import { WorkspaceSwitcher } from "../workspace/WorkspaceSwitcher";
 import { WorkspaceTree } from "../workspace/WorkspaceTree";
 import type { LayoutCtx } from "./ctx";
 import { WorkspaceLockBanner } from "./WorkspaceLockBanner";
+import { HelpMenu, HelpMenuItems } from "./HelpMenu";
 import { PipelineDots, PipelineStrip } from "./PipelineStrip";
 import { AUTO_RUN, AUTO_RUN_HINT, RUN } from "./vocabulary";
 
@@ -90,6 +91,9 @@ export function DesktopHeader({ ctx }: Props): JSX.Element {
             </Box>
           </Menu.Dropdown>
         </Menu>
+        {/* `?` — Docs, Language reference, Keyboard shortcuts, Report a
+            problem (M-T8.18, audit H5). */}
+        <HelpMenu ctx={ctx} />
       </Group>
       {/* The pipeline strip IS the Generate / Bundle / Boot controls plus
           their state — one widget on both shells (audit H1). */}
@@ -219,6 +223,9 @@ export function MobileHeader({ ctx }: Props): JSX.Element {
             <Box px="sm" py={6}>
               <WorkspaceTree workspaceStore={workspace.store} buildClient={buildClient} />
             </Box>
+            <Menu.Divider />
+            {/* The `?` items fold into the kebab on mobile (M-T8.18). */}
+            <HelpMenuItems ctx={ctx} />
           </Menu.Dropdown>
         </Menu>
       </Group>

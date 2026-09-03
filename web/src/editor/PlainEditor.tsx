@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type MutableRefObject } from "react";
 import { Box } from "@mantine/core";
 import type { EditorHandle } from "./editor-handle";
+import { applyTextEdits, selectionFor } from "./apply-edits";
 
 export interface PlainEditorProps {
   initialValue: string;
@@ -38,6 +39,28 @@ export function PlainEditor({ initialValue, handleRef, onChange }: PlainEditorPr
         const area = areaRef.current;
         if (area) replaceValue(area, text);
         setLineCount(countLines(text));
+      },
+      // The textarea has no edit model: apply the edits to its text and write
+      // the result back through the undoable path, then dispatch like a
+      // keystroke so the app (and mobile's generate-fed Problems) follow.
+      applyEdits: (edits) => {
+        const area = areaRef.current;
+        if (!area || edits.length === 0) return;
+        const next = applyTextEdits(area.value, edits);
+        if (next === area.value) return;
+        replaceValue(area, next);
+        setLineCount(countLines(next));
+        onChangeRef.current?.(next);
+      },
+      revealRange: (range) => {
+        const area = areaRef.current;
+        if (!area) return;
+        const sel = selectionFor(area.value, range);
+        area.focus();
+        area.setSelectionRange(sel.start, sel.end);
+        // Line-height arithmetic: no layout API tells a textarea where a
+        // line is, and the gutter shares these metrics exactly.
+        area.scrollTop = Math.max(0, (range.startLineNumber - 3) * LINE_H);
       },
       // The textarea's NATIVE stack.  `execCommand` only acts on the focused
       // element, so undo/redo focus it first — on a phone that is the

@@ -8,6 +8,8 @@ import { isAggregate, isOperation, isPage, isUi, isWorkflow } from "../../../src
 import { parseDdd } from "./parse";
 import { spliceNodeIfParses } from "./edit-engine";
 import { RefusalLine } from "./refusal";
+import { ParseErrorState } from "./ParseErrorState";
+import { PARSE_ERROR } from "../layout/vocabulary";
 import { usePaneHarness } from "./pane-harness";
 import { ConfirmAction, confirmSites, type ConfirmSpec } from "../util/confirm";
 import { UndoRedo, paneUndoKeyHandler } from "./undo-redo";
@@ -285,7 +287,7 @@ export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   const liveNodes = harness.liveTick > 0 ? seedNodes : initialNodes;
 
   if (!harness.parseOk) {
-    return <Message>Source has syntax errors — fix them in the editor to use the builder.</Message>;
+    return <ParseErrorState ctx={ctx} purpose={PARSE_ERROR.purpose.builder} testid="builder" />;
   }
   if (!current || !initialNodes) {
     return <Message>No <code>page</code> or <code>component</code> with a <code>body:</code> found. Add a <code>ui {"{ page { … } }"}</code> block.</Message>;
