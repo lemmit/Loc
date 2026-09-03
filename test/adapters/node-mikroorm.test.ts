@@ -581,15 +581,22 @@ describe("mikroorm capability gating (loom.mikroorm-unsupported)", () => {
     expect(errors.filter((e) => /persistence: mikroorm/.test(e))).toEqual([]);
   });
 
-  // A ROOT scalar collection is the one shape still behind drizzle — and it used
-  // to abort codegen with a raw `Error: mikroorm: unsupported field kind 'array'
-  // … (validator gap)` instead of failing validation.  `emit` returns before
-  // generating when the IR validator errors, so this asserts BOTH halves at once:
-  // the diagnostic is present, and no exception escapes.
-  it("refuses a root scalar-collection field as a diagnostic, not a codegen throw", async () => {
+  // A ROOT scalar collection used to be the one shape behind drizzle — it
+  // aborted codegen with a raw `Error: mikroorm: unsupported field kind
+  // 'array' … (validator gap)`, which `validateMikroOrmSupport` then turned
+  // into an honest `loom.mikroorm-unsupported#scalar-array` refusal.  Both are
+  // gone now (M-T6.23): `columnsForType` (typescript/emit/mikroorm.ts) grew a
+  // native-Postgres-array column arm mirroring drizzle's own
+  // (`emit/schema.ts`, `case "array"`), so the field generates on mikroorm
+  // exactly as it already did on drizzle — see
+  // `test/generator/typescript/mikroorm-scalar-array.test.ts` for the emitted
+  // shape.
+  it("no longer refuses a root scalar-collection field — generates like drizzle", async () => {
     const { errors, files } = await emit(sys("mikroorm", "tags: string[]"));
-    expect(errors.filter((e) => /persistence: mikroorm/.test(e))).toHaveLength(1);
-    expect(files.size).toBe(0);
+    expect(errors.filter((e) => /persistence: mikroorm/.test(e))).toEqual([]);
+    expect(files.size).toBeGreaterThan(0);
+    const entities = files.get("api/db/entities.ts")!;
+    expect(entities).toContain('tags: { type: "string", array: true },');
     // The same field on drizzle still generates (native Postgres array).
     const drizzle = await emit(sys("drizzle", "tags: string[]"));
     expect(drizzle.errors).toEqual([]);
