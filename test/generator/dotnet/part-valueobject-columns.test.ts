@@ -46,9 +46,8 @@
 // verbatim.
 
 import { describe, expect, it } from "vitest";
-import { generateDotnet } from "../../../src/generator/dotnet/index.js";
-import { generateSystemFiles } from "../../_helpers/generate.js";
-import { parseString } from "../../_helpers/parse.js";
+import { generateDotnet, generateSystemFiles } from "../../_helpers/generate.js";
+import { parseValid } from "../../_helpers/parse.js";
 
 const SRC = `
   context Shop {
@@ -78,8 +77,7 @@ system Shop {
 `;
 
 async function orderConfig(): Promise<string> {
-  const { model, errors } = await parseString(SRC);
-  expect(errors).toEqual([]);
+  const model = await parseValid(SRC);
   const cfg = generateDotnet(model).get(
     "Infrastructure/Persistence/Configurations/OrderConfiguration.cs",
   );

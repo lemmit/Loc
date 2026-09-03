@@ -54,8 +54,8 @@
 // rather than a contract change.
 
 import { describe, expect, it } from "vitest";
-import { generateDotnet } from "../../../src/generator/dotnet/index.js";
-import { parseString } from "../../_helpers/parse.js";
+import { generateDotnet } from "../../_helpers/generate.js";
+import { parseValid } from "../../_helpers/parse.js";
 
 const SRC = `
   context Shop {
@@ -72,8 +72,7 @@ const SRC = `
 `;
 
 async function requests(): Promise<string> {
-  const { model, errors } = await parseString(SRC);
-  expect(errors).toEqual([]);
+  const model = await parseValid(SRC);
   const files = generateDotnet(model);
   const key = [...files.keys()].find((k) => k.endsWith("Widgets/Requests/WidgetRequests.cs"));
   expect(key, "WidgetRequests.cs not emitted").toBeDefined();
@@ -130,8 +129,7 @@ describe("dotnet — a required VALUE-TYPE member is actually enforced", () => {
   });
 
   it("the 422 arm claims the missing-member failure, and only it", async () => {
-    const { model, errors } = await parseString(SRC);
-    expect(errors).toEqual([]);
+    const model = await parseValid(SRC);
     const files = generateDotnet(model);
     const vp = [...files].find(([p]) => p.endsWith("Api/ValidationProblem.cs"))?.[1] as string;
     expect(vp, "ValidationProblem.cs not emitted").toBeDefined();

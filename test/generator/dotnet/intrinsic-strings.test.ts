@@ -8,8 +8,8 @@
 // as trim (no separate SQL table on .NET).
 
 import { describe, expect, it } from "vitest";
-import { generateDotnet } from "../../../src/generator/dotnet/index.js";
-import { parseString } from "../../_helpers/parse.js";
+import { generateDotnet } from "../../_helpers/generate.js";
+import { parseString, parseValid } from "../../_helpers/parse.js";
 
 const SRC = `
   context Catalog {
@@ -34,7 +34,7 @@ describe("dotnet generator — string intrinsics (stdlib A2 batch)", () => {
   });
 
   it("renders the string batch in-memory in derived/invariant bodies", async () => {
-    const { model } = await parseString(SRC);
+    const model = await parseValid(SRC);
     const domain = generateDotnet(model).get("Domain/Products/Product.cs")!;
     // derived slug — chained trim().toLower()
     expect(domain).toContain(".Trim().ToLowerInvariant()");
@@ -54,7 +54,7 @@ describe("dotnet generator — string intrinsics (stdlib A2 batch)", () => {
   });
 
   it("renders queryable toLower inside the find Where lambda (EF-translatable)", async () => {
-    const { model } = await parseString(SRC);
+    const model = await parseValid(SRC);
     const repo = generateDotnet(model).get("Infrastructure/Repositories/ProductRepository.cs")!;
     expect(repo).toContain(".Where(x => x.Name.ToLower() == q)");
   });
@@ -69,8 +69,7 @@ describe("dotnet generator — string intrinsics (stdlib A2 batch)", () => {
         }
       }
     `;
-    const { model, errors } = await parseString(src);
-    expect(errors).toEqual([]);
+    const model = await parseValid(src);
     const domain = generateDotnet(model).get("Domain/Docs/Doc.cs")!;
     expect(domain).toContain('(5 >= this.Body.Length ? "" : this.Body.Substring(5))');
     expect(domain).toContain('.Split("\\n").ToList()');

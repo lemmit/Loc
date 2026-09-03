@@ -4,8 +4,11 @@
 // `foreach` with a per-iteration SaveAsync.
 
 import { describe, expect, it } from "vitest";
-import { generateDotnet } from "../../../src/generator/dotnet/index.js";
-import { generateSystemFiles } from "../../_helpers/generate.js";
+import {
+  generateDotnet,
+  generateSystemFiles,
+  generateSystemFilesUnchecked,
+} from "../../_helpers/generate.js";
 import { parseValid } from "../../_helpers/parse.js";
 
 const SRC = `
@@ -163,31 +166,62 @@ describe(".NET generator — retrieval principal binding (DEBT-24)", () => {
 // This guards against a future contributor "honouring" loads with a
 // spurious `.Include` / projection that would diverge whole from explicit.
 const LOADS_SRC = `
-  context Sales {
-    aggregate Order {
-      status: string
-      contains lines: Line[]
-      contains notes: Note[]
-      entity Line { sku: string }
-      entity Note { text: string }
+  system Sys {
+    subdomain D {
+      context Sales {
+        aggregate Order {
+          status: string
+          contains lines: Line[]
+          contains notes: Note[]
+          entity Line { sku: string }
+          entity Note { text: string }
+        }
+        repository Orders for Order { }
+        criterion Open(s: string) of Order = status == s
+        retrieval Recent(s: string) of Order { where: Open(s) }
+        retrieval Slim(s: string) of Order { where: Open(s) loads: [this.lines] }
+      }
     }
-    repository Orders for Order { }
-    criterion Open(s: string) of Order = status == s
-    retrieval Recent(s: string) of Order { where: Open(s) }
-    retrieval Slim(s: string) of Order { where: Open(s) loads: [this.lines] }
+    storage primary { type: postgres }
+    resource salesState { for: Sales, kind: state, use: primary }
+    deployable api {
+      platform: dotnet
+      contexts: [Sales]
+      dataSources: [salesState]
+      port: 5000
+    }
   }
 `;
 
+/**
+ * `loads:` is REFUSED outright — `loom.retrieval-loads-unsupported`, on every
+ * backend and with or without a hosting deployable (verified: `ddd parse` exits
+ * 1 on this exact source in both shapes).  Emitting from the refused model IS
+ * these two tests' subject: the guarantee is that the emitter never grows a
+ * narrowing branch while the refusal stands, so when `loads:` eventually ships
+ * there is a pinned before-picture.  Hence the `Unchecked` helper rather than a
+ * weakened phase-⑦ assertion (M-T9.45, mirroring M-T9.44's Hono twin).  The map
+ * is re-keyed to drop the deployable directory.
+ */
+async function loadsFiles(): Promise<Map<string, string>> {
+  const files = await generateSystemFilesUnchecked(
+    LOADS_SRC,
+    "explicit `loads:` is refused by loom.retrieval-loads-unsupported; that the " +
+      "emitter still loads the WHOLE aggregate is the property under test",
+  );
+  return new Map([...files].map(([k, v]) => [k.replace(/^api\//, ""), v]));
+}
+
 describe(".NET generator — retrieval loadPlan (owned-type no-op)", () => {
   it("maps owned containments to OwnsMany (always loaded with the owner)", async () => {
-    const out = await generateDotnet(await parseValid(LOADS_SRC));
+    const out = await loadsFiles();
     const cfg = out.get("Infrastructure/Persistence/Configurations/OrderConfiguration.cs")!;
     expect(cfg).toMatch(/\.OwnsMany<Line>\("_lines"/);
     expect(cfg).toMatch(/\.OwnsMany<Note>\("_notes"/);
   });
 
   it("whole and explicit-`loads` specs are identical (no Include, no narrowing)", async () => {
-    const out = await generateDotnet(await parseValid(LOADS_SRC));
+    const out = await loadsFiles();
     // `Recent` (whole) and `Slim` (explicit `loads: [this.lines]`) both have
     // `where: Open(s)`; loads narrowing is gated, so the two reified specs are
     // identical modulo class name — and neither Includes anything.

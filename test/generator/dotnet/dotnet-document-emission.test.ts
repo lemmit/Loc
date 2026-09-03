@@ -3,9 +3,9 @@ import { fileURLToPath } from "node:url";
 import { URI } from "langium";
 import { NodeFileSystem } from "langium/node";
 import { beforeAll, describe, expect, it } from "vitest";
-import { generateDotnet } from "../../../src/generator/dotnet/index.js";
 import { createDddServices } from "../../../src/language/ddd-module.js";
 import type { Model } from "../../../src/language/generated/ast.js";
+import { generateDotnet } from "../../_helpers/generate.js";
 
 // ---------------------------------------------------------------------------
 // .NET document-persistence emission (`normalised(false)`).

@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from "vitest";
 import { generateDotnet } from "../../_helpers/generate.js";
-import { parseString } from "../../_helpers/parse.js";
+import { parseValid } from "../../_helpers/parse.js";
 
 const SRC = `
   context Shop {
@@ -29,7 +29,7 @@ const SRC = `
 `;
 
 async function files(): Promise<Map<string, string>> {
-  const { model } = await parseString(SRC, { validate: false });
+  const model = await parseValid(SRC);
   return generateDotnet(model);
 }
 

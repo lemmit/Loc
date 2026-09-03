@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from "vitest";
 import { generateDotnet } from "../../_helpers/generate.js";
-import { parseString } from "../../_helpers/parse.js";
+import { parseValid } from "../../_helpers/parse.js";
 
 const SRC = `
   context Shop {
@@ -22,7 +22,7 @@ const SRC = `
 `;
 
 async function files(): Promise<Map<string, string>> {
-  const { model } = await parseString(SRC, { validate: false });
+  const model = await parseValid(SRC);
   return generateDotnet(model);
 }
 
@@ -104,7 +104,7 @@ describe("dotnet — exception-less operation returns (A3)", () => {
         }
       }
     `;
-    const { model } = await parseString(src, { validate: false });
+    const model = await parseValid(src);
     const u = find(await generateDotnet(model), "Domain/Orders/OrderOrNotFound.cs");
     expect(u).toMatch(/using \S+\.Application\.Orders\.Responses;/);
     expect(u).toContain("IReadOnlyList<LineResponse> Lines");

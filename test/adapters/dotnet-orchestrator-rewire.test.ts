@@ -16,8 +16,8 @@
 import { describe, expect, it, vi } from "vitest";
 import * as byLayerModule from "../../src/generator/dotnet/adapters/by-layer-layout.js";
 import * as cqrsStyleModule from "../../src/generator/dotnet/adapters/cqrs-style.js";
-import { generateDotnet } from "../../src/generator/dotnet/index.js";
 import { generateSystems } from "../../src/system/index.js";
+import { generateDotnet } from "../_helpers/generate.js";
 import { parseValid } from "../_helpers/parse.js";
 
 const SYSTEM_SRC = `

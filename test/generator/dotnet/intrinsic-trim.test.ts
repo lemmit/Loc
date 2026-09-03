@@ -6,8 +6,8 @@
 // the C# snippet in render-expr.ts (CS_INTRINSIC_RENDERERS).
 
 import { describe, expect, it } from "vitest";
-import { generateDotnet } from "../../../src/generator/dotnet/index.js";
-import { parseString } from "../../_helpers/parse.js";
+import { generateDotnet } from "../../_helpers/generate.js";
+import { parseString, parseValid } from "../../_helpers/parse.js";
 
 const SRC = `
   context Catalog {
@@ -29,13 +29,13 @@ describe("dotnet generator — string.trim() intrinsic (stdlib A1 pilot)", () =>
   });
 
   it("renders trim in-memory in derived/invariant bodies", async () => {
-    const { model } = await parseString(SRC);
+    const model = await parseValid(SRC);
     const domain = generateDotnet(model).get("Domain/Products/Product.cs")!;
     expect(domain).toContain(".Trim()");
   });
 
   it("renders trim inside the find Where lambda (EF Core translates it to SQL)", async () => {
-    const { model } = await parseString(SRC);
+    const model = await parseValid(SRC);
     const repo = generateDotnet(model).get("Infrastructure/Repositories/ProductRepository.cs")!;
     expect(repo).toContain(".Where(x => x.Name.Trim() == q)");
   });
@@ -49,8 +49,7 @@ describe("dotnet generator — string.trim() intrinsic (stdlib A1 pilot)", () =>
         }
       }
     `;
-    const { model, errors } = await parseString(src);
-    expect(errors).toEqual([]);
+    const model = await parseValid(src);
     const repo = generateDotnet(model).get("Infrastructure/Repositories/ProductRepository.cs")!;
     expect(repo).toContain(".Where(x => x.Name == q.Trim())");
   });

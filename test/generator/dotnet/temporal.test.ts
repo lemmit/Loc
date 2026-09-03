@@ -5,10 +5,10 @@
 // is a `TimeSpan`.  Mirrors test/generator/typescript/temporal.test.ts.
 
 import { describe, expect, it } from "vitest";
-import { generateDotnet } from "../../../src/generator/dotnet/index.js";
 import { validateLoomModel } from "../../../src/ir/validate/validate.js";
+import { generateDotnet } from "../../_helpers/generate.js";
 import { toLoomModel } from "../../_helpers/ir.js";
-import { parseString } from "../../_helpers/parse.js";
+import { parseString, parseValid } from "../../_helpers/parse.js";
 
 const SRC = `
   context Billing {
@@ -43,7 +43,7 @@ describe("dotnet generator — A5 temporal", () => {
   });
 
   it("renders duration constructors as TimeSpan and datetime ± duration as native operators", async () => {
-    const { model } = await parseString(SRC);
+    const model = await parseValid(SRC);
     const domain = generateDotnet(model).get("Domain/Invoices/Invoice.cs")!;
     expect(domain).toContain("this.CreatedAt + TimeSpan.FromDays(30)");
     expect(domain).toContain("this.DueDate - TimeSpan.FromHours(6)");
@@ -51,7 +51,7 @@ describe("dotnet generator — A5 temporal", () => {
   });
 
   it("renders dt−dt, duration algebra, and duration * int as native TimeSpan ops", async () => {
-    const { model } = await parseString(SRC);
+    const model = await parseValid(SRC);
     const domain = generateDotnet(model).get("Domain/Invoices/Invoice.cs")!;
     // datetime − datetime → TimeSpan, via the native operator (a
     // duration-typed let).
@@ -66,7 +66,7 @@ describe("dotnet generator — A5 temporal", () => {
   });
 
   it("lowers column-side datetime ± duration to EF-translatable Add{Days,Hours} in Where", async () => {
-    const { model } = await parseString(SRC);
+    const model = await parseValid(SRC);
     const repo = generateDotnet(model).get("Infrastructure/Repositories/InvoiceRepository.cs")!;
     expect(repo).toContain(".Where(x => (x.DueDate).AddDays((30)) < q)");
     // param amount composes; `now()` renders as DateTime.UtcNow (funcletized
@@ -75,13 +75,13 @@ describe("dotnet generator — A5 temporal", () => {
   });
 
   it("value-side datetime ± duration also lowers (EF funcletizes the value side)", async () => {
-    const { model } = await parseString(SRC);
+    const model = await parseValid(SRC);
     const repo = generateDotnet(model).get("Infrastructure/Repositories/InvoiceRepository.cs")!;
     expect(repo).toContain(".Where(x => x.DueDate < (q).AddDays((2)))");
   });
 
   it("never emits the in-memory TimeSpan spelling inside a Where lambda", async () => {
-    const { model } = await parseString(SRC);
+    const model = await parseValid(SRC);
     const repo = generateDotnet(model).get("Infrastructure/Repositories/InvoiceRepository.cs")!;
     expect(repo).not.toContain("TimeSpan.From");
   });
@@ -95,8 +95,7 @@ describe("dotnet generator — A5 temporal", () => {
         }
       }
     `;
-    const { model, errors } = await parseString(src);
-    expect(errors).toEqual([]);
+    const model = await parseValid(src);
     // The queryable gate is IR-level (phase ⑦) and platform-neutral — only
     // DIRECT constructor operands are admitted; a `duration + duration`
     // composite is honestly rejected (matching exactly what the EF binary

@@ -1,4 +1,4 @@
-import { generateDotnet } from "../../src/generator/dotnet/index.js";
+import { generateDotnet as generateDotnetProject } from "../../src/generator/dotnet/index.js";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
 import { lowerModel, mergeLoomModels } from "../../src/ir/lower/lower.js";
 import { validateLoomModel } from "../../src/ir/validate/validate.js";
@@ -64,6 +64,30 @@ export function assertModelVerifies(model: Model, context = ".ddd fixture"): voi
 export const generateHono = (model: Model): Map<string, string> => {
   assertModelVerifies(model);
   return generateTypeScript(model, HONO_V4_PINS);
+};
+
+/**
+ * Generate the single-context .NET project file map from an AST Model.
+ *
+ * The .NET twin of `generateHono` above, and it was the same hole: until
+ * M-T9.45 this name was RE-EXPORTED straight from
+ * `src/generator/dotnet/index.js`, so the helper wrapped it with nothing.  Its
+ * call sites asserted on emitted C# from an IR nothing had ever inspected —
+ * and most of them did not even reach the helper, importing the generator
+ * directly from `src/` and so sitting outside every gate this module has.
+ *
+ * Now a real wrapper: `assertModelVerifies` first, exactly as `generateHono`
+ * does, from the same shared body so the two legacy paths cannot drift.
+ * Phases ① and ④ are the CALLER's for the same reason as above — this takes a
+ * `Model`, not a source string — which is what the `parseString` column of
+ * `test/system/legacy-generate-path-ratchet.test.ts` pins.
+ */
+export const generateDotnet = (
+  model: Model,
+  options: { emitTrace?: boolean } = {},
+): Map<string, string> => {
+  assertModelVerifies(model);
+  return generateDotnetProject(model, options);
 };
 
 /**
@@ -216,6 +240,5 @@ export async function generateSystemResult(
   return generateSystems(await assertGeneratable(source), options);
 }
 
-/** Re-exported for symmetry — generates the single .NET project file map. */
 /** Re-exported — full multi-deployable system emission orchestrator. */
-export { generateDotnet, generateSystems };
+export { generateSystems };

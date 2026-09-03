@@ -9,8 +9,8 @@
 // dependent's NULL id.
 
 import { describe, expect, it } from "vitest";
-import { generateDotnet } from "../../../src/generator/dotnet/index.js";
-import { parseString } from "../../_helpers/parse.js";
+import { generateDotnet } from "../../_helpers/generate.js";
+import { parseValid } from "../../_helpers/parse.js";
 
 const SRC = `
   context Shop {
@@ -28,8 +28,7 @@ const SRC = `
 
 describe("dotnet generator — single (non-collection) containment", () => {
   it("fully configures the owned entity's own table, key, FK and id conversion", async () => {
-    const { model, errors } = await parseString(SRC);
-    expect(errors).toEqual([]);
+    const model = await parseValid(SRC);
     const cfg = generateDotnet(model).get(
       "Infrastructure/Persistence/Configurations/OrderConfiguration.cs",
     )!;
