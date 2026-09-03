@@ -451,6 +451,19 @@ export interface LayoutCtx {
   sendAgentMessage: (text: string) => void;
   /** Clear the live chat (display + the carried transcript). */
   clearAgentChat: () => void;
+  /** Plan-first mode (M-T8.19 slice 2).  While on, a turn returns a
+   *  model-node delta the user approves before any `.ddd` is written — for
+   *  the first turn of a conversation and for any structural turn; a
+   *  members-only follow-up writes straight through.  Off restores the
+   *  M-T8.3 behaviour of streaming the agent's source into the editor. */
+  agentPlanMode: boolean;
+  setAgentPlanMode: (v: boolean) => void;
+  /** Approve the pending plan, writing the candidate minus the node
+   *  addresses in `excluded` (honoured as real `remove` model patches). */
+  approveAgentPlan: (excluded: string[]) => void;
+  /** Reject the pending plan — nothing is written, and the refusal rides the
+   *  next prompt so the model knows what was refused. */
+  rejectAgentPlan: (excluded: string[]) => void;
 
   // Actions
   runGenerate: () => void;

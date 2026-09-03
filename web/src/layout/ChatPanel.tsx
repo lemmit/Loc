@@ -12,6 +12,7 @@ import {
   ScrollArea,
   Select,
   Stack,
+  Switch,
   Text,
   TextInput,
   Textarea,
@@ -19,8 +20,12 @@ import {
 } from "@mantine/core";
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import type { AgentMessage, AgentToolCall } from "../agent/demo";
+import type { PlanItem } from "../agent/plan";
+import { planSummary } from "../agent/plan";
 import { type AgentSettings, PROVIDER_PRESETS, presetById, settingsReady } from "../agent/provider";
+import type { PlanCard as PlanCardData } from "../agent/turn";
 import type { LayoutCtx } from "./ctx";
+import { CHAT, PLAN } from "./vocabulary";
 
 // "Agent" dock tab — two modes over one shared transcript display:
 //   • the deterministic M-T8.3 wedge demo (prose → `.ddd` → generate → green),
@@ -93,7 +98,7 @@ export function ChatBody({ ctx }: { ctx: LayoutCtx }): JSX.Element {
               onClick={() => clearAgentChat()}
               data-testid="agent-clear"
             >
-              Clear
+              {CHAT.clear}
             </Button>
           )}
           <SettingsMenu ctx={ctx} />
@@ -104,7 +109,7 @@ export function ChatBody({ ctx }: { ctx: LayoutCtx }): JSX.Element {
             onClick={() => runAgentDemo()}
             data-testid="agent-run-demo"
           >
-            {agentMessages.length > 0 ? "Replay demo" : "Run demo"}
+            {agentMessages.length > 0 ? CHAT.replayDemo : CHAT.demo}
           </Button>
         </Group>
       </Group>
@@ -129,7 +134,7 @@ export function ChatBody({ ctx }: { ctx: LayoutCtx }): JSX.Element {
               )}
             </Text>
           ) : (
-            agentMessages.map((m) => <ChatMessage key={m.id} m={m} />)
+            agentMessages.map((m) => <ChatMessage key={m.id} m={m} ctx={ctx} />)
           )}
         </Stack>
       </ScrollArea>
@@ -155,14 +160,25 @@ export function ChatBody({ ctx }: { ctx: LayoutCtx }): JSX.Element {
             disabled={!ready || !input.trim()}
             data-testid="agent-send"
           >
-            Send
+            {CHAT.send}
           </Button>
         </Group>
-        {!ready && (
-          <Text size="xs" c="dimmed" mt={4}>
-            Live chat needs a provider + API key.
-          </Text>
-        )}
+        <Group gap={10} mt={4} wrap="nowrap">
+          <Tooltip label={PLAN.toggleHint} withArrow multiline w={280}>
+            <Switch
+              size="xs"
+              checked={ctx.agentPlanMode}
+              onChange={(e) => ctx.setAgentPlanMode(e.currentTarget.checked)}
+              label={PLAN.toggle}
+              data-testid="agent-plan-toggle"
+            />
+          </Tooltip>
+          {!ready && (
+            <Text size="xs" c="dimmed">
+              Live chat needs a provider + API key.
+            </Text>
+          )}
+        </Group>
       </Box>
     </Box>
   );
@@ -270,7 +286,7 @@ function SettingsMenu({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   );
 }
 
-function ChatMessage({ m }: { m: AgentMessage }): JSX.Element {
+function ChatMessage({ m, ctx }: { m: AgentMessage; ctx: LayoutCtx }): JSX.Element {
   const isUser = m.role === "user";
   return (
     <Box
@@ -303,8 +319,145 @@ function ChatMessage({ m }: { m: AgentMessage }): JSX.Element {
             ))}
           </Stack>
         )}
+        {m.extras?.plan && <PlanCard card={m.extras.plan} ctx={ctx} />}
       </Box>
     </Box>
+  );
+}
+
+/** The plan step's checklist (M-T8.19 slice 2).  Not prose the model wrote —
+ *  a model-node delta from `loom_outline`, each line a real patch address, so
+ *  striking one off is an operation the compiler can perform rather than a
+ *  hint.  A `remove` line is all-or-nothing (reverting a deletion would need
+ *  the base declaration's source text, which the outline does not carry), and
+ *  the row says so instead of offering a control that would lie. */
+function PlanCard({ card, ctx }: { card: PlanCardData; ctx: LayoutCtx }): JSX.Element {
+  const [excluded, setExcluded] = useState<string[]>(card.excluded);
+  const pending = card.state === "pending";
+  const shown = pending ? excluded : card.excluded;
+  const items = card.plan.items;
+
+  const toggle = (node: string): void =>
+    setExcluded((prev) => (prev.includes(node) ? prev.filter((n) => n !== node) : [...prev, node]));
+
+  return (
+    <Box
+      mt={6}
+      p={8}
+      data-testid="agent-plan"
+      data-plan-state={card.state}
+      style={{
+        borderRadius: 6,
+        background: "var(--mantine-color-body)",
+        border: "1px solid var(--mantine-color-default-border)",
+      }}
+    >
+      <Group gap={6} wrap="nowrap" mb={4}>
+        <Badge size="xs" variant="light" color="blue">
+          {PLAN.title}
+        </Badge>
+        <Text size="xs" c="dimmed" data-testid="agent-plan-summary">
+          {planSummary(items)}
+        </Text>
+      </Group>
+      <Text size="xs" c="dimmed" mb={6}>
+        {PLAN.subtitle}
+      </Text>
+      <Stack gap={2}>
+        {items.map((item) => (
+          <PlanRow
+            key={item.node}
+            item={item}
+            excluded={shown.includes(item.node)}
+            interactive={pending}
+            onToggle={() => toggle(item.node)}
+          />
+        ))}
+      </Stack>
+      {pending ? (
+        <Group gap={6} mt={8}>
+          <Tooltip label={PLAN.approveHint} withArrow>
+            <Button
+              size="compact-xs"
+              onClick={() => ctx.approveAgentPlan(excluded)}
+              data-testid="agent-plan-approve"
+            >
+              {PLAN.approve}
+            </Button>
+          </Tooltip>
+          <Tooltip label={PLAN.rejectHint} withArrow>
+            <Button
+              size="compact-xs"
+              variant="subtle"
+              color="gray"
+              onClick={() => ctx.rejectAgentPlan(excluded)}
+              data-testid="agent-plan-reject"
+            >
+              {PLAN.reject}
+            </Button>
+          </Tooltip>
+        </Group>
+      ) : (
+        <Text size="xs" c="dimmed" mt={6} data-testid="agent-plan-verdict">
+          {card.state === "rejected"
+            ? PLAN.rejected
+            : card.excluded.length > 0
+              ? PLAN.partial(card.excluded.length)
+              : ""}
+        </Text>
+      )}
+    </Box>
+  );
+}
+
+function PlanRow({
+  item,
+  excluded,
+  interactive,
+  onToggle,
+}: {
+  item: PlanItem;
+  excluded: boolean;
+  interactive: boolean;
+  onToggle: () => void;
+}): JSX.Element {
+  const color = item.change === "add" ? "green" : item.change === "remove" ? "red" : "yellow";
+  const canExclude = interactive && item.excludable;
+  const label = excluded ? PLAN.include : item.excludable ? PLAN.exclude : PLAN.notExcludable;
+  return (
+    <Group
+      gap={6}
+      wrap="nowrap"
+      data-testid="agent-plan-item"
+      data-node={item.node}
+      data-excluded={excluded || undefined}
+      style={{ opacity: excluded ? 0.45 : 1 }}
+    >
+      <Tooltip label={label} withArrow>
+        <ActionIcon
+          size="xs"
+          variant="subtle"
+          color={excluded ? "gray" : color}
+          disabled={!canExclude}
+          onClick={onToggle}
+          aria-label={`${label}: ${item.node}`}
+          data-testid="agent-plan-exclude"
+        >
+          <Text size="xs">{excluded ? "+" : "×"}</Text>
+        </ActionIcon>
+      </Tooltip>
+      <Badge size="xs" variant="light" color={color}>
+        {PLAN.verb[item.change]}
+      </Badge>
+      <Code style={{ fontSize: 11, background: "transparent" }}>{item.node}</Code>
+      {item.addedMembers.length + item.removedMembers.length > 0 && (
+        <Text size="xs" c="dimmed" ml="auto" style={{ flexShrink: 0 }}>
+          {item.addedMembers.length > 0 ? `+${item.addedMembers.length}` : ""}
+          {item.addedMembers.length > 0 && item.removedMembers.length > 0 ? " " : ""}
+          {item.removedMembers.length > 0 ? `−${item.removedMembers.length}` : ""}
+        </Text>
+      )}
+    </Group>
   );
 }
 

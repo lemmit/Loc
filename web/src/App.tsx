@@ -24,6 +24,13 @@ import { buildDiagnosticsToLsp } from "./lsp/build-diagnostics";
 // demands a 128 MB contiguous heap, and on iOS the main thread and every worker
 // share one process memory budget.  See M-T8.15.
 import type { AgentMessage } from "./agent/demo";
+// `agent/plan` and `agent/turn` are safe to import EAGERLY: both are pure and
+// their only imports are `import type` (the diagnostics contract, the bubble
+// shape), so nothing of `src/api` / Langium follows them into the entry chunk.
+// The `callTool` / `applyPatches` calls the plan gate makes are still reached
+// through `await import(...)` below, for exactly the reason above.
+import { buildPlan, exclusionPatches, isStructural, planIsEmpty } from "./agent/plan";
+import { attachTurnExtras, type TurnExtras, withTurnExtras } from "./agent/turn";
 // Type-only from `src/tools` too (`Complete` etc.) — no runtime edge; this
 // module's own body is small and provider-shaped.
 import { createOpenAiCompatibleComplete } from "./agent/openai-transport";
@@ -35,6 +42,7 @@ import {
   settingsReady,
 } from "./agent/provider";
 import type { Complete, Message as AgentTranscriptMessage } from "../../src/tools/index.js";
+import type { Outline } from "../../src/diagnostics/contract.js";
 import { examples, defaultExample, type LoomExample } from "./examples";
 import { LoomBuildClient } from "./build/client";
 import type {
@@ -89,7 +97,7 @@ import { CommandPalette, openPalette } from "./layout/CommandPalette";
 import { ShortcutSheet } from "./layout/ShortcutSheet";
 import { hotkeyAction, isTextEntry } from "./util/hotkeys";
 import { inDocumentOrder, stepIndex, toEditorRange } from "./layout/problem-nav";
-import { PROBLEMS } from "./layout/vocabulary";
+import { PLAN, PROBLEMS } from "./layout/vocabulary";
 import type { EditorRange } from "./editor/editor-handle";
 import type { AgentPromptRequest, CenterView, ExplorerMode } from "./layout/ctx";
 import { useStableFns } from "./util/useStableFns";
@@ -324,6 +332,32 @@ export default function App(): JSX.Element {
   const [agentMessages, setAgentMessages] = useState<AgentMessage[]>([]);
   const [agentRunning, setAgentRunning] = useState(false);
   const agentSignalRef = useRef<{ cancelled: boolean }>({ cancelled: false });
+  // M-T8.19 — per-turn attachments (the plan, and later the receipt / commit /
+  // stuck card).  Kept OUT of the bubble list because that list is re-folded
+  // from the raw transcript on every render; `attachTurnExtras` grafts these
+  // back on at display time.  `agentTurnRef` is the 0-based turn index, which
+  // matches the count of `you` bubbles because every send appends exactly one.
+  const [agentExtras, setAgentExtras] = useState<(TurnExtras | undefined)[]>([]);
+  // Mirror, so the Approve / Reject handlers can read the card they are acting
+  // on without closing over a render-stale copy.
+  const agentExtrasRef = useRef<(TurnExtras | undefined)[]>([]);
+  agentExtrasRef.current = agentExtras;
+  const agentTurnRef = useRef(-1);
+  // Plan-first mode: the owner default is ON, and while on, the gate PAUSES
+  // for the first turn of a conversation and for any structural turn, and
+  // auto-approves an otherwise cosmetic follow-up (see `gatePlan`).
+  const [agentPlanMode, setAgentPlanMode] = usePersistedState<boolean>(
+    "loom.agent.planFirst",
+    true,
+  );
+  const agentPlanModeRef = useRef(agentPlanMode);
+  agentPlanModeRef.current = agentPlanMode;
+  // Resolver for the in-flight plan gate — the turn is literally awaiting this
+  // promise, so the composer stays disabled until Approve / Reject lands.
+  const planResolveRef = useRef<((v: string | null) => void) | null>(null);
+  // A rejection is fed back to the model on the NEXT prompt rather than as its
+  // own transcript turn, so the turn indices stay aligned with the bubbles.
+  const planRejectionRef = useRef<string | null>(null);
   // Live agent chat (M-T8.3): BYOK provider settings (persisted) + the raw
   // Anthropic-shaped transcript carried across turns.  `agentMessages` above is
   // the shared DISPLAY list (the demo and the live chat both render into it).
@@ -1873,6 +1907,9 @@ export default function App(): JSX.Element {
   async function runAgentDemo(): Promise<void> {
     if (agentRunning) return;
     agentSignalRef.current = { cancelled: false };
+    // The demo replays from scratch — its own transcript starts at turn 0.
+    agentTurnRef.current = 0;
+    setAgentExtras([]);
     setAgentRunning(true);
     try {
       const { runAgentDemo: playAgentDemo } = await import("./agent/demo");
@@ -1885,6 +1922,92 @@ export default function App(): JSX.Element {
     } finally {
       setAgentRunning(false);
     }
+  }
+
+  // ---------------------------------------------------------------------
+  // The PLAN GATE (M-T8.19 slice 2).
+  //
+  // The builders' plan modes ask the model to describe what it intends in
+  // prose.  Loom does not have to: run `loom_outline` over the candidate
+  // `.ddd`, diff it against the outline of what is in the editor, and the plan
+  // IS the model-node delta — declarations to add, change, remove, each one a
+  // real patch address.  Nothing is written until this resolves.
+  // ---------------------------------------------------------------------
+  async function gatePlan(candidate: string, base: string): Promise<string | null> {
+    const turn = agentTurnRef.current;
+    const { callTool } = await import("../../src/tools/index.js");
+    const [before, after] = (await Promise.all([
+      callTool("loom_outline", { source: base }),
+      callTool("loom_outline", { source: candidate }),
+    ])) as [Outline, Outline];
+    const plan = buildPlan({ before, after, base, candidate, turn });
+
+    // Owner default: pause on the first turn of a conversation and on any
+    // structural turn; a follow-up that only moves members through is written
+    // straight away.  An empty delta is never worth a gate.
+    const firstTurn = turn === 0;
+    if (planIsEmpty(plan) || !(firstTurn || isStructural(plan.items))) return candidate;
+
+    setAgentExtras((prev) =>
+      withTurnExtras(prev, turn, { plan: { plan, state: "pending", excluded: [] } }),
+    );
+    return new Promise<string | null>((resolve) => {
+      planResolveRef.current = resolve;
+    });
+  }
+
+  // Approve the pending plan: write the candidate, minus whatever the user
+  // struck off the checklist.  The exclusions are honoured as REAL model
+  // patches (`op: "remove"` against the candidate's own addresses), so a
+  // partial approval produces a source the compiler agrees with rather than a
+  // hand-spliced string.
+  function approveAgentPlan(excluded: string[]): void {
+    const resolve = planResolveRef.current;
+    if (!resolve) return;
+    planResolveRef.current = null;
+    const turn = agentTurnRef.current;
+    const card = agentExtrasRef.current[turn]?.plan;
+    if (!card) {
+      resolve(null);
+      return;
+    }
+    setAgentExtras((prev) =>
+      withTurnExtras(prev, turn, { plan: { ...card, state: "approved", excluded } }),
+    );
+    void (async () => {
+      let source = card.plan.candidate;
+      const patches = exclusionPatches(card.plan.items, excluded);
+      if (patches.length > 0) {
+        const { applyPatches } = await import("../../src/api/index.js");
+        const result = await applyPatches(source, patches);
+        // A patch batch that cannot resolve leaves the candidate untouched
+        // (`applyPatches` is atomic) — better to write the whole plan than to
+        // write a mangled one, and the card still records what was struck.
+        if (result.ok) source = result.text;
+      }
+      resolve(source);
+    })();
+  }
+
+  // Reject: write nothing.  The refusal rides the NEXT prompt rather than
+  // becoming its own transcript turn, so the turn indices stay aligned with
+  // the `you` bubbles the extras are keyed by.
+  function rejectAgentPlan(excluded: string[]): void {
+    const resolve = planResolveRef.current;
+    if (!resolve) return;
+    planResolveRef.current = null;
+    const turn = agentTurnRef.current;
+    const card = agentExtrasRef.current[turn]?.plan;
+    const names = (card?.plan.items ?? [])
+      .filter((i) => i.change === "add")
+      .map((i) => i.node);
+    planRejectionRef.current = PLAN.rejectionNote(names);
+    setAgentExtras((prev) => {
+      const c = prev[turn]?.plan;
+      if (!c) return prev;
+      return withTurnExtras(prev, turn, { plan: { ...c, state: "rejected", excluded } });
+    });
+    resolve(null);
   }
 
   // Persist BYOK settings whenever they change.
@@ -1904,6 +2027,12 @@ export default function App(): JSX.Element {
     if (agentRunning || !text.trim()) return;
     if (!injected && !settingsReady(agentSettings)) return;
     agentSignalRef.current = { cancelled: false };
+    agentTurnRef.current += 1;
+    // A rejected plan is carried into the next prompt, so the model learns
+    // what was refused without an extra bubble in the transcript.
+    const rejection = planRejectionRef.current;
+    planRejectionRef.current = null;
+    const prompt = rejection ? `${rejection}\n\n${text}` : text;
     setAgentRunning(true);
     const preset = presetById(agentSettings.providerId);
     const headers: Record<string, string> =
@@ -1926,12 +2055,16 @@ export default function App(): JSX.Element {
       ]);
       agentTranscriptRef.current = await runLiveAgent({
         complete,
-        prompt: text,
+        prompt,
         currentSource: sourceRef.current,
         history: agentTranscriptRef.current,
         system: buildSystemPrompt(),
         setMessages: setAgentMessages,
         applySource: applyAgentSource,
+        // Plan-first is the owner default; the toggle turns the gate off
+        // entirely, which restores the M-T8.3 behaviour of streaming the
+        // agent's source into the editor as it writes.
+        gateSource: agentPlanModeRef.current ? gatePlan : undefined,
         triggerGenerate: () => void runGenerate(true),
         signal: agentSignalRef.current,
       });
@@ -1950,9 +2083,24 @@ export default function App(): JSX.Element {
   // send starts a fresh conversation).
   function clearAgentChat(): void {
     agentSignalRef.current.cancelled = true;
+    // A pending plan is part of the conversation being thrown away — release
+    // the turn that is awaiting it, writing nothing.
+    planResolveRef.current?.(null);
+    planResolveRef.current = null;
+    planRejectionRef.current = null;
     agentTranscriptRef.current = [];
+    agentTurnRef.current = -1;
+    setAgentExtras([]);
     setAgentMessages([]);
   }
+
+  // What the chat actually renders: the folded transcript with each turn's
+  // playground-side attachments grafted back on (see `agent/turn.ts` for why
+  // they cannot simply live on a bubble).
+  const agentMessagesDisplay = useMemo(
+    () => attachTurnExtras(agentMessages, agentExtras),
+    [agentMessages, agentExtras],
+  );
 
   // ---------------------------------------------------------------------
   // ctx — the state + actions bundle the shell and its panes consume.
@@ -2179,6 +2327,9 @@ export default function App(): JSX.Element {
     copyShareLink,
     runAgentDemo: (): void => void runAgentDemo(),
     setAgentSettings,
+    setAgentPlanMode,
+    approveAgentPlan,
+    rejectAgentPlan,
     sendAgentMessage: (text: string): void => void sendAgentMessage(text),
     clearAgentChat,
     runGenerate: (): void => void runGenerate(true),
@@ -2269,8 +2420,9 @@ export default function App(): JSX.Element {
       backendLog,
       appLog,
       copied,
-      agentMessages,
+      agentMessages: agentMessagesDisplay,
       agentRunning,
+      agentPlanMode,
       agentSettings,
       evolution,
       evolutionRunning,
@@ -2352,8 +2504,9 @@ export default function App(): JSX.Element {
       backendLog,
       appLog,
       copied,
-      agentMessages,
+      agentMessagesDisplay,
       agentRunning,
+      agentPlanMode,
       agentSettings,
       evolution,
       evolutionRunning,
