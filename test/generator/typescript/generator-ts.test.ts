@@ -1688,12 +1688,14 @@ describe("typescript generator", () => {
       // Strict `z.number()`, not `z.coerce.number()`: a JSON body carries a
       // real number, and coercing accepted `false`/`"12"` for a field the spec
       // declares `{"type":"number"}` (schemathesis F7).
-      expect(orderRoutes).toMatch(/amount: z\.number\(\)\.min\(0\)/);
+      expect(orderRoutes).toMatch(
+        /amount: z\.number\(\)\.min\(0, \{ message: "Amount must be at least 0" \}\)/,
+      );
       // A LENGTH bound is a CODE-POINT predicate, not zod's code-unit
       // `.length(3)` — and the routes re-attach the `minLength`/`maxLength`
       // the OpenAPI schema published all along (RS-31).
       expect(orderRoutes).toMatch(
-        /currency: z\.string\(\)\.refine\(\(s\) => \[\.\.\.s\]\.length === 3\)\.openapi\(\{ minLength: 3, maxLength: 3 \}\)/,
+        /currency: z\.string\(\)\.refine\(\(s\) => \[\.\.\.s\]\.length === 3, \{ message: "Currency must be exactly 3 characters" \}\)\.openapi\(\{ minLength: 3, maxLength: 3 \}\)/,
       );
       // No leftover OBJECT-level `.refine(` for the single-field shapes.
       const moneyBlock = orderRoutes.match(
@@ -1709,7 +1711,7 @@ describe("typescript generator", () => {
       const orderRoutes = files.get("http/order.routes.ts")!;
       // `qty > 0` → recognised as min(1) on the int field.
       expect(orderRoutes).toMatch(
-        /AddLineOrderRequest = z\.object\(\{[\s\S]*qty: z\.number\(\)\.int\(\)\.min\(1\)/,
+        /AddLineOrderRequest = z\.object\(\{[\s\S]*qty: z\.number\(\)\.int\(\)\.min\(1, \{ message: "Qty must be at least 1" \}\)/,
       );
     });
 
@@ -1721,7 +1723,7 @@ describe("typescript generator", () => {
       // update is rejected at the wire boundary (422) instead of the domain floor.
       const customerRoutes = files.get("http/customer.routes.ts")!;
       expect(customerRoutes).toMatch(
-        /UpdateCustomerRequest = z\.object\(\{[\s\S]*email: z\.string\(\)\.refine\(\(s\) => \[\.\.\.s\]\.length >= 1\)/,
+        /UpdateCustomerRequest = z\.object\(\{[\s\S]*email: z\.string\(\)\.refine\(\(s\) => \[\.\.\.s\]\.length >= 1, \{ message: "Email must be at least 1 character" \}\)/,
       );
     });
 
@@ -1734,7 +1736,7 @@ describe("typescript generator", () => {
       // classifier filters this out, so CreateOrderRequest carries NO
       // refine clause for it.
       const createBlock = orderRoutes.match(
-        /const CreateOrderRequest = z\.object\(\{[\s\S]*?\}\)\.openapi\("CreateOrderRequest"\)([^;]*);/,
+        /const CreateOrderRequest = z\.object\(\{[\s\S]*?\n\}\)\.openapi\("CreateOrderRequest"\)([^;]*);/,
       )!;
       expect(createBlock[1]).toBe("");
       // And the schema still has the basic field set.
@@ -1751,7 +1753,7 @@ describe("typescript generator", () => {
       // `this.status` via a helper-fn.  Must NOT appear as a refine
       // on AddLineRequest (and the refine can't read `this`).
       const addLineBlock = orderRoutes.match(
-        /const AddLineOrderRequest = z\.object\(\{[\s\S]*?\}\)\.openapi\("AddLineOrderRequest"\)([^;]*);/,
+        /const AddLineOrderRequest = z\.object\(\{[\s\S]*?\n\}\)\.openapi\("AddLineOrderRequest"\)([^;]*);/,
       )!;
       // Only the `qty > 0` precondition is wire-translatable, and it
       // was absorbed into the int chain — so no `.refine(` here.
@@ -1785,7 +1787,7 @@ describe("typescript generator", () => {
       const files = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS);
       const routes = files.get("http/user.routes.ts")!;
       expect(routes).toMatch(
-        /CreateUserRequest = z\.object\(\{[\s\S]*email: z\.string\(\)\.regex\(\/\^\[\^@\]\+@\.\+\$\/\)/,
+        /CreateUserRequest = z\.object\(\{[\s\S]*email: z\.string\(\)\.regex\(\/\^\[\^@\]\+@\.\+\$\/, \{ message: "Email is not in the expected format" \}\)/,
       );
     });
 
