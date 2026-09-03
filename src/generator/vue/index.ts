@@ -33,7 +33,11 @@ import { renderGateExpr } from "../_frontend/gate-expr.js";
 // move alongside them).
 import { renderI18nModule, renderLocaleCatalog } from "../_frontend/i18n-runtime.js";
 import { LIB_SCHEMAS_PROV_TS, PROV_LINEAGE_SCHEMA_BLOCK } from "../_frontend/lib-schemas.js";
-import { deriveSidebarFromUi } from "../_frontend/menu-emitter.js";
+import {
+  deriveSidebarFromUi,
+  type NavEntryVM,
+  type NavSectionVM,
+} from "../_frontend/menu-emitter.js";
 import { MONEY_TEXT_SOURCE } from "../_frontend/money-format.js";
 import { VUE_NAV_LABELS, withNavLabelTokens } from "../_frontend/nav-labels.js";
 import { pageEmitPath } from "../_frontend/page-identity.js";
@@ -551,7 +555,14 @@ export function generateVueForContexts(
   // `deriveSidebarFromUi` render a `requiresJs` gate on any entry whose
   // linked page declares a `requires` clause, so the app-shell can hide a
   // forbidden page's nav link at runtime.
-  const sidebarOverride = deriveSidebarFromUi(ui, pageCtx, authUi);
+  // With no explicit `ui.menu` block the ui's own custom pages MERGE into the
+  // scaffold grouping instead of replacing it (M-FT.6 / finding C1).
+  const sidebarOverride = deriveSidebarFromUi(
+    ui,
+    pageCtx,
+    authUi,
+    deriveNavSections(defaultPages, pageCtx),
+  );
   const navSections: Array<{
     label: string;
     labelKey?: string;
@@ -877,14 +888,6 @@ function renderNestedRouter(
 // arrive with the parity slice (`deriveSidebarFromUi` mirror).
 // ---------------------------------------------------------------------------
 
-interface NavEntryVM {
-  to: string;
-  label: string;
-  testId: string;
-  exact?: boolean;
-  requiresJs?: string;
-}
-
 function deriveNavSections(
   pages: PageIR[],
   nameCtx: PageNameCtx,
@@ -892,7 +895,7 @@ function deriveNavSections(
    *  gated entry can be `v-if`-hidden.  Without it every entry stays ungated
    *  (there is no `currentUser` to test), byte-identical. */
   authUi: boolean,
-): Array<{ label: string; entries: NavEntryVM[] }> {
+): NavSectionVM[] {
   const aggregates: NavEntryVM[] = [];
   const workflows: NavEntryVM[] = [];
   // A DEFAULT entry inherits the gate of the page it links to, exactly as the
@@ -912,6 +915,7 @@ function deriveNavSections(
         to: page.route,
         label,
         testId: `nav-${snake(plural(o.aggregateName))}`,
+        activeArgs: JSON.stringify(page.route),
         ...(requiresJs ? { requiresJs } : {}),
       });
     } else if (o.kind === "workflow-form") {
@@ -919,11 +923,12 @@ function deriveNavSections(
         to: page.route,
         label: humanize(o.workflowName),
         testId: `nav-wf-${snake(o.workflowName)}`,
+        activeArgs: JSON.stringify(page.route),
         ...(requiresJs ? { requiresJs } : {}),
       });
     }
   }
-  const sections: Array<{ label: string; entries: NavEntryVM[] }> = [];
+  const sections: NavSectionVM[] = [];
   if (aggregates.length > 0) sections.push({ label: "Aggregates", entries: aggregates });
   if (workflows.length > 0) sections.push({ label: "Workflows", entries: workflows });
   return sections;

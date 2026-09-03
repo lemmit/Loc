@@ -5,6 +5,7 @@ import type {
   DeployableIR,
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
+  PageIR,
   ParamIR,
   RepositoryIR,
   SystemIR,
@@ -29,7 +30,7 @@ import {
 } from "../_frontend/extern-functions.js";
 import { renderGateExpr } from "../_frontend/gate-expr.js";
 import { renderI18nModule, renderLocaleCatalog } from "../_frontend/i18n-runtime.js";
-import { deriveSidebarFromUi } from "../_frontend/menu-emitter.js";
+import { deriveSidebarFromUi, type NavSectionVM } from "../_frontend/menu-emitter.js";
 import { MONEY_TEXT_SOURCE } from "../_frontend/money-format.js";
 import { ANGULAR_NAV_LABELS, withNavLabelTokens } from "../_frontend/nav-labels.js";
 import { renderRealtimeClient } from "../_frontend/realtime.js";
@@ -399,7 +400,15 @@ export function generateAngularForContexts(
   // gate validator guarantees a page `requires` is currentUser-only, so
   // `renderGateExpr` can't throw here (same assumption the page guard in
   // page-shell.ts relies on).
-  const sidebarOverride = ui ? deriveSidebarFromUi(ui, pageCtx, authUi) : undefined;
+  // Angular's default section is one link per routed page, so a custom page is
+  // already in it; `deriveSidebarFromUi` MERGES its `menu { … }`-carrying pages
+  // into that default and drops the default copy of any route the merge already
+  // claims, so nothing is listed twice and nothing vanishes (M-FT.6 / C1).
+  const defaultSections: NavSectionVM[] =
+    ui && pages.length > 0 ? [defaultAngularNavSection(sys, pages, pageCtx, authUi)] : [];
+  const sidebarOverride = ui
+    ? deriveSidebarFromUi(ui, pageCtx, authUi, defaultSections)
+    : undefined;
   const navSections = sidebarOverride
     ? sidebarOverride.map((s) => ({
         label: s.label,
@@ -414,22 +423,19 @@ export function generateAngularForContexts(
           href: e.href,
         })),
       }))
-    : pages.length > 0
-      ? [
-          {
-            label: humanize(sys.name),
-            entries: pages.map((p) => ({
-              to: p.route!,
-              label: humanize(p.name),
-              testId: `nav-${pageSlug(p, pageCtx)}`,
-              requiresJs:
-                authUi && p.requires ? renderGateExpr(p.requires, "currentUser") : undefined,
-              external: false,
-              href: undefined as string | undefined,
-            })),
-          },
-        ]
-      : [];
+    : defaultSections.map((s) => ({
+        label: s.label,
+        labelKey: s.labelKey,
+        entries: s.entries.map((e) => ({
+          to: e.to,
+          label: e.label,
+          labelKey: e.labelKey,
+          testId: e.testId,
+          requiresJs: e.requiresJs,
+          external: !!e.external,
+          href: e.href,
+        })),
+      }));
 
   // Nav labels → Angular-spelled tokens (`{{ t(key, def) }}`, resolved against
   // the component instance the shell already exposes), so the `menu.*` catalog
@@ -686,6 +692,27 @@ export class NotFoundComponent {}
  *  emitted source is asked, not just the page ones. */
 function rendersChart(source: string): boolean {
   return source.includes("<loom-chart");
+}
+
+/** The Angular shell's DEFAULT sidebar: a single system-named section with one
+ *  link per routed page.  Handed to `deriveSidebarFromUi` as the base the ui's
+ *  own `menu { … }`-carrying pages merge into (M-FT.6). */
+function defaultAngularNavSection(
+  sys: SystemIR,
+  pages: readonly PageIR[],
+  pageCtx: PageNameCtx,
+  authUi: boolean,
+): NavSectionVM {
+  return {
+    label: humanize(sys.name),
+    entries: pages.map((p) => ({
+      to: p.route ?? "",
+      label: humanize(p.name),
+      testId: `nav-${pageSlug(p, pageCtx)}`,
+      activeArgs: JSON.stringify(p.route ?? ""),
+      ...(authUi && p.requires ? { requiresJs: renderGateExpr(p.requires, "currentUser") } : {}),
+    })),
+  };
 }
 
 /**

@@ -44,6 +44,7 @@ import {
   buildExternFunctionSignature,
 } from "../_frontend/extern-functions.js";
 import { renderGateExpr } from "../_frontend/gate-expr.js";
+import type { NavEntryVM, NavSectionVM } from "../_frontend/menu-emitter.js";
 import { pageFileBase } from "../_frontend/page-identity.js";
 import { buildPageObjectModule } from "../_frontend/page-objects-builder.js";
 import { buildWalkerPageObject } from "../_frontend/walker-page-objects.js";
@@ -280,12 +281,10 @@ export function emitSveltePagesForUi(ui: UiIR, ctx: SveltePageEmitContext): Map<
  *  sidebar (Aggregates / Workflows) mirroring the react
  *  shell's hardcoded grouping, overridden by an explicit `ui.menu`
  *  via the shared `deriveSidebarFromUi`. */
-interface DefaultNavEntry {
-  to: string;
-  label: string;
-  testId: string;
-  requiresJs?: string;
-}
+/** The shared sidebar entry shape (`_frontend/menu-emitter.ts`), so these
+ *  default sections can be handed straight to `deriveSidebarFromUi` as the base
+ *  the ui's own custom pages merge into (M-FT.6). */
+type DefaultNavEntry = NavEntryVM;
 
 export function defaultNavSections(
   scaffoldedAggregates: readonly AggregateIR[],
@@ -300,17 +299,26 @@ export function defaultNavSections(
   /** `auth: ui` — without a client-side session user there is nothing to test,
    *  so every entry stays ungated and the output is byte-identical. */
   authUi = false,
-): Array<{ label: string; entries: DefaultNavEntry[] }> {
+): NavSectionVM[] {
   const gateForRoute = (route: string): string | undefined => {
     if (!authUi) return undefined;
     const page = uiPages.find((p) => p.route === route);
     return page?.requires ? renderGateExpr(page.requires, "currentUser") : undefined;
   };
-  const entry = (to: string, label: string, testId: string): DefaultNavEntry => {
+  /** `activeArgs` is the shared VM's route-match argument list; the Svelte
+   *  app-shell ignores it (it compares `$page.url.pathname`), but carrying it
+   *  keeps these sections assignable to `NavSectionVM`. */
+  const entry = (to: string, label: string, testId: string, exact = false): DefaultNavEntry => {
     const requiresJs = gateForRoute(to);
-    return { to, label, testId, ...(requiresJs ? { requiresJs } : {}) };
+    return {
+      to,
+      label,
+      testId,
+      activeArgs: exact ? `${JSON.stringify(to)}, { exact: true }` : JSON.stringify(to),
+      ...(requiresJs ? { requiresJs } : {}),
+    };
   };
-  const sections: Array<{ label: string; entries: DefaultNavEntry[] }> = [];
+  const sections: NavSectionVM[] = [];
   if (scaffoldedAggregates.length > 0) {
     sections.push({
       label: "Aggregates",
@@ -322,7 +330,7 @@ export function defaultNavSections(
   }
   const wfEntries: DefaultNavEntry[] = [];
   if (hasWorkflowsIndex) {
-    wfEntries.push(entry("/workflows", "All workflows", "nav-workflows"));
+    wfEntries.push(entry("/workflows", "All workflows", "nav-workflows", true));
   }
   for (const wf of scaffoldedWorkflows) {
     wfEntries.push(

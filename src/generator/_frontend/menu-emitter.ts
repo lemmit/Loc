@@ -8,9 +8,11 @@
 //        matching `PageIR` in `ui.pages`; external links emit as
 //        target="_blank" anchors styled to match NavLink.
 //
-//   2. No explicit menu block → returns `undefined`.  Caller falls
-//      back to the hardcoded sidebar in
-//      `prepareAppShellVM(aggregates, workflows, views, …)`.
+//   2. No explicit menu block → the caller's DEFAULT sections are
+//      MERGED with every custom page's own `menu { … }` metadata
+//      (and with the custom pages that declare none).  Returns
+//      `undefined` only when that merge is empty, so a caller with
+//      no default sections of its own keeps its fallback.
 //
 // What this emitter covers:
 // - Explicit `ui.menu` overrides emit the user's exact section
@@ -22,9 +24,18 @@
 //   awaits `useAuth` plumbing and currently emits the link
 //   unconditionally.
 //
-// Per-page `menuMeta` is not consulted as the default sidebar driver;
-// the default sidebar still flows through the hardcoded grouping in
-// `prepareAppShellVM`.
+// The MERGE rule (M-FT.6 / finding C1).  A page-level `menu { … }`
+// block is ADDITIVE, never a replacement: writing
+// `menu { section: "Work", label: "Board" }` on one hand-written page
+// used to collapse the whole sidebar to that single link, so every
+// scaffolded aggregate/workflow link vanished — and omitting the block
+// left the page with no link at all.  Both halves are fixed here:
+// the caller passes the default sections it would otherwise have
+// rendered on its own, this emitter appends the custom pages to them
+// (same-labelled sections merge; a page with no `menu` block lands in
+// a plain "Pages" section), and a default entry whose route a custom
+// page already claims is dropped so the frontends whose default is
+// "one link per routed page" (angular, phoenix) don't list it twice.
 
 import type { PageIR, UiIR } from "../../ir/types/loom-ir.js";
 import { areaQualifiedName, classifyPage, type PageNameCtx } from "../../ir/util/page-kind.js";
@@ -96,13 +107,63 @@ export interface NavSectionVM {
   entries: NavEntryVM[];
 }
 
-/** Build sidebar `navSections` from a ui's explicit `menu { … }`
- *  block.  Returns `undefined` when the ui has no menu block — the
- *  caller falls back to the default hardcoded grouping. */
+/** The section a custom page with no `menu { section: … }` of its own
+ *  lands in.  Emitter-derived (no catalog key), like the default
+ *  aggregate/workflow headings. */
+const UNSECTIONED_LABEL = "Pages";
+
+/** Whether a page can carry a sidebar link at all: it must have a
+ *  parameterless route to navigate to, and must not have been mounted
+ *  outside the app shell (`layout: none` — a login screen has no
+ *  sidebar to appear in). */
+function isNavigable(p: PageIR): boolean {
+  const route = p.route;
+  if (!route || route.includes(":")) return false;
+  if (p.layout?.kind === "preset" && p.layout.name === "none") return false;
+  return true;
+}
+
+/** Merge a caller's DEFAULT sidebar sections with the sections derived
+ *  from the ui's own pages.  Defaults come first (an empty one is
+ *  dropped rather than rendering a heading over nothing); a default
+ *  entry whose route a page section already claims is dropped so the
+ *  page's own label/testid wins; a page section whose label matches a
+ *  default's is appended into it, and any other one is appended as a
+ *  new section. */
+export function mergeNavSections(
+  defaults: readonly NavSectionVM[],
+  pageSections: readonly NavSectionVM[],
+): NavSectionVM[] {
+  const claimed = new Set(pageSections.flatMap((s) => s.entries.map((e) => e.to)));
+  const out: NavSectionVM[] = [];
+  for (const section of defaults) {
+    const entries = section.entries.filter((e) => !claimed.has(e.to));
+    if (entries.length === 0) continue;
+    out.push({ ...section, entries });
+  }
+  for (const section of pageSections) {
+    const sameLabel = out.find((s) => s.label === section.label);
+    if (sameLabel) sameLabel.entries = [...sameLabel.entries, ...section.entries];
+    else out.push({ ...section });
+  }
+  return out;
+}
+
+/** Build sidebar `navSections` for a ui.  An explicit `menu { … }`
+ *  block is the author's exact layout and REPLACES the caller's
+ *  defaults; with no such block the ui's own pages are merged INTO
+ *  `defaultSections` (see the merge rule at the top of this file).
+ *  Returns `undefined` when nothing at all is derivable — the caller
+ *  then keeps whatever fallback it has. */
 export function deriveSidebarFromUi(
   ui: UiIR,
   nameCtx: PageNameCtx,
   authUi = false,
+  /** The sections the caller would render on its own (the scaffolded
+   *  Aggregates/Workflows grouping on react/vue/svelte, one link per
+   *  routed page on angular/phoenix).  Omitted ⇒ page-derived sections
+   *  only. */
+  defaultSections: readonly NavSectionVM[] = [],
 ): NavSectionVM[] | undefined {
   if (ui.menu) {
     return ui.menu.sections.map(
@@ -117,25 +178,28 @@ export function deriveSidebarFromUi(
       }),
     );
   }
-  // Fallback driver: per-page `menuMeta` blocks on
-  // EXPLICIT pages.  When no `ui.menu` is declared, walker-rendered
-  // pages (and any other source-declared pages) with `menu {
-  // section: "X" }` metadata group by section into a sidebar.
+  // No `ui.menu` block: the sidebar is the caller's defaults PLUS the
+  // ui's own custom (hand-written) pages.  Scaffold-synthesised pages
+  // are excluded here because the caller's default sections already
+  // represent them — including them again would double every link.
   //
-  // Restricted to `custom` (hand-written) pages so scaffold-synthesised
-  // pages (which carry default menuMeta from the scaffold expander)
-  // don't pre-empt the default hardcoded grouping in app-shell.ts.
-  // Explicit pages opt into this driver by declaring a `menu { … }`
-  // block.
-  const eligible = ui.pages.filter(
-    (p) =>
-      classifyPage(p, nameCtx).kind === "custom" && p.menuMeta && !readMenuMetaBool(p, "hidden"),
-  );
-  if (eligible.length === 0) return undefined;
-  // Group pages by section name (default "" if no section declared).
+  // A custom page opts into a named section with `menu { section: "X" }`;
+  // one with no `menu` block at all still gets a link (in the
+  // `UNSECTIONED_LABEL` section) as long as it is navigable, so a
+  // hand-written page is never unreachable from the shell.
+  const eligible = ui.pages.filter((p) => {
+    if (classifyPage(p, nameCtx).kind !== "custom") return false;
+    if (readMenuMetaBool(p, "hidden")) return false;
+    return p.menuMeta ? true : isNavigable(p);
+  });
+  if (eligible.length === 0) {
+    const defaultsOnly = mergeNavSections(defaultSections, []);
+    return defaultsOnly.length > 0 ? defaultsOnly : undefined;
+  }
+  // Group pages by section name (the unsectioned bucket if none declared).
   const bySection = new Map<string, PageIR[]>();
   for (const p of eligible) {
-    const section = readMenuMetaString(p, "section") ?? "";
+    const section = readMenuMetaString(p, "section") ?? UNSECTIONED_LABEL;
     let arr = bySection.get(section);
     if (!arr) {
       arr = [];
@@ -152,12 +216,16 @@ export function deriveSidebarFromUi(
       const bOrder = readMenuMetaNumber(b, "order") ?? Infinity;
       return aOrder - bOrder;
     });
+    // The unsectioned bucket's heading is emitter-DERIVED, so — like the
+    // default aggregate/workflow headings — it carries no catalog key: no
+    // translator ever saw it, and a key that resolves to nothing renders blank.
+    const authoredSection = sectionLabel !== UNSECTIONED_LABEL;
     sections.push({
       label: sectionLabel,
       // The heading is one page's `menu { section: … }` metadata, extracted
       // under THAT page's prefix — every page in the group carries the same
       // message, so the first one's key is as good as any (A13b).
-      ...(sectionLabel && pages[0]
+      ...(authoredSection && sectionLabel && pages[0]
         ? { labelKey: messageKey(`page.${pages[0].name}`, "menu.section", sectionLabel) }
         : {}),
       entries: pages.map((p): NavEntryVM => {
@@ -180,7 +248,8 @@ export function deriveSidebarFromUi(
       }),
     });
   }
-  return sections;
+  const merged = mergeNavSections(defaultSections, sections);
+  return merged.length > 0 ? merged : undefined;
 }
 
 function navEntryForLink(

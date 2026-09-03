@@ -39,6 +39,120 @@ export interface ExtraPageRoute {
   route: string;
 }
 
+/** The sidebar this shell renders with no menu input of its own: one
+ *  section per construct kind, in aggregate/workflow declaration order.
+ *  Exported so the react generator can hand it to `deriveSidebarFromUi`
+ *  as the base the ui's own custom pages MERGE into (M-FT.6) — the
+ *  preparer keeps using it directly for callers that pass no override. */
+export function defaultNavSections(
+  aggregates: AggregateIR[],
+  workflows: WorkflowIR[],
+): NavSectionVM[] {
+  const sections: NavSectionVM[] = [];
+  sections.push({
+    label: "Aggregates",
+    entries: aggregates.map((a) => {
+      const slug = snake(plural(a.name));
+      const entry: NavEntryVM = {
+        to: `/${slug}`,
+        label: humanize(plural(a.name)),
+        testId: `nav-${slug}`,
+        activeArgs: JSON.stringify(`/${slug}`),
+      };
+      return entry;
+    }),
+  });
+  if (workflows.length > 0) {
+    const entries: NavEntryVM[] = [];
+    // Index link first, exact-match so /workflows/<slug> children
+    // don't shadow the parent.
+    entries.push({
+      to: "/workflows",
+      label: "All workflows",
+      testId: "nav-workflows",
+      activeArgs: `"/workflows", { exact: true }`,
+    });
+    for (const wf of workflows) {
+      const slug = snake(wf.name);
+      entries.push({
+        to: `/workflows/${slug}`,
+        label: humanize(wf.name),
+        testId: `nav-workflow-${slug}`,
+        activeArgs: JSON.stringify(`/workflows/${slug}`),
+      });
+    }
+    sections.push({ label: "Workflows", entries });
+  }
+  return sections;
+}
+
+/** The sidebar this shell renders with no menu input of its own: one section
+ *  per construct kind, in aggregate/workflow declaration order.  Exported so
+ *  the react generator can hand it to `deriveSidebarFromUi` as the base the
+ *  ui's own custom pages MERGE into (M-FT.6) — the preparer keeps calling it
+ *  directly for callers that pass no override.
+ *
+ *  `uiPages` + `authUi` carry the per-entry `requires` gating (M-T3.15-C3): a
+ *  scaffolded List page clones the `find all … requires` gate guarding the very
+ *  read it makes, so a default entry inherits the gate of the page it links to
+ *  and the two sidebar paths cannot disagree about link visibility. */
+export function defaultNavSections(
+  aggregates: AggregateIR[],
+  workflows: WorkflowIR[],
+  uiPages: readonly PageIR[] = [],
+  authUi = false,
+): NavSectionVM[] {
+  /** The `requiresJs` a default nav entry inherits from the page it links to.
+   *  Same derivation `navEntryForLink` uses for menu-declared links. */
+  const gateForRoute = (route: string): string | undefined => {
+    if (!authUi) return undefined;
+    const page = uiPages.find((p) => p.route === route);
+    return page?.requires ? renderGateExpr(page.requires, "currentUser") : undefined;
+  };
+  const sections: NavSectionVM[] = [];
+  sections.push({
+    label: "Aggregates",
+    entries: aggregates.map((a) => {
+      const slug = snake(plural(a.name));
+      const requiresJs = gateForRoute(`/${slug}`);
+      const entry: NavEntryVM = {
+        to: `/${slug}`,
+        label: humanize(plural(a.name)),
+        testId: `nav-${slug}`,
+        activeArgs: JSON.stringify(`/${slug}`),
+        ...(requiresJs ? { requiresJs } : {}),
+      };
+      return entry;
+    }),
+  });
+  if (workflows.length > 0) {
+    const entries: NavEntryVM[] = [];
+    // Index link first, exact-match so /workflows/<slug> children
+    // don't shadow the parent.
+    const indexGate = gateForRoute("/workflows");
+    entries.push({
+      to: "/workflows",
+      label: "All workflows",
+      testId: "nav-workflows",
+      activeArgs: `"/workflows", { exact: true }`,
+      ...(indexGate ? { requiresJs: indexGate } : {}),
+    });
+    for (const wf of workflows) {
+      const slug = snake(wf.name);
+      const wfGate = gateForRoute(`/workflows/${slug}`);
+      entries.push({
+        to: `/workflows/${slug}`,
+        label: humanize(wf.name),
+        testId: `nav-workflow-${slug}`,
+        activeArgs: JSON.stringify(`/workflows/${slug}`),
+        ...(wfGate ? { requiresJs: wfGate } : {}),
+      });
+    }
+    sections.push({ label: "Workflows", entries });
+  }
+  return sections;
+}
+
 export function prepareAppShellVM(
   aggregates: AggregateIR[],
   workflows: WorkflowIR[],
@@ -260,58 +374,7 @@ export function prepareAppShellVM(
 
   // Sidebar nav sections.  Each construct kind contributes at most
   // one section, omitted entirely when its entry list is empty.
-  const navSections: NavSectionVM[] = [];
-
-  /** The `requiresJs` a default nav entry inherits from the page it links to.
-   *  Same derivation `navEntryForLink` uses for menu-declared links — the two
-   *  sidebar paths must not disagree about which links a principal may see. */
-  const gateForRoute = (route: string): string | undefined => {
-    if (!authUi) return undefined;
-    const page = uiPages.find((p) => p.route === route);
-    return page?.requires ? renderGateExpr(page.requires, "currentUser") : undefined;
-  };
-
-  navSections.push({
-    label: "Aggregates",
-    entries: aggregates.map((a) => {
-      const slug = snake(plural(a.name));
-      const requiresJs = gateForRoute(`/${slug}`);
-      const entry: NavEntryVM = {
-        to: `/${slug}`,
-        label: humanize(plural(a.name)),
-        testId: `nav-${slug}`,
-        activeArgs: JSON.stringify(`/${slug}`),
-        ...(requiresJs ? { requiresJs } : {}),
-      };
-      return entry;
-    }),
-  });
-
-  if (workflows.length > 0) {
-    const entries: NavEntryVM[] = [];
-    // Index link first, exact-match so /workflows/<slug> children
-    // don't shadow the parent.
-    const indexGate = gateForRoute("/workflows");
-    entries.push({
-      to: "/workflows",
-      label: "All workflows",
-      testId: "nav-workflows",
-      activeArgs: `"/workflows", { exact: true }`,
-      ...(indexGate ? { requiresJs: indexGate } : {}),
-    });
-    for (const wf of workflows) {
-      const slug = snake(wf.name);
-      const wfGate = gateForRoute(`/workflows/${slug}`);
-      entries.push({
-        to: `/workflows/${slug}`,
-        label: humanize(wf.name),
-        testId: `nav-workflow-${slug}`,
-        activeArgs: JSON.stringify(`/workflows/${slug}`),
-        ...(wfGate ? { requiresJs: wfGate } : {}),
-      });
-    }
-    navSections.push({ label: "Workflows", entries });
-  }
+  const navSections = defaultNavSections(aggregates, workflows, uiPages, authUi);
 
   // step 2 — flatten the pre-walked named-layout VMs into
   // the AppShellVM channel + extend the import list.  Routes inside

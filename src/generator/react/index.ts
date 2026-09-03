@@ -48,6 +48,7 @@ import {
 } from "./emit-templates.js";
 import { prepareNamedLayouts } from "./layouts-emitter.js";
 import { deriveSidebarFromUi } from "./menu-emitter.js";
+import { defaultNavSections } from "./templating/preparers/app-shell.js";
 import {
   deriveExtraRoutesFromUi,
   emitPageObjectsForUi,
@@ -351,13 +352,6 @@ export function generateReactForContexts(
   // non-code modules need a declaration); harmless on earlier versions.
   out.set("src/vite-env.d.ts", '/// <reference types="vite/client" />\n');
   out.set("src/main.tsx", renderMain(pack, routerBasename, authUi));
-  // When the ui block declares an explicit `menu { … }`,
-  // its derived sidebar overrides the hardcoded Aggregates /
-  // Workflows / Views grouping below.  When the ui has no menu
-  // block, `sidebarOverride` is `undefined` and the AppShell
-  // preparer falls back to its default hardcoded shape.
-  const sidebarOverride = deriveSidebarFromUi(ui, pageCtx, authUi);
-
   // Explicit pages with non-conventional names need
   // to register their import + route in App.tsx so React Router
   // can mount them.  Pages that override a scaffolded shape at the
@@ -425,6 +419,23 @@ export function generateReactForContexts(
   // it dangles against a missing `./pages/workflows/index` module (TS2307) —
   // the per-workflow pages still mount.
   const hasWorkflowsIndex = ui.pages.some((p) => kindOf(p).kind === "workflows-index");
+
+  // When the ui block declares an explicit `menu { … }`, its derived sidebar
+  // REPLACES the default Aggregates / Workflows grouping.  With no menu block
+  // the ui's own custom pages are MERGED into that default instead (M-FT.6 /
+  // finding C1) — a hand-written page carrying `menu { section: "Work" }` used
+  // to erase every scaffolded link, and one carrying no `menu` block at all had
+  // no link of its own.  `sidebarOverride` is `undefined` only when nothing is
+  // derivable; the AppShell preparer then falls back to its own default shape.
+  const sidebarOverride = deriveSidebarFromUi(
+    ui,
+    pageCtx,
+    authUi,
+    defaultNavSections(
+      scaffoldedAggregates.map((a) => a.agg),
+      scaffoldedWorkflows.map((w) => w.wf),
+    ),
+  );
 
   out.set(
     "src/App.tsx",
