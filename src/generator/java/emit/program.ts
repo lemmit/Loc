@@ -484,7 +484,7 @@ export function renderDockerfile(
           ``,
         ]
       : [
-          `FROM node:22-alpine AS spa-build`,
+          `FROM node:24-alpine AS spa-build`,
           `WORKDIR /spa`,
           `COPY ClientApp/package.json ClientApp/package-lock.json* ./`,
           `RUN npm ci --prefer-offline --no-audit --no-fund || npm install`,

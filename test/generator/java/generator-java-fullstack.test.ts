@@ -59,7 +59,7 @@ describe("java generator — embedded-SPA fullstack mount", () => {
 
   it("Dockerfile gains the node SPA stage copying dist to /app/ui", async () => {
     const docker = (await files()).get("fs_app/Dockerfile")!;
-    expect(docker).toContain("FROM node:22-alpine AS spa-build");
+    expect(docker).toContain("FROM node:24-alpine AS spa-build");
     expect(docker).toContain("COPY --from=spa-build /spa/dist /app/ui");
   });
 

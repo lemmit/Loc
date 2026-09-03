@@ -95,7 +95,7 @@ describe("java generator — hosts: fullstack embed (M-T6.5)", () => {
 
   it("Dockerfile gains the node SPA stage copying the vite dist to /app/ui (react)", async () => {
     const docker = (await generateSystemFiles(src("react", "mantine"))).get("jh_app/Dockerfile")!;
-    expect(docker).toContain("FROM node:22-alpine AS spa-build");
+    expect(docker).toContain("FROM node:24-alpine AS spa-build");
     expect(docker).toContain("COPY --from=spa-build /spa/dist /app/ui");
   });
 
@@ -133,7 +133,7 @@ describe("java generator — hosts: fullstack embed (M-T6.5)", () => {
   // Feliz (F#/Fable) is embeddable too, but differs in its BUILD toolchain:
   // it compiles via `dotnet fable` + `vite build` (not npm-only), so the host
   // Dockerfile's spa-build stage needs a .NET SDK + Node image rather than
-  // `node:22-alpine`.  Its vite output is still flat `dist/` (like react/vue).
+  // `node:24-alpine`.  Its vite output is still flat `dist/` (like react/vue).
   it("dispatches a hosted feliz SPA (F#/Fable, flat dist) into ClientApp/", async () => {
     const files = await generateSystemFiles(src("feliz", '"dracula"'));
     // Feliz project lands under ClientApp/ — its F# project files, vite config,
@@ -150,7 +150,7 @@ describe("java generator — hosts: fullstack embed (M-T6.5)", () => {
     // `dotnet tool restore`, NOT the node-only vite stage.
     const docker = files.get("jh_app/Dockerfile")!;
     expect(docker).toContain("FROM mcr.microsoft.com/dotnet/sdk:8.0 AS spa-build");
-    expect(docker).not.toContain("FROM node:22-alpine AS spa-build");
+    expect(docker).not.toContain("FROM node:24-alpine AS spa-build");
     expect(docker).toContain("RUN dotnet tool restore");
     // Feliz still emits flat `dist/`, so the runtime copy is unchanged.
     expect(docker).toContain("COPY --from=spa-build /spa/dist /app/ui");
