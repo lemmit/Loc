@@ -319,6 +319,110 @@ export function createInProcessDispatcher(db: NodePgDatabase<typeof schema>): Do
 
 > Honest gap: the `.NET` / `Python` / `Java` reactors emit the equivalent load-or-allocate handler (a Mediator `INotificationHandler<TEvent>` on .NET, a dispatcher-routed coroutine on Python, a dispatch method on Java) over a backend-mapped saga-state row — documented in [`../workflow.md`](../workflow.md) §"Status". They're not re-excerpted here; the Node handler above is the canonical shape and the dispatch wiring is structurally identical per backend.
 
+## `timerSource` — time as an event source
+
+```
+TimerSource: 'timerSource' name=LooseName '{'
+    ('for' ':' event=[EventDecl:ID] ','?)
+    ('cron' ':' cron=STRING ','?)? ('every' ':' every=DURATION ','?)?
+    ('in' ':' timezone=STRING ','?)? ('overlap' ':' overlap?='allow' ','?)?
+'}'
+```
+
+A `timerSource` is system-scope — the clock twin of `channelSource`: it fires a plain domain `event` on a wall-clock cadence, and workflows react through the **existing** `create(e) by …` / `on(e)` triggers. There is no `schedule` trigger and no new workflow grammar; the cadence lives on the binding, so it is swappable per environment. There is no `docs/scheduling.md` — this section is the reference.
+
+```ddd
+context Orders {
+  event SweepTick { sweep: Sweep id, at: datetime }   // the tick: a fact carrying the fire time
+  channel Ticks { carries: SweepTick }
+  workflow sweepRun {
+    sweep: Sweep id
+    create(t: SweepTick) by t.sweep { … }             // ordinary event-triggered starter
+  }
+}
+
+timerSource sweep { for: SweepTick, cron: "*/5 * * * *" }
+```
+
+Gates (`src/language/validators/timer.ts` for the cadence, `src/ir/validate/checks/timer-checks.ts` for the rest):
+
+| Code | Raised when |
+|---|---|
+| `loom.timer-cadence` | both `cron:` and `every:`, neither, a malformed cron, an `every:` under the 1000 ms floor, or an `every:` that is cleanly cron-expressible (`every: 5m` → *write `cron: "*/5 * * * *"`*). `every:` is for what cron can't say: sub-minute, or non-dividing (`7m`, `90m`). |
+| `loom.timer-event-shape` | the `for:` event is also emitted by domain logic (**error** — a tick must be infrastructure-emitted only), or it has no `at: datetime` field (**warning** — the reactor can't read the fire time). |
+| `loom.timer-needs-state` | the owning deployable's platform binds no relational state, or no database-backed deployable owns the event's context. Single-fire across replicas needs a Postgres-backed ledger. |
+| `loom.timer-source-unbound` | no workflow reacts to the event (**warning**) — the timer fires into the void. |
+| `loom.reserved-not-emitted` | `in: "<tz>"` and `overlap: allow` parse and reach the IR, but **no emitter reads either** — cron is evaluated in the container's clock, and every backend still guards against an overlapping run. |
+
+Each backend hosts the timer on its ecosystem's durable job runner — single-fire across replicas, automatic retry, and missed-boundary catch-up are the runner's, not Loom's:
+
+::: tabs backend
+== node
+```ts
+// scheduler.ts — pg-boss recurring job (+ a loom_timer_runs catch-up ledger)
+const queue = "timer_nightly";
+await boss.createQueue(queue);
+await boss.work(queue, async () => {
+  await events.dispatch({ type: "SweepTick", order: Ids.newOrderId(), at: new Date() });
+  baseLogger.info({ event: "timer_fired", timer: "nightly" });
+});
+await boss.schedule(queue, "0 2 * * *", {}, { retryLimit: 3, retryBackoff: true });
+```
+== dotnet
+```csharp
+// Infrastructure/Scheduling/TimerScheduler.cs — Hangfire recurring job
+public async Task ExecuteAsync()
+{
+    try {
+        await _events.DispatchAsync(new SweepTick(SweepId.New(), DateTime.UtcNow), CancellationToken.None);
+        _log.LogInformation("{Event} timer={Timer}", "timer_fired", "sweep");
+    } catch (Exception ex) {
+        _log.LogError(ex, "{Event} timer={Timer} error={Error}", "timer_emit_failed", "sweep", ex.Message);
+        throw; // let Hangfire's automatic retry engage
+    }
+}
+```
+== python
+```python
+# app/scheduling.py — procrastinate periodic task
+@timer_app.periodic(cron="*/5 * * * *", periodic_id="sweep")
+@timer_app.task(queueing_lock="timer:sweep", retry=RetryStrategy(max_attempts=3, exponential_wait=2))
+async def _timer_sweep(timestamp: int) -> None:
+    async with session_factory() as session, session.begin():
+        await make_dispatcher(session).dispatch(SweepTick(sweep=new_sweep_id(), at=datetime.now(UTC)))
+    log("info", "timer_fired", timer="sweep", boundary=timestamp)
+```
+== java
+```java
+// SweepTimerJob.java — JobRunr recurring job
+public void execute() {
+    try {
+        events.publishEvent(new SweepTick(SweepId.newId(), Instant.now()));
+        CatalogLog.event("timer_fired", "info", "timer", "sweep");
+    } catch (RuntimeException err) {
+        CatalogLog.event("timer_emit_failed", "error", "timer", "sweep", "error", String.valueOf(err.getMessage()));
+        throw err; // let JobRunr's automatic retry engage
+    }
+}
+```
+== elixir
+```elixir
+# lib/d/scheduler/sweep_worker.ex — Oban worker, `unique` on the boundary = the single-fire ledger
+use Oban.Worker, queue: :timers, max_attempts: 3,
+  unique: [keys: [:boundary], period: :infinity, states: [:scheduled, :available, :executing, :retryable, :completed, :cancelled, :discarded, :suspended]]
+
+@impl Oban.Worker
+def perform(%Oban.Job{args: %{"boundary" => _boundary}}) do
+  event = %D.Orders.Events.SweepTick{sweep: UUIDv7.generate(), at: DateTime.utc_now()}
+  D.Orders.Dispatcher.dispatch(event)
+  Logger.info("timer_fired", event: "timer_fired", timer: @timer_name)
+  :ok
+end
+```
+::: end
+
+The tick rides the ordinary in-process dispatcher, so a reactor sees no difference between a timer tick and a domain event. A tick dispatched outside a request has no principal — a realtime relay degrades such an event to a refetch ticket ([Channels](14-apis-storage-resources-channels.md#channel--channelsource)).
+
 ## `apply` — the `eventSourced` fold
 
 Mark a workflow `eventSourced` and its truth becomes its own event stream (a `<wf>_events` table) instead of a `<Wf>State` row. There, `create` / `on` bodies may only `emit`; each emitted event must be folded by an `apply(param: Event) { body }` block — a pure fold (`:=` assignments only), exactly like an aggregate [applier](06-behavior-and-statements.md#applye-event--the-event-sourcing-fold). An emitted event with no applier is an error (`Event 'X' is emitted … but no applier folds it`).
@@ -473,7 +577,7 @@ public void transferCredit(TransferCreditRequest request) {
 
 ## Resource consumption
 
-`objectStore` / `queue` / `api` / `mailer` resources are *used*, not persisted to. A workflow calls them through an **ambient handle** (the resource name, in scope like `currentUser`) and a closed per-kind verb vocabulary — `objectStore`: `put` / `get` / `list` / `signedUrl` / `delete`; `queue`: `enqueue` / `publish`; `api`: `get` / `post`; `mailer`: `send(to, subject, body)`. The verbs are **workflows-only**, capability-gated (an unknown verb is `loom.resource-verb-invalid`), and **forbidden inside a transactional span** (`loom.resource-op-in-transaction` — an external effect can't roll back with the DB).
+`objectStore` / `queue` / `api` / `mailer` resources are *used*, not persisted to. A workflow calls them through an **ambient handle** (the resource name, in scope like `currentUser`) and a closed per-kind verb vocabulary — `objectStore`: `put` / `get` / `list` / `signedUrl` / `delete`; `queue`: `enqueue` / `publish`; `api`: `get` / `post`; `mailer`: `send(to, subject, body)`. The verbs are legal in a **workflow body and a `commandHandler` / `queryHandler` body, and nowhere else** — an aggregate `operation`, an invariant, a `derived`, a repository filter, and a `domainService` operation are all `loom.resource-op-outside-workflow` (only the two application-layer render sites have the client in scope). They are capability-gated against the bound sourceType (an unknown verb is `loom.resource-verb-invalid`) and **forbidden inside a transactional span** (`loom.resource-op-in-transaction` — an external effect can't roll back with the DB).
 
 ```ddd
 resource files { for: Sales, kind: objectStore, use: bucket }

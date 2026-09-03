@@ -123,6 +123,26 @@ public sealed class Customer : Party
     private void AssertInvariants() { _ = this; }   // the base's invariant is NOT inherited
 }
 ```
+== java
+```java
+// features/customers/Customer.java — a derived SINGLE_TABLE entity
+@DiscriminatorValue("Customer")
+public class Customer extends Party {
+    @Column(name = "credit_limit") BigDecimal creditLimit;
+    public void _assertInvariants() { }   // the base's invariant is NOT inherited
+}
+// features/customers/CustomerResponse.java — the merged wire shape
+public record CustomerResponse(UUID id, String name, String email, double creditLimit, int version) { }
+```
+== python
+```python
+# app/domain/customer.py — a plain class; no base class, no inherited `display`
+class Customer:
+    def __init__(self, *, id: CustomerId, name: str, email: str, credit_limit: float, version: int, ...):
+        ...
+    def _assert_invariants(self) -> None:
+        pass
+```
 == elixir
 ```elixir
 # lib/d/parties/customer.ex (TPH) — its own schema over the SAME table
@@ -299,6 +319,14 @@ public async Task<IReadOnlyList<Asset>> FindAllAsync(CancellationToken cancellat
     return result;
 }
 // TPH: no PartyRepository is emitted — `DbSet<Party>` reads the shared table polymorphically.
+```
+== java
+```java
+// No polymorphic reader is emitted on Java — the ONLY artifact for the base is
+// the entity itself (features/parties/Party.java @Inheritance(SINGLE_TABLE) under
+// TPH, features/assets/Asset.java @MappedSuperclass under TPC).  There is no
+// PartyRepository, no PartyService and no PartiesController: read the base
+// through JPA's own polymorphic `Party` query, or read each concrete repository.
 ```
 == python
 ```python

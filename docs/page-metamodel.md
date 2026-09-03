@@ -238,22 +238,35 @@ to a body expression. They never declare a route.
 
 ```ddd
 component OrderPanel(order: Order) {
-  body: Stack {[
-    Heading { "Order " + order.id, level: 2 },
-    Badge { order.status },
-    Table { order.lines, columns: [productId, quantity, unitPrice, subtotal] },
-    Toolbar {[
-      Action(confirm, then: navigate(OrderConsole, { customerId: order.customerId })),
-      Action(cancel,  then: toast("Cancelled"))
-    ]}
-  ]}
+  body: Stack {
+    Heading { `Order {order.id}`, level: 2 },
+    EnumBadge { order.status },
+    Money { order.total, decimals: 2 },
+    Table { rows: order.lines,
+      Column { "Product", l => l.productName },
+      Column { "Qty",     l => l.quantity } },
+    Toolbar {
+      Action { order.confirm, then: navigate(Home) },
+      Action { order.cancel,  then: toast("Cancelled") }
+    }
+  }
 }
 ```
 
-The compiler enforces parameter relationships at every call site:
-`Form { creates: Order }` binds form fields to `wireShape(Order.create)`;
-`scaffoldDetails { of: Order }` resolves the `of:` aggregate and exposes its
-operations as actions.
+Two things that example pins down and earlier drafts got wrong:
+
+- **A user-visible slot may not be built by `+` concatenation.**
+  `Heading { "Order " + order.id }` is rejected (`loom.user-visible-concat`) —
+  word order, plural rules and formatting don't survive translation.  Use a
+  backtick template (`` `Order {order.id}` ``), which the extractor turns into
+  one ICU catalog message.
+- **Every named argument is read by name, so an invented one is an error.**
+  `Table { …, columns: [ … ] }` raises `loom.page-primitive-unknown-arg`
+  (`Table` has no `columns:` argument) — columns are `Column { … }` children.
+
+The compiler enforces parameter relationships at every call site: `CreateForm
+{ of: Order }` binds form fields to `wireShape(Order.create)`; `OperationForm
+{ of: <record>.<op> }` resolves the operation and its payload.
 
 User-defined components are pure functions over their parameters and local
 state — they cannot synthesise pages, routes, or menu entries.
@@ -267,6 +280,13 @@ same emission path (one component per ui that references them: react
 in `lib/components.dart`, and **feliz** — which has no per-component file — an F#
 props function in App.fs's nested `Components` module).  Per-target deferrals are
 listed in [`generators.md`](generators.md).
+
+A component body admits the same declarations a page does *except* routing
+metadata: `state { … }`, `derived …`, `action …`, then one `body:` expression.
+`component X(…) extern from "./X.tsx"` declares only the typed param contract —
+Loom emits a re-export shim plus a typed `<Name>.props.ts` and the user owns the
+module (`loom.extern-component-has-body` if such a declaration also carries a
+body; `loom.component-missing-body` if a non-extern one doesn't).
 
 - **`ui`-scope** (`ui WebApp { component X(…) { … } }`) — visible only to
   pages and other components inside the same ui block. Use when the

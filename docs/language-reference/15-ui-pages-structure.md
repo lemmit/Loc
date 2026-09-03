@@ -99,6 +99,8 @@ Other `PageProp`s: `title:` (an expression, so it may interpolate), `requires <e
 
 **Route parameters.** `route:` takes a `STRING`; declared parameters (`page OrderConsole(customerId: string)`) type the framework's route-param hook, and every declared name the body references is destructured from it. `id` is magic: a `/…/:id` route binds `id` (and instance-op effects and `OperationForm` resolve against it) even when the page declares no parameter list.
 
+>  **Honest gap — a page whose `body:` is a bare `match` is dropped.** `match { cond => … else => … }` is a normal expression (chapter 5) and parses fine as a page body, but the page then emits **no file and no route**, with zero diagnostics — verified on this HEAD. Wrap it in a layout primitive (`body: Stack { match { … } }`) until the walker's page-shell handles a top-level `match`.
+
 Two pages that resolve to the same emit path are rejected by `loom.ui-page-path-collision` (a page's identity is its area path plus its name), and two pages claiming the same scaffold archetype slot by `loom.ui-page-slot-collision` — only one of them would be reachable from the router. A name in a rendered slot that resolves to no route param, `state` field, `derived` binding, lambda parameter or store field raises `loom.unresolved-page-ref` (the walker would otherwise emit a comment and silently drop the content).
 
 ## `component` — reusable region tree
