@@ -7282,9 +7282,9 @@
     {
       "id": "F2-SEED-EVENTSOURCED",
       "title": "A `seed` row on an event-sourced aggregate is silently dropped on elixir (marker still written) and emits an arity-wrong `create(...)` on java + dotnet",
-      "pr": "#2700",
+      "pr": "#2770",
       "sha": "727d328",
-      "note": "gated: loom.seed-event-sourced-unsupported + loom.seed-abstract-aggregate (src/diagnostics/unsupported-register.ts:613) — the event-append seed path itself remains real future work under M-T6.50/M-T6.52."
+      "note": "gated 2026-08-31 by #2700 (loom.seed-event-sourced-unsupported + loom.seed-abstract-aggregate); M-T6.52 (Wave 2 packet 2.5, #2770) lands the event-append seed path itself — a shared seeder model (src/generator/_persistence/seed-datasets.ts) derives an event-sourced aggregate's create-call shape from its `create` action's OWN params (not the field set) and all five backends read it: elixir appends the creation event through the create_<agg>/1 command seam, java/.NET build the call from the shared param list. `loom.seed-event-sourced-unsupported` is retired; the domain path is now accepted, with two narrower permanent rules (`loom.seed-raw-eventsourced`, `loom.seed-eventsourced-no-create`) in its place."
     },
     {
       "id": "connection-secret-wiring",
