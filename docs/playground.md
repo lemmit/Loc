@@ -174,6 +174,14 @@ A browser without `navigator.locks` / `BroadcastChannel` degrades to the old
 single-tab assumption — every tab writable — rather than to a hard failure or
 a spurious read-only banner.
 
+## Runtime & evolution surfaces
+
+The dock's **Runtime** tab has four sub-views once the backend is booted: **API** (the spec-driven endpoint console), **Database** (the SQL console + Reset), **Tables** (read-only — `information_schema.tables` across every generated schema, click a table for its first 50 rows; a *Users* strip beside it names the identities requests carry: the generated dev stub's built-in identity and the Auth tab's override) and **Requests** (every OpenAPI operation with the number of requests it served, matched from the runtime log's `request_end` lines by `web/src/backend/route-match.ts`; unmatched paths collect in a *404s* list). Every raw runtime error — a boot failure, a 4xx/5xx body, a dispatch that produced no response — carries one line of interpretation and a *See Output → Runtime logs* link above the raw text.
+
+The **Migrations** tab compares the live source with a baseline (*Last save* by default, or any commit pinned from History) and draws the schema as a table diagram tinted by the pending migration — added green, changed amber, removed red, untouched dimmed (`web/src/layout/migration-tint.ts` over the evolution worker's `tables` + per-step `table`) — beside the migration SQL. A destructive change renders as the gate `ddd generate system` raises: the `--allow-destructive` flag and the data it would drop. The comparison runs when the tab opens; **Refresh** re-runs it.
+
+The **Tests** tab's requirement verdicts read *Verified / Failing / Untested / Unverified* with a one-line legend; a discovery failure (in a sandbox with no registry: `Failed to resolve module specifier "uuidv7"`) shows one line of interpretation with the raw text folded behind *Show details*, and discovery reports per-suite progress with a *Cancel*.
+
 ## Crash reporting & diagnostics
 
 The playground is a static GitHub Pages site: **there is no telemetry and no

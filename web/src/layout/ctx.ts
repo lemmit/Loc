@@ -35,6 +35,7 @@ import type {
 import type { PipelineState } from "../pipeline/state";
 import type { DispatchResult, QueryResult } from "../runtime/protocol";
 import type { ApiEndpoint } from "../backend/openapi";
+import type { RequestTraces } from "../backend/route-match";
 import type { TestResult } from "../testing/harness";
 import type { OutputStream } from "./OutputPanel";
 import type { LogLine } from "../util/log-line";
@@ -345,6 +346,12 @@ export interface LayoutCtx {
   runGenerateExample: () => void;
   /** Run one SQL statement against the booted DB (Database console). */
   runQuery: (sql: string) => Promise<QueryResult>;
+  /** Requests the booted backend served, folded per operation from the
+   *  runtime log's `request_end` lines and matched to `apiEndpoints`
+   *  (M-T8.22) — the Runtime tab's Requests view reads it; M-T8.20 puts the
+   *  same counts on the Model pane's operation nodes.  `EMPTY_TRACES`
+   *  before the first request. */
+  requestTraces: RequestTraces;
 
   // Live mode
   liveMode: boolean;

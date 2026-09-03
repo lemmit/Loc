@@ -11,7 +11,7 @@
 // the worker bundle, not the workspace, and aren't user-managed.
 // ---------------------------------------------------------------------------
 
-import { ActionIcon, Badge, Group, Text, Tooltip } from "@mantine/core";
+import { ActionIcon, Badge, Button, Group, Text, Tooltip } from "@mantine/core";
 import { useEffect, useState } from "react";
 import type { LoomBuildClient } from "../build/client.js";
 import type { GitStore } from "./git/index.js";
@@ -50,16 +50,28 @@ export function WorkspaceTree({ workspaceStore, buildClient }: Props): JSX.Eleme
   // imports/deletes propagate without a manual refresh.  Reads are
   // async (git-backed), so the list lands in state.
   const [packs, setPacks] = useState<PackSummary[]>([]);
+  // A failed read shows an error row + Retry instead of an empty list that
+  // silently hides the imported packs (audit M18).
+  const [error, setError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     if (!workspaceStore) {
       setPacks([]);
+      setError(null);
       return;
     }
     let cancelled = false;
     const rebuild = (): void => {
-      void summarisePacks(workspaceStore).then((p) => {
-        if (!cancelled) setPacks(p);
-      });
+      void summarisePacks(workspaceStore)
+        .then((p) => {
+          if (!cancelled) {
+            setPacks(p);
+            setError(null);
+          }
+        })
+        .catch((err: unknown) => {
+          if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+        });
     };
     rebuild();
     const unsubscribe = workspaceStore.subscribe(DESIGN_PREFIX, rebuild);
@@ -67,7 +79,20 @@ export function WorkspaceTree({ workspaceStore, buildClient }: Props): JSX.Eleme
       cancelled = true;
       unsubscribe();
     };
-  }, [workspaceStore]);
+  }, [workspaceStore, attempt]);
+
+  if (error) {
+    return (
+      <Group gap="xs" data-testid="workspace-packs-error">
+        <Text size="xs" c="red">
+          Could not list imported packs — {error}
+        </Text>
+        <Button size="compact-xs" variant="subtle" onClick={() => setAttempt((n) => n + 1)} data-testid="workspace-packs-retry">
+          Retry
+        </Button>
+      </Group>
+    );
+  }
 
   if (packs.length === 0) return null;
 

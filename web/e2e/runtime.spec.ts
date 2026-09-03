@@ -179,6 +179,50 @@ test("editor → generate → bundle → boot → dispatch", async ({ page }) =>
     await expect(result).toContainText("table_name");
   });
 
+  // M-T8.22 — the Runtime tab's read-only Tables view and the Requests
+  // traces, provable only after a real boot.  NOT run locally when added:
+  // the authoring sandbox had no registry access, so bundle + boot could
+  // not complete there (stated in the PR body); the first real run is this
+  // heavy lane.
+  await test.step("Tables view lists the booted schema's tables and reads rows", async () => {
+    await page.getByTestId("runtime-subview").getByText("Tables").click();
+    await expect(page.getByTestId("runtime-tables-list")).toBeVisible({ timeout: 30_000 });
+    const products = page.getByTestId("runtime-table-products");
+    await expect(products).toBeVisible();
+    await products.click();
+    // The first-50-rows read lands as the shared SqlResult table, with the
+    // product inserted above in it.
+    const rows = page.getByTestId("runtime-table-rows");
+    await expect(rows.getByTestId("sql-result")).toBeVisible({ timeout: 30_000 });
+    await expect(rows).toContainText("PW-1");
+    // The Users strip names the dev stub's built-in identity beside it.
+    await expect(page.getByTestId("runtime-users")).toBeVisible();
+  });
+
+  await test.step("Requests view counts the GET /products calls made from the API console", async () => {
+    await page.getByTestId("runtime-subview").getByText(/^Requests/).click();
+    const requests = page.getByTestId("runtime-requests");
+    await expect(requests).toBeVisible({ timeout: 30_000 });
+    // The GET-list operation (not `/products/{id}`), matched from the
+    // runtime log's `request_end` lines to the OpenAPI operation.  This spec
+    // sent GET /products twice above (the empty page + the read-back); the
+    // preview's own list fetch may add more, so the count is >= 2, never 0.
+    const row = requests
+      .locator('[data-testid^="runtime-request-op-"]')
+      .filter({ hasText: /GET \/(api\/)?products(\s|$)/ })
+      .first();
+    await expect(row).toBeVisible();
+    const count = row.locator('[data-testid^="runtime-request-count-"]');
+    await expect(count).toHaveText(/^[1-9]\d*$/);
+    expect(Number(await count.textContent())).toBeGreaterThanOrEqual(2);
+    // Nothing this spec sent was a 404.
+    await expect(page.getByTestId("runtime-requests-404s")).toContainText(
+      "Every request so far matched an operation.",
+    );
+    // Back to the API view so the Preview step below finds its controls.
+    await page.getByTestId("runtime-subview").getByText("API").click();
+  });
+
   await test.step("Preview loads the React app via the sandbox bridge", async () => {
     // The Preview tab is only meaningful when the source has a
     // React deployable.  The default Sales System example does;
