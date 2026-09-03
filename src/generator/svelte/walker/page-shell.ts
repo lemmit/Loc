@@ -40,7 +40,12 @@ import { idTargetHookVar } from "../../_frontend/form-helpers.js";
 import { renderGateExpr } from "../../_frontend/gate-expr.js";
 import type { LoadedPack } from "../../_packs/loader.js";
 import { storeMemberLocal } from "../../_walker/js-target-helpers.js";
-import { addImportToMap, I18N_MODULE, needsPackChromeT } from "../../_walker/render-primitive.js";
+import {
+  addImportToMap,
+  I18N_MODULE,
+  needsPackChromeT,
+  takeDecimalImport,
+} from "../../_walker/render-primitive.js";
 import { indentJsx } from "../../_walker/shared/args.js";
 import type {
   ActionMutationState,
@@ -388,6 +393,11 @@ export function renderSveltePage(
   // import block is serialized two lines below.  Hence the form wiring runs here.
   if (needsPackChromeT(form.templateScope)) addImportToMap(imports, I18N_MODULE, "t");
   addOpModuleImports(imports, pack, formOfs);
+  // The <script> block is the SINGLE owner of this file's `Decimal` binding, so
+  // the active pack's `field-input-money` declaration is absorbed here instead
+  // of being serialized beside it (svelte-check: "Identifier 'Decimal' has
+  // already been declared").  See `takeDecimalImport`.
+  const packDeclaresDecimal = takeDecimalImport(imports);
   const packImports = renderSvelteImportLines(imports);
   // Interactive-table sort helper — imported only when a sortable `Table`
   // renders on this page (M-T1.1).
@@ -458,7 +468,7 @@ export function renderSveltePage(
   // Decimal("0"))` — pull decimal.js into the <script> (the dep rides
   // the deployable's money-usage flag in package.json).
   const decimalImport =
-    effectiveUsesState && state.some((f) => typeUsesMoney(f.type))
+    (effectiveUsesState && state.some((f) => typeUsesMoney(f.type))) || packDeclaresDecimal
       ? `  import Decimal from "decimal.js";\n`
       : "";
 
@@ -690,6 +700,8 @@ export function renderSvelteComponentFile(
   addOpModuleImports(imports, pack, formOfs);
   // See the page renderer above.
   if (needsPackChromeT(form.templateScope)) addImportToMap(imports, I18N_MODULE, "t");
+  // Component twin of the page drain above — see `takeDecimalImport`.
+  const packDeclaresDecimal = takeDecimalImport(imports);
   const packImports = renderSvelteImportLines(imports);
   const tableHelperNames = [
     ...(usesTableSort ? ["sortRows"] : []),
@@ -772,7 +784,7 @@ export function renderSvelteComponentFile(
     ? state.map((f) => `  ${renderRunesState(f, pack)}\n`).join("")
     : "";
   const decimalImport =
-    effectiveUsesState && state.some((f) => typeUsesMoney(f.type))
+    (effectiveUsesState && state.some((f) => typeUsesMoney(f.type))) || packDeclaresDecimal
       ? `  import Decimal from "decimal.js";\n`
       : "";
   const templateScope = form.templateScope === "" ? "" : `\n${form.templateScope}`;

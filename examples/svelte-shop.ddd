@@ -15,6 +15,17 @@ system SvelteShop {
             aggregate Customer with crudish {
                 name: string
                 email: string
+                // The MONEY-PRIMITIVE form witness (M-T1.23 / audit F18).
+                // `crudish` puts every writable field — optionals included —
+                // on the generated `update` op, so the scaffolded Customer
+                // Detail page's update OperationForm renders the pack's
+                // `field-input-money` template.  That is the shape that once
+                // emitted TWO `decimal.js` imports into one file (the pack's
+                // named import + the page shell's default import) and broke
+                // `svelte-check`.  Optional on purpose: `CreateForm` filters
+                // optionals out, so the `ui.customers.create({ name, email })`
+                // e2e literal below stays valid.
+                creditLimit: money?
                 tags: ContactTag[]
                 invariant name.length > 0
                 derived display: string = name

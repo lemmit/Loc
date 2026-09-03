@@ -18,6 +18,47 @@ export type { ImportMap };
  *  non-React targets rewrite it to their own alias (`$lib/i18n`). */
 export const I18N_MODULE = "../i18n";
 
+/** The arbitrary-precision decimal runtime a `money` binding resolves against.
+ *  Written as a bare package specifier, so no depth rewrite applies. */
+export const DECIMAL_MODULE = "decimal.js";
+
+/** Drain the `decimal.js` entry from a page's import map, reporting whether the
+ *  active pack had declared it.
+ *
+ *  TWO owners want to put `Decimal` in the same emitted file.  Every React and
+ *  Svelte pack declares `imports."field-input-money" = [{from: "decimal.js",
+ *  named: ["Decimal"]}]`, which `registerFormFieldImports` merges into this map
+ *  and the import-line renderers serialize as `import { Decimal } from
+ *  "decimal.js";`.  The page shell independently emits its own `import Decimal
+ *  from "decimal.js";` — decided by scanning the assembled body, because a
+ *  `Decimal` binding has three producers (a money `state {}` field, an
+ *  `exprConvert` cast, the `Decimal.min`/`.max`/`.ROUND_*` intrinsics) and only
+ *  the rendered text knows about all three.  A money FORM FIELD triggers both:
+ *  the pack template contains `new Decimal(…)`, so the shell's scan fires on
+ *  exactly the page the pack declaration also lands in, and the file gets two
+ *  `Decimal` bindings — `TS2300: Duplicate identifier` (svelte-check calls it
+ *  `Identifier 'Decimal' has already been declared`).  The generated app does
+ *  not build.
+ *
+ *  Same defect, and same remedy, as `takeReactSpecifiers`
+ *  (`react/walker/import-lines.ts`), which drains `"react"`: the shell
+ *  drains what the pack declared and stays the SINGLE emitter.  Draining rather
+ *  than deleting the pack entries keeps an out-of-tree pack correct — it goes on
+ *  declaring what its template needs and the shell absorbs the declaration —
+ *  and keeps the shell honest for the producers no pack knows about.
+ *
+ *  The returned boolean is the second half of that absorption: a pack that
+ *  declares the module but whose template the body scan cannot see (a `.hbs`
+ *  reaching `Decimal` some other way) must still get the binding, so callers OR
+ *  this into their own decimal-import fallback.
+ *
+ *  Both import forms are legal against decimal.js's typings — it declares
+ *  `export declare class Decimal` AND `export default Decimal` — so absorbing a
+ *  named import into the shell's default import loses nothing. */
+export function takeDecimalImport(imports: ImportMap): boolean {
+  return imports.delete(DECIMAL_MODULE);
+}
+
 /** Register the `t` import on the page's import map.  Chrome rendered straight
  *  INTO THE PAGE resolves `t` against the page's own import block and must ask
  *  for it; the hoisted-child helpers in `i18n-emit.ts` deliberately do not. */
@@ -64,6 +105,19 @@ export function wirePackChromeImport(ctx: WalkContext, rendered: string): string
  *  Idempotent — duplicate names dedupe inside the Set per source. */
 export function addImport(ctx: WalkContext, from: string, ...names: string[]): void {
   addImportToMap(ctx.imports, from, ...names);
+}
+
+/** Register a TYPE-ONLY named import: the map stores the inline
+ *  `type X` import SPECIFIER, so every frontend's import-line renderer
+ *  emits `import { type X, ... }` with no renderer change.  Required
+ *  for a name that exists only in the type layer (the `<Action>FormState`
+ *  aliases): SvelteKit's generated tsconfig turns `verbatimModuleSyntax`
+ *  on, and under it a plain value import of a type is a hard
+ *  svelte-check error (TS1484).  The inline form is what
+ *  `verbatimModuleSyntax` prescribes, and is byte-inert everywhere a
+ *  plain import already type-checked. */
+export function addTypeImport(ctx: WalkContext, from: string, name: string): void {
+  addImport(ctx, from, `type ${name}`);
 }
 
 /** Convenience for the (still many) emit functions that haven't been

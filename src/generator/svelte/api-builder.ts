@@ -16,8 +16,10 @@ import {
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import {
   aggregateHasProvenanced,
+  dualTypeAliases,
   emitOperationUnionResponse,
   historyHookName,
+  typeReachesMoney,
 } from "../_frontend/api-module.js";
 import {
   AUDIT_ENTRY_LIST_TYPE,
@@ -88,6 +90,17 @@ export function buildSvelteApiModule(
     ),
   );
   lines.push(`export type Create${agg.name}Request = z.infer<typeof Create${agg.name}Request>;`);
+  // Dual FormState/Payload aliases — emitted only where the schema carries a
+  // real transform (`moneySchema`: decimal string in, `Decimal` out), so
+  // `z.input` genuinely differs from `z.output`.  The Svelte form emitter
+  // imports `Create<Agg>FormState` whenever it renders a money field, so
+  // without this the generated app fails svelte-check with "Module
+  // '$lib/api/<agg>' has no exported member 'Create<Agg>FormState'" — a break
+  // that stayed invisible for exactly the same reason as M-T1.23's duplicate
+  // import: no Svelte build-matrix example had a money field in a form.
+  if (requiredFields.some((f) => typeReachesMoney(f.type, ctx))) {
+    lines.push(...dualTypeAliases(`Create${agg.name}`));
+  }
   lines.push("");
 
   for (const op of agg.operations.filter((o) => o.visibility === "public")) {
@@ -106,6 +119,9 @@ export function buildSvelteApiModule(
     lines.push(
       `export type ${upperFirst(op.name)}${agg.name}Request = z.infer<typeof ${upperFirst(op.name)}${agg.name}Request>;`,
     );
+    if (op.params.some((p) => typeReachesMoney(p.type, ctx))) {
+      lines.push(...dualTypeAliases(`${upperFirst(op.name)}${agg.name}`));
+    }
   }
   lines.push("");
 

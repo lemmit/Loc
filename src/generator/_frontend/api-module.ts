@@ -791,8 +791,12 @@ export function typeReachesMoney(t: TypeIR, ctx: BoundedContextIR): boolean {
 /** The dual-type aliases for a transform-bearing action schema
  *  (frontend-acl.md): `FormState` is what a form holds
  *  (`z.input` — money fields are decimal strings pre-parse), `Payload`
- *  what the API client sends after parse (`z.output` — Decimal). */
-function dualTypeAliases(name: string): string[] {
+ *  what the API client sends after parse (`z.output` — Decimal).
+ *
+ *  Exported because the Svelte api-builder is a SECOND emitter of the same
+ *  schema surface and its form emitter references `<Action>FormState` by name;
+ *  it must produce the identical pair rather than a third spelling. */
+export function dualTypeAliases(name: string): string[] {
   return [
     `/** Pre-parse form shape (z.input) — money fields are decimal strings. */`,
     `export type ${name}FormState = z.input<typeof ${name}Request>;`,

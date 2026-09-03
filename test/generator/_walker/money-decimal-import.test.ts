@@ -131,3 +131,265 @@ describe("money intrinsics render in a page body on every JS frontend", () => {
     expect(src).not.toContain("decimal.js");
   }, 120_000);
 });
+
+// ---------------------------------------------------------------------------
+// M-T1.23 — the import has ONE owner, and the count is the assertion.
+//
+// The tests above ask whether the binding is PRESENT.  Presence is exactly
+// what passed while the generated app did not build: every React/Svelte pack
+// declares `imports."field-input-money" = [{from: "decimal.js", named:
+// ["Decimal"]}]`, and the page shell independently scans its own rendered body
+// and emits `import Decimal from "decimal.js";`.  A money FORM FIELD fires
+// both — the pack template contains `new Decimal(…)`, so the scan sees it —
+// and the page ends up with two `Decimal` bindings: `TS2300: Duplicate
+// identifier` under tsc, `Identifier 'Decimal' has already been declared`
+// under svelte-check.  `containsIn`-style assertions cannot see that; only
+// counting can.
+// ---------------------------------------------------------------------------
+
+/** Every `… from "decimal.js"` line in an emitted page, in source order. */
+function decimalImportLines(src: string): string[] {
+  return src.split("\n").filter((l) => /^\s*import\s.*\bfrom\s+["']decimal\.js["']/.test(l));
+}
+
+const MONEY_FORM_SYSTEM = (framework: string): string => `
+system MF {
+  subdomain D {
+    context C {
+      aggregate A { name: string  price: money  derived display: string = name }
+      repository As for A { }
+    }
+  }
+  api Api from D
+  storage pg { type: postgres }
+  resource st { for: C, kind: state, use: pg }
+  ui W {
+    framework: ${framework}
+    api C: Api
+    page P {
+      route: "/p"
+      body: CreateForm(of: A)
+    }
+  }
+  deployable api { platform: node, contexts: [C], dataSources: [st], serves: Api, port: 3000 }
+  deployable web { platform: static, targets: api, ui: W { C: api }, port: 3001 }
+}
+`;
+
+describe("a money form field yields exactly one decimal.js import (M-T1.23)", () => {
+  it("react and svelte — the pack declares it, the shell owns it, the page gets one", async () => {
+    // The two frameworks whose packs declare `decimal.js` under
+    // `field-input-money`.  Before the shell drained that declaration these
+    // pages carried BOTH the pack's `import { Decimal } from "decimal.js"` and
+    // the shell's `import Decimal from "decimal.js"`.
+    for (const framework of ["react", "svelte"] as const) {
+      const files = await generateSystemFiles(MONEY_FORM_SYSTEM(framework));
+      const src = [...files].find(([k]) => PAGE_OF[framework]!.test(k))?.[1] ?? "";
+      expect(src, `${framework}: no page emitted`).not.toBe("");
+      // The witness holds only while the page really renders the money field.
+      expect(src, `${framework}: page must bind Decimal for this test to mean anything`).toContain(
+        'new Decimal("0")',
+      );
+      const lines = decimalImportLines(src);
+      expect(
+        lines,
+        `${framework}: expected ONE decimal.js import, got ${lines.length}:\n${lines.join("\n")}`,
+      ).toHaveLength(1);
+      // …and it is the shell's default import, the single canonical form.
+      expect(lines[0]).toContain('import Decimal from "decimal.js"');
+    }
+  }, 300_000);
+
+  it("vue and angular — no pack declaration, and still never two", async () => {
+    // The negative side of the same invariant: these packs declare no
+    // decimal.js entry, so the drain must be a no-op that changes nothing.
+    for (const framework of ["vue", "angular"] as const) {
+      const files = await generateSystemFiles(MONEY_FORM_SYSTEM(framework));
+      const src = [...files].find(([k]) => PAGE_OF[framework]!.test(k))?.[1] ?? "";
+      expect(src, `${framework}: no page emitted`).not.toBe("");
+      const lines = decimalImportLines(src);
+      expect(
+        lines.length,
+        `${framework}: expected at most one decimal.js import, got ${lines.length}:\n${lines.join("\n")}`,
+      ).toBeLessThanOrEqual(1);
+    }
+  }, 300_000);
+});
+
+describe("the FormState alias rides a type-only import specifier (M-T1.23)", () => {
+  // The alias is a `type` export (`export type CreateAFormState = z.input<…>`),
+  // and SvelteKit's generated tsconfig turns `verbatimModuleSyntax` on — under
+  // it a plain VALUE import of a type is a hard svelte-check error:
+  //   TS1484: 'CreateAFormState' is a type and must be imported using a
+  //   type-only import when 'verbatimModuleSyntax' is enabled.
+  // So the walker registers the alias through `addTypeImport`, which stores the
+  // inline `type X` import SPECIFIER — the form `verbatimModuleSyntax`
+  // prescribes, and valid TS on every frontend that already accepted the plain
+  // import.  Without this, the svelte-shop money witness's build cell is red
+  // even with the decimal drain in place.
+  it("react and svelte money-form pages import `type <Action>FormState`, never the value form", async () => {
+    for (const framework of ["react", "svelte"] as const) {
+      const files = await generateSystemFiles(MONEY_FORM_SYSTEM(framework));
+      const src = [...files].find(([k]) => PAGE_OF[framework]!.test(k))?.[1] ?? "";
+      expect(src, `${framework}: no page emitted`).not.toBe("");
+      expect(src, `${framework}: the alias must arrive as an inline type specifier`).toMatch(
+        /import \{[^}]*\btype CreateAFormState\b[^}]*\} from/,
+      );
+      expect(
+        src,
+        `${framework}: a bare value import of the alias is TS1484 under verbatimModuleSyntax`,
+      ).not.toMatch(/[{,]\s*CreateAFormState/);
+    }
+  }, 300_000);
+
+  // The svelte-shop matrix witness rides the OPERATION form (crudish `update`
+  // on the scaffolded Detail page), which registers its alias at a different
+  // call site than `CreateForm` — pin that site too.
+  it("an OperationForm page imports its `type <Op><Agg>FormState` the same way", async () => {
+    const files = await generateSystemFiles(`
+      system OF {
+        subdomain D {
+          context C {
+            aggregate A {
+              name: string
+              price: money
+              derived display: string = name
+              operation reprice(price: money) { }
+            }
+            repository As for A { }
+          }
+        }
+        api Api from D
+        storage pg { type: postgres }
+        resource st { for: C, kind: state, use: pg }
+        ui W {
+          framework: svelte
+          api C: Api
+          page P(id: A id) { route: "/p/:id" body: OperationForm(of: A, op: reprice) }
+        }
+        deployable api { platform: node, contexts: [C], dataSources: [st], serves: Api, port: 3000 }
+        deployable web { platform: static, targets: api, ui: W { C: api }, port: 3001 }
+      }
+    `);
+    const src = [...files].find(([k]) => PAGE_OF.svelte!.test(k))?.[1] ?? "";
+    expect(src, "no svelte page emitted").not.toBe("");
+    expect(src).toMatch(/import \{[^}]*\btype RepriceAFormState\b[^}]*\} from/);
+    expect(src).not.toMatch(/[{,]\s*RepriceAFormState/);
+  }, 300_000);
+});
+
+describe("a React component brings its own `Decimal` into scope (M-T1.23)", () => {
+  // The component shell computed a decimal import and then dropped it —
+  // `const _decimalImport = …` was never spliced into the returned file.  A
+  // `component` with a money `state {}` field therefore emitted
+  // `useState<Decimal>(new Decimal("1.50"))` with nothing importing `Decimal`
+  // (TS2304).  Nothing caught it because a component that ALSO hosted a money
+  // form got the pack's `field-input-money` declaration by accident — and
+  // draining that declaration (the fix above) takes the accident away, so the
+  // real owner had to be wired in the same change.
+  it("a money `state {}` field in a component imports decimal.js exactly once", async () => {
+    const files = await generateSystemFiles(`
+      system CM {
+        subdomain D {
+          context C {
+            aggregate A { name: string  price: money  derived display: string = name }
+            repository As for A { }
+          }
+        }
+        api Api from D
+        storage pg { type: postgres }
+        resource st { for: C, kind: state, use: pg }
+        ui W {
+          framework: react
+          api C: Api
+          component Wallet() {
+            state { amt: money = money("1.50") }
+            body: Text(string(amt))
+          }
+          page P { route: "/p" body: Wallet() }
+        }
+        deployable api { platform: node, contexts: [C], dataSources: [st], serves: Api, port: 3000 }
+        deployable web { platform: static, targets: api, ui: W { C: api }, port: 3001 }
+      }
+    `);
+    const src = [...files].find(([k]) => /\/src\/components\/Wallet\.tsx$/.test(k))?.[1] ?? "";
+    expect(src, "no component emitted").not.toBe("");
+    expect(src, "the component really does bind Decimal").toContain('new Decimal("1.50")');
+    const lines = decimalImportLines(src);
+    expect(
+      lines,
+      `expected ONE decimal.js import in the component, got ${lines.length}:\n${lines.join("\n")}`,
+    ).toHaveLength(1);
+  }, 300_000);
+});
+
+describe("the Svelte api module exports the dual FormState/Payload aliases (M-T1.23)", () => {
+  // Found while building the Svelte half of the witness above.  `moneySchema`
+  // is the one wire schema that TRANSFORMS on parse (decimal string in,
+  // `Decimal` out), so a money-bearing action's `z.input` differs from its
+  // `z.output` and the form emitter binds `<Action>FormState` (the pre-parse
+  // shape) rather than the request type.  The React api module emits that pair;
+  // the SVELTE api module is a second emitter of the same schema surface and
+  // never did — so any Svelte money form failed svelte-check with "Module
+  // '$lib/api/<agg>' has no exported member 'Create<Agg>FormState'".  Same
+  // witness gap as the duplicate import: no Svelte build-matrix example had a
+  // money field in a form.
+  const MONEY_SYSTEM = `
+    system SM {
+      subdomain D {
+        context C {
+          aggregate A {
+            name: string
+            price: money
+            derived display: string = name
+            operation reprice(price: money) { }
+          }
+          repository As for A { }
+        }
+      }
+      api Api from D
+      storage pg { type: postgres }
+      resource st { for: C, kind: state, use: pg }
+      ui W { framework: svelte  api C: Api  page P { route: "/p" body: CreateForm(of: A) } }
+      deployable api { platform: node, contexts: [C], dataSources: [st], serves: Api, port: 3000 }
+      deployable web { platform: static, targets: api, ui: W { C: api }, port: 3001 }
+    }
+  `;
+
+  it("a money create input and a money operation each get their alias pair", async () => {
+    const files = await generateSystemFiles(MONEY_SYSTEM);
+    const src = [...files].find(([k]) => /\/src\/lib\/api\/a\.ts$/.test(k))?.[1] ?? "";
+    expect(src, `no svelte api module emitted: ${[...files.keys()].join(", ")}`).not.toBe("");
+    for (const name of [
+      "export type CreateAFormState = z.input<typeof CreateARequest>;",
+      "export type CreateAPayload = z.output<typeof CreateARequest>;",
+      "export type RepriceAFormState = z.input<typeof RepriceARequest>;",
+      "export type RepriceAPayload = z.output<typeof RepriceARequest>;",
+    ]) {
+      expect(src, `svelte api module must export: ${name}`).toContain(name);
+    }
+  }, 300_000);
+
+  it("a money-free action gets no aliases — they would be structurally identical", async () => {
+    const files = await generateSystemFiles(`
+      system SN {
+        subdomain D {
+          context C {
+            aggregate B { name: string  derived display: string = name }
+            repository Bs for B { }
+          }
+        }
+        api Api from D
+        storage pg { type: postgres }
+        resource st { for: C, kind: state, use: pg }
+        ui W { framework: svelte  api C: Api  page P { route: "/p" body: CreateForm(of: B) } }
+        deployable api { platform: node, contexts: [C], dataSources: [st], serves: Api, port: 3000 }
+        deployable web { platform: static, targets: api, ui: W { C: api }, port: 3001 }
+      }
+    `);
+    const src = [...files].find(([k]) => /\/src\/lib\/api\/b\.ts$/.test(k))?.[1] ?? "";
+    expect(src).not.toBe("");
+    expect(src).not.toContain("FormState");
+    expect(src).not.toContain("Payload");
+  }, 300_000);
+});

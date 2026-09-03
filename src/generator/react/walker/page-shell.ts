@@ -26,7 +26,12 @@ import { renderGateExpr } from "../../_frontend/gate-expr.js";
 import type { LoadedPack } from "../../_packs/loader.js";
 import { routerPackageForStack } from "../../_packs/stack-runtime.js";
 import { storeHookName, storeMemberLocal } from "../../_walker/js-target-helpers.js";
-import { addImportToMap, I18N_MODULE, needsPackChromeT } from "../../_walker/render-primitive.js";
+import {
+  addImportToMap,
+  I18N_MODULE,
+  needsPackChromeT,
+  takeDecimalImport,
+} from "../../_walker/render-primitive.js";
 import { renderActionHandlers } from "../../_walker/walker-core.js";
 import type {
   ActionMutationState,
@@ -399,6 +404,11 @@ export function renderCustomLayoutPage(
   // `useMemo`/`useState`/`useEffect`) so they merge into the shell's single
   // react import line below instead of emitting a second, clashing one.
   const bodyReactSpecifiers = takeReactSpecifiers(imports);
+  // Same drain, same reason: the shell is the single owner of this file's
+  // `Decimal` binding, so the active pack's `field-input-money` declaration is
+  // absorbed here rather than serialized beside the shell's own line.  See
+  // `takeDecimalImport`.
+  const packDeclaresDecimal = takeDecimalImport(imports);
   const mantineImport = renderImportLines(imports, srcImportPrefix);
   // One default-import line per user component
   // referenced in the body, sorted alphabetically.
@@ -494,9 +504,12 @@ export function renderCustomLayoutPage(
     : "";
   // A money-typed `state {}` field renders as `useState<Decimal>(new
   // Decimal("0"))` — pull decimal.js into scope (the dep is added to
-  // package.json via the deployable's money-usage flag).
+  // package.json via the deployable's money-usage flag).  A pack that DECLARED
+  // the module for a money form field counts too: its declaration was drained
+  // above, so if the body scan below can't see the template's own `Decimal`
+  // use, this is the only thing left to bind it.
   const decimalImport =
-    effectiveUsesState && state.some((f) => typeUsesMoney(f.type))
+    (effectiveUsesState && state.some((f) => typeUsesMoney(f.type))) || packDeclaresDecimal
       ? `import Decimal from "decimal.js";\n`
       : "";
   const typeEntries = params.map((p) => `${p.name}: ${typeRefAsTsString(p)}`);
@@ -1084,6 +1097,7 @@ export function renderUserComponentFile(
   // file, and the import block is rendered on the next line.
   if (needsPackChromeT(form.moduleScope)) addImportToMap(imports, I18N_MODULE, "t");
   const bodyReactSpecifiers = takeReactSpecifiers(imports);
+  const packDeclaresDecimal = takeDecimalImport(imports);
   const mantineImport = renderImportLines(imports);
   // Components don't have routes — useNavigate/Link still legal in
   // a component subtree (e.g. Button(to:) inside).
@@ -1105,8 +1119,16 @@ export function renderUserComponentFile(
   }
   const reactImport =
     reactSpecifiers.length > 0 ? `import { ${reactSpecifiers.join(", ")} } from "react";\n` : "";
-  const _decimalImport =
-    usesState && state.some((f) => typeUsesMoney(f.type))
+  // The component twin of the page shell's decimal binding.  It was computed
+  // and then dropped on the floor (`_decimalImport`, never spliced), so a
+  // `component` hosting a money `state {}` field emitted `new Decimal("0")`
+  // with nothing importing `Decimal` — TS2304, masked until now because the
+  // pack's `field-input-money` declaration happened to render a `Decimal` line
+  // into the same file whenever a money FORM was present.  Draining that
+  // declaration (above) removes the accident, so the real owner has to be wired
+  // — same commit, or the drain trades one broken shape for another.
+  const decimalFallback =
+    (usesState && state.some((f) => typeUsesMoney(f.type))) || packDeclaresDecimal
       ? `import Decimal from "decimal.js";\n`
       : "";
   // Components that reference Slot() or declare a `slot`-typed
@@ -1208,14 +1230,19 @@ export function renderUserComponentFile(
   // Module-scope hoists (DataGrid's child component) — same contract as the
   // page shell above; a user `component` can host a DataGrid too.
   const moduleDecls = (hoistedModuleDecls ?? []).join("\n");
-  return `// Auto-generated.  Do not edit by hand.
-${gate.import}${reactImport}${reactTypesImport}${reactRouterImport}${mantineImport}${apiHookImports}${dtoImportLines}${actionWiring.imports}${store.imports}${userComponentImports}${externFunctionImports}${propsType}${form.moduleScope}${moduleDecls === "" ? "" : `${moduleDecls}\n`}
+  // Assembled FIRST so the decimal.js import can be decided by scanning it —
+  // the page shell's `belowImports` contract, applied here for the same reason
+  // (a `Decimal` can come from a cast or an intrinsic, not just a money state
+  // field, and only the rendered text knows).
+  const belowImports = `${propsType}${form.moduleScope}${moduleDecls === "" ? "" : `${moduleDecls}\n`}
 export default function ${name}(${propDestructure}) {
 ${navigateLine}${store.decls}${actionWiring.decls}${form.decls}${stateLines}${apiHookDecls}${derivedLines}${actionLines}${gate.guard}  return (
     ${indentJsx(tsx, "    ")}
   );
 }
 `;
+  return `// Auto-generated.  Do not edit by hand.
+${gate.import}${reactImport}${decimalImportFor(belowImports, decimalFallback)}${reactTypesImport}${reactRouterImport}${mantineImport}${apiHookImports}${dtoImportLines}${actionWiring.imports}${store.imports}${userComponentImports}${externFunctionImports}${belowImports}`;
 }
 
 /** True when a param type is `slot` or `slot?` — both render as
