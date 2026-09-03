@@ -2,6 +2,10 @@
 
 *Plan: [`../improvement-waves-2026-09.md`](../improvement-waves-2026-09.md) §Wave 1 and §3a. Base: `main` @ `b826f87` (#2713 merged). One PR for the wave; packets work on `claude/wave-1-<packet>` sub-branches (git refuses `claude/wave-1/<packet>` while `claude/wave-1` exists) and are folded here by the coordinator. This file is the claim: any agent reading the PR list sees every packet, row and tree fence below. Hand-off notes are appended verbatim under §Hand-offs as packets land.*
 
+## Status: **complete — ready for review** (2026-09-03)
+
+Full fast suite on the folded tree: 1900 files / 21129 tests — 2 files failed on the first run and both were resolved: `image-avatar-attr-cross-target` was a §88 straddle (the sweeper fold landed mid-run; 28/28 on re-run) and `test/ir/projection-comprehension.test.ts` pinned the pre-LEFT-JOIN join shape for the node/python/elixir arms (retargeted; 16/16). `npx tsc -b` and `biome ci` clean. Merge-tree dry run against `main` @ `36d8516`: clean.
+
 ## Packets
 
 | packet | model | tree fence | rows (in fold order) | state |
