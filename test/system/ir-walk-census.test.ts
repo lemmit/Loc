@@ -306,7 +306,7 @@ function computeSites(): Site[] {
 // ---------------------------------------------------------------------------
 
 const HOTSPOT_SPLIT_REASON =
-  "packet 2.6 splits this file into per-theme leaves after 2.3 folds (docs/new-plan/waves/wave-2.md) — re-triage each leaf post-split";
+  "packet 2.3 identified this hand-rolled switch/if-chain as a genuine walk.ts migration candidate but left it for the 2.6 hotspot-split (docs/new-plan/waves/wave-2.md) to relocate first; 2.6's split is a purely mechanical move (no logic change), so the site itself is unchanged — the migration itself remains a follow-up drain, tracked at its new post-split location below";
 
 const INFLIGHT_2736 =
   "in-flight fence (docs/new-plan/waves/wave-2.md): PR #2736 (M-FT.1, wire `== null`) owns zod-refine.ts this wave — do not edit its hunks";
@@ -365,18 +365,23 @@ const DELEGATES_TO_SANCTIONED_WALKER =
   "already rides walkWorkflowStmtChildren/walkExprDeep for recursion (migrated this packet); the flagged if/`||` guard is a narrow kind-membership test layered on top, not a dispatch needing full-kind coverage";
 
 const WAIVERS: Record<string, string> = {
-  // --- 2.6 hotspot-split fence (packet brief, verbatim) ---------------------
-  "src/ir/validate/checks/system-checks.ts#docExprUnsupported": HOTSPOT_SPLIT_REASON,
-  "src/ir/validate/checks/system-checks.ts#docFunctionUnsupported": HOTSPOT_SPLIT_REASON,
-  "src/ir/validate/checks/system-checks.ts#docStmtUnsupported": HOTSPOT_SPLIT_REASON,
-  "src/ir/validate/checks/system-checks.ts#eachStmtExpr": HOTSPOT_SPLIT_REASON,
-  "src/ir/validate/checks/ui-checks.ts#checkBody": HOTSPOT_SPLIT_REASON,
-  "src/ir/validate/checks/ui-checks.ts#directlyRenderedRefs": HOTSPOT_SPLIT_REASON,
-  "src/ir/validate/checks/ui-checks.ts#namesReadByBody": HOTSPOT_SPLIT_REASON,
-  "src/ir/validate/checks/ui-checks.ts#toastMessageProblem": HOTSPOT_SPLIT_REASON,
-  "src/ir/validate/checks/ui-checks.ts#visitExpr": HOTSPOT_SPLIT_REASON,
-  "src/ir/validate/checks/ui-checks.ts#visitStmt": HOTSPOT_SPLIT_REASON,
-  "src/generator/typescript/emit/mikroorm.ts#filterValue": HOTSPOT_SPLIT_REASON,
+  // --- 2.6 hotspot-split fence: system-checks.ts / ui-checks.ts / mikroorm.ts
+  // were mechanically split into per-theme leaves by packet 2.6
+  // (docs/new-plan/waves/handoffs/wave-2-hotspot-splits.md).  These eleven
+  // sites are pure relocations of the same 2.3-flagged offenders — same
+  // code, same reason, new home; the walk.ts migration itself is still a
+  // follow-up drain, not done here.
+  "src/ir/validate/checks/datasource-checks.ts#docExprUnsupported": HOTSPOT_SPLIT_REASON,
+  "src/ir/validate/checks/datasource-checks.ts#docFunctionUnsupported": HOTSPOT_SPLIT_REASON,
+  "src/ir/validate/checks/datasource-checks.ts#docStmtUnsupported": HOTSPOT_SPLIT_REASON,
+  "src/ir/validate/checks/backend-syntax-checks.ts#eachStmtExpr": HOTSPOT_SPLIT_REASON,
+  "src/ir/validate/checks/ui-action-body-checks.ts#checkBody": HOTSPOT_SPLIT_REASON,
+  "src/ir/validate/checks/ui-page-structure-checks.ts#directlyRenderedRefs": HOTSPOT_SPLIT_REASON,
+  "src/ir/validate/checks/ui-page-structure-checks.ts#namesReadByBody": HOTSPOT_SPLIT_REASON,
+  "src/ir/validate/checks/ui-action-body-checks.ts#toastMessageProblem": HOTSPOT_SPLIT_REASON,
+  "src/ir/validate/checks/ui-action-body-checks.ts#visitExpr": HOTSPOT_SPLIT_REASON,
+  "src/ir/validate/checks/ui-action-body-checks.ts#visitStmt": HOTSPOT_SPLIT_REASON,
+  "src/generator/typescript/emit/mikroorm-filter.ts#filterValue": HOTSPOT_SPLIT_REASON,
 
   // --- in-flight PR fence (docs/new-plan/waves/wave-2.md §In-flight fence) --
   "src/generator/zod-refine.ts#refineRenderable": INFLIGHT_2736,
