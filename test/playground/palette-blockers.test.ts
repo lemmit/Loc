@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseDdd } from "../../web/src/builder/parse.js";
-import { REFUSAL_WHY, refusalMessage } from "../../web/src/builder/refusal.js";
+import { REFUSAL_WHY, refusalMessage } from "../../web/src/builder/refusal-text.js";
 import { addConstructSource, addSystemExtraSource } from "../../web/src/builder/system/add.js";
 import { addContextExtraSource } from "../../web/src/builder/system-v2/add-extra.js";
 import { paletteBlockers } from "../../web/src/builder/system-v2/add-palette-blockers.js";
