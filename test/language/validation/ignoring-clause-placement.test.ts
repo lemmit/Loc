@@ -89,11 +89,15 @@ describe("loom.ignoring-clause-placement — the bypass clause only where it is 
   });
 
   it("errors on a `select` body's trailing `ignoring`", async () => {
+    // On the LAST select entry: an `ignoring` written mid-list would eat the
+    // following entry as another capability name (`ignoring softDeletable,
+    // orders` — the clause takes a comma-separated list), which is a syntax
+    // error, not this gate.
     const { diagnostics } = await parseString(
       withProjection(`
           from Order as o
           group by o.status
-          select status = o.status ignoring softDeletable, orders = count()`),
+          select status = o.status, orders = count() ignoring softDeletable`),
     );
     expect(codesOf(diagnostics)).toContain(CODE);
   });

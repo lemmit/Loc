@@ -57,6 +57,12 @@ function catalogedSources(): string[] {
   out.push(path.join("src", "macros", "expander.ts"));
   out.push(path.join("src", "api", "evolve.ts"));
   out.push(path.join("src", "api", "index.ts"));
+  // Phase ① — the parser's own error text.  It attaches no `loom.*` code
+  // (Langium stamps `parsing-error` and `src/api/report.ts` maps that to
+  // `loom.parse-error`), so invariants 1/2/4 have nothing to check here; it
+  // is listed so invariant 3 counts its catalog entries as REACHED rather
+  // than orphaned.
+  out.push(path.join("src", "language", "parse-errors.ts"));
   return out;
 }
 
@@ -215,12 +221,35 @@ const ALL_DYNAMIC = SCANNED.flatMap((s) => s.dynamic);
 
 /** The catalog key a site renders, or `undefined` when it does not go through
  *  the catalog at all. */
-function keyOf(site: Site): string | undefined {
-  const m = site.message;
-  if (!ts.isCallExpression(m)) return undefined;
-  if (m.expression.getText(site.sf) !== "diagMessage") return undefined;
-  const arg = m.arguments[0];
+/** The catalog key a `diagMessage("…")` call renders, or `undefined` when the
+ *  expression is not one. */
+function keyOfCall(e: ts.Expression, sf: ts.SourceFile): string | undefined {
+  if (!ts.isCallExpression(e)) return undefined;
+  if (e.expression.getText(sf) !== "diagMessage") return undefined;
+  const arg = e.arguments[0];
   return arg && ts.isStringLiteral(arg) ? arg.text : undefined;
+}
+
+/**
+ * Every catalog key a site's message can render — normally one, but a site
+ * that picks between two `#<slug>` variants of the SAME code with a ternary
+ * (`shadowed ? diagMessage(a) : diagMessage(b)`) renders either.  Both are
+ * returned so invariant 2 checks BOTH belong to the site's code; an empty
+ * array means inline wording, which invariant 1 rejects.
+ *
+ * Only a ternary between two catalogued calls is admitted — a ternary with an
+ * inline-literal branch yields the empty array and fails invariant 1, exactly
+ * as a wholly inline message does.
+ */
+function keysOf(site: Site): string[] {
+  const m = site.message;
+  if (ts.isConditionalExpression(m)) {
+    const whenTrue = keyOfCall(m.whenTrue, site.sf);
+    const whenFalse = keyOfCall(m.whenFalse, site.sf);
+    return whenTrue !== undefined && whenFalse !== undefined ? [whenTrue, whenFalse] : [];
+  }
+  const single = keyOfCall(m, site.sf);
+  return single === undefined ? [] : [single];
 }
 
 const where = (s: Site): string => `${s.file}:${s.line} (${s.code})`;
@@ -269,18 +298,18 @@ describe("validator diagnostic-message catalog", () => {
   });
 
   it("has no inline wording — every coded diagnostic renders from the catalog", () => {
-    const inline = ALL_SITES.filter((s) => keyOf(s) === undefined).map(where);
+    const inline = ALL_SITES.filter((s) => keysOf(s).length === 0).map(where);
     expect(inline).toEqual([]);
   });
 
   it("renders a key that belongs to the code the site attaches", () => {
     const mismatched: string[] = [];
     for (const s of ALL_SITES) {
-      const key = keyOf(s);
-      if (key === undefined) continue;
-      if (!(key in DIAGNOSTIC_MESSAGES)) mismatched.push(`${where(s)} → unknown key '${key}'`);
-      else if (codeOfMessageKey(key as DiagnosticMessageKey) !== s.code) {
-        mismatched.push(`${where(s)} → key '${key}' belongs to a different code`);
+      for (const key of keysOf(s)) {
+        if (!(key in DIAGNOSTIC_MESSAGES)) mismatched.push(`${where(s)} → unknown key '${key}'`);
+        else if (codeOfMessageKey(key as DiagnosticMessageKey) !== s.code) {
+          mismatched.push(`${where(s)} → key '${key}' belongs to a different code`);
+        }
       }
     }
     expect(mismatched).toEqual([]);

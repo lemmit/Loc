@@ -620,8 +620,8 @@ describe("validation", () => {
       const { errors } = await parse(`
         system S {
           ui WebApp {
-            page X { route: "/x", body: f() }
-            page X { route: "/y", body: g() }
+            page X { route: "/x"  body: f() }
+            page X { route: "/y"  body: g() }
           }
         }
       `);
@@ -632,7 +632,7 @@ describe("validation", () => {
       const { errors } = await parse(`
         system S {
           ui WebApp {
-            page X { route: "/x", body: f() }
+            page X { route: "/x"  body: f() }
             menu { section "Main" { link X } }
             menu { section "Other" { link X } }
           }
@@ -783,7 +783,7 @@ describe("validation", () => {
       const { errors } = await parse(`
         system S {
           ui A {
-            page Home { route: "/", body: f() }
+            page Home { route: "/"  body: f() }
           }
           ui B {
             menu {
@@ -801,7 +801,7 @@ describe("validation", () => {
       const { errors } = await parse(`
         system S {
           ui WebApp {
-            page Home { route: "/", body: f() }
+            page Home { route: "/"  body: f() }
             menu {
               section "Main" {
                 link Home { foo: "bar" }
@@ -817,7 +817,7 @@ describe("validation", () => {
       const { errors } = await parse(`
         system S {
           ui WebApp {
-            page X { route: "/x", body: match { } }
+            page X { route: "/x"  body: match { } }
           }
         }
       `);

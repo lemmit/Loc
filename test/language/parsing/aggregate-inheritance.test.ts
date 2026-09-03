@@ -131,7 +131,7 @@ describe("aggregate inheritance — validator (I1)", () => {
       context T {
         abstract aggregate Party {
           name: string
-          operation rename(to: string) { this.name = to }
+          operation rename(to: string) { name := to }
         }
       }
     `);

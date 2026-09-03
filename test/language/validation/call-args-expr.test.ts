@@ -57,7 +57,7 @@ describe("expression-position free-call args (M-T6.18 gap #2 slice B)", () => {
   });
 
   it("flags a wrong-typed arg in a LET value inside an operation body", async () => {
-    expect(await codes('operation go() { let y := fee("x")  qty := y }')).toContain(TYPE);
+    expect(await codes('operation go() { let y = fee("x")  qty := y }')).toContain(TYPE);
   });
 
   it("flags a wrong-typed arg to a call used in a precondition", async () => {

@@ -1,8 +1,9 @@
 import { readdirSync, readFileSync } from "node:fs";
 import * as path from "node:path";
 import type { AstNode, ValidationAcceptor } from "langium";
-import { OperationCancelled } from "langium";
+import { EmptyFileSystem, OperationCancelled, URI } from "langium";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createDddServices } from "../../../src/language/ddd-module.js";
 import { runChecked } from "../../../src/language/ddd-validator.js";
 import { repoRoot } from "../../_helpers/examples.js";
 import { parseString } from "../../_helpers/parse.js";
@@ -22,6 +23,34 @@ import { parseString } from "../../_helpers/parse.js";
 //       one guard diagnostic, the remaining checks still run, and Langium's
 //       own cancellation signal is re-thrown untouched.
 // ---------------------------------------------------------------------------
+
+/**
+ * Validate a source with the stop-after-parse policy DISABLED.
+ *
+ * M-FT.4 made "a document that does not parse is not validated" the DEFAULT
+ * (`src/language/ddd-document-validator.ts`): every diagnostic over a
+ * recovered tree is a guess about code the author did not write, and on the
+ * field-test model one syntax error produced eleven such guesses.  The
+ * crash-isolation guards below are about what happens WHEN a check does run
+ * over a half-built node — a caller that opts back in (Langium's options are
+ * still honoured), and any future construction path that can produce one — so
+ * they ask for that explicitly rather than leaning on a default that has since
+ * changed.  The default itself is asserted once, at the end of the block.
+ */
+async function errorsOverBrokenParse(source: string): Promise<string[]> {
+  const services = createDddServices(EmptyFileSystem);
+  const doc = services.shared.workspace.LangiumDocumentFactory.fromString(
+    source,
+    URI.parse(`memory:///broken-${Math.random().toString(36).slice(2)}.ddd`),
+  );
+  services.shared.workspace.LangiumDocuments.addDocument(doc);
+  await services.shared.workspace.DocumentBuilder.build([doc], { validation: false });
+  const diagnostics = await services.Ddd.validation.DocumentValidator.validateDocument(doc, {
+    stopAfterLexingErrors: false,
+    stopAfterParsingErrors: false,
+  });
+  return diagnostics.filter((d) => d.severity === 1).map((d) => d.message);
+}
 
 /** Every shipped `.ddd` example (both example roots). */
 function exampleFiles(): string[] {
@@ -141,7 +170,7 @@ describe("validator fault isolation — the fuzz gate never lets a throw escape"
     // that undefined node threw inside `checkDerived`, which aborted the whole
     // enclosing `context` family — so the author saw one parse error plus a
     // crash notice INSTEAD of the real diagnostics for the same file.
-    const { errors } = await parseString(`
+    const errors = await errorsOverBrokenParse(`
       context Shop {
         aggregate Order {
           qty: int
@@ -170,7 +199,7 @@ describe("validator fault isolation — the fuzz gate never lets a throw escape"
     // that threw inside `checkOneCriterion` — aborting the whole `criteria`
     // family, which also owns `checkCriterionUseSites`.  So a half-typed
     // criterion silently swallowed every criterion arity error in the file.
-    const { errors } = await parseString(`
+    const errors = await errorsOverBrokenParse(`
       context Shop {
         criterion InRegion(region: string) of Order = this.region == region
         criterion Broken of Order =
@@ -191,6 +220,25 @@ describe("validator fault isolation — the fuzz gate never lets a throw escape"
       errors.filter((e) => /crashed and was skipped/.test(e)),
       errors.join("\n"),
     ).toEqual([]);
+  });
+
+  // The counterpart of the two tests above: with the DEFAULT policy neither of
+  // those documents is validated at all.  Both halves matter — the guards
+  // above say a check that DOES run over a recovered tree stays contained;
+  // this says the toolchain does not run them there in the first place
+  // (M-FT.4 / field finding F4).
+  it("says only the syntax error under the DEFAULT policy", async () => {
+    const { errors } = await parseString(`
+      context Shop {
+        aggregate Order {
+          qty: int
+          derived page: int[] = [1, 2]
+          label: string = 42
+        }
+      }
+    `);
+    expect(errors, errors.join("\n")).toHaveLength(1);
+    expect(errors[0]).toMatch(/Expecting|Unexpected/);
   });
 });
 

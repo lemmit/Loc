@@ -2236,6 +2236,22 @@ export const DIAGNOSTIC_MESSAGES = {
     `\`extern\` function, so the frontend renders nothing for it — in a text slot the ` +
     `content is silently DROPPED (\`Text(${p.name}(…))\` emits an empty element).  Check the ` +
     `spelling, declare a \`component ${p.name}(…)\`, or import it as an \`extern\` function.`,
+  // Same code, the case where the callee has no name to quote.  The leading
+  // cause is a page `action` called with arguments (`onClick: pick("x")`) —
+  // an action is passed BY NAME to an event slot and receives its payload
+  // from the primitive, so the call form has no lowering and the frontend
+  // renders nothing.
+  // No `where` hole: unlike its sibling this message names nothing from the
+  // model, and the CLI already prints the diagnostic's `source` ahead of the
+  // text (`${d.code} ${d.source}: ${d.message}`).
+  "loom.unknown-page-element#computed-callee":
+    `a call in a rendered slot has a computed callee — the thing being called is ` +
+    `an expression, not a name the walker can resolve, so the frontend renders nothing ` +
+    `for it and in a text slot the content is silently DROPPED. The usual cause is ` +
+    `calling a page \`action\` with arguments: an action is referenced BY NAME in an ` +
+    `event slot (\`onClick: save\`) and takes its payload from the primitive, never ` +
+    `\`onClick: save(x)\`. Pass the value through page \`state\` or the primitive's own ` +
+    `props instead.`,
   "loom.unresolved-page-ref": (p: { where: unknown; name: unknown }) =>
     `\`${p.name}\` in a rendered slot names no route parameter, \`state\` field, ` +
     `\`derived\` binding, enclosing lambda parameter, or store field, so the frontend has ` +
@@ -3087,6 +3103,43 @@ export const DIAGNOSTIC_MESSAGES = {
   // ----------------------------------------------------------------------
   "loom.ir-internal#generation": (p: { err: unknown }) =>
     `IR phase failed before generation: ${p.err}`,
+
+  // ----------------------------------------------------------------------
+  // src/language/validators/types.ts — comparison operands
+  // ----------------------------------------------------------------------
+  "loom.compare-type-mismatch": (p: { op: unknown; lt: unknown; rt: unknown }) =>
+    `Operator '${p.op}' cannot compare '${p.lt}' with '${p.rt}'. ` +
+    `Operands must be the same type, both numeric (int / long / decimal), both money, ` +
+    `or one a null literal against an optional.`,
+  // The same failure, when the reason is that a same-named declaration won a
+  // bare enum case.  Without this the author reads "cannot compare 'Status'
+  // with 'bool'" about a line that says `status == Open` and has no way to
+  // see that `Open` stopped meaning the case.
+  "loom.compare-type-mismatch#enum-case-shadowed": (p: {
+    op: unknown;
+    lt: unknown;
+    rt: unknown;
+    name: unknown;
+    enumName: unknown;
+    kind: unknown;
+  }) =>
+    `Operator '${p.op}' cannot compare '${p.lt}' with '${p.rt}'. ` +
+    `'${p.name}' here resolves to the ${p.kind} '${p.name}', not the '${p.enumName}' case ` +
+    `of the same name — the ${p.kind} shadows the enum case. Write '${p.enumName}.${p.name}' ` +
+    `for the case, or rename the ${p.kind}.`,
+
+  // ----------------------------------------------------------------------
+  // src/language/parse-errors.ts  (phase ①)
+  // ----------------------------------------------------------------------
+  // Chevrotain's own text for this is a numbered dump of every lookahead
+  // path it considered — 14 lines for a mistyped design pack, over a hundred
+  // in a member position.  Every alternation the author can hit is a CLOSED
+  // SET, so the reply is the nearest legal spelling plus a sample of the set.
+  "loom.parse-error#unexpected-token": (p: {
+    found: unknown;
+    suggestion: unknown;
+    candidates: unknown;
+  }) => `Unexpected '${p.found}'.${p.suggestion} Expected one of: ${p.candidates}.`,
 } satisfies Record<string, MessageEntry>;
 
 type Catalog = typeof DIAGNOSTIC_MESSAGES;

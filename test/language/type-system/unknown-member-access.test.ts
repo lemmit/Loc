@@ -47,7 +47,7 @@ describe("loom.unknown-member — undefined field access", () => {
   });
 
   it("flags a typo across an `X id` reference", async () => {
-    const e = await errs(`aggregate Customer { name: string display }
+    const e = await errs(`aggregate Customer { name: string }
       aggregate Order { customerId: Customer id
         operation f() { let x = this.customerId.naem } }`);
     expect(unknownMember(e), e.join("\n")).toHaveLength(1);
@@ -55,7 +55,7 @@ describe("loom.unknown-member — undefined field access", () => {
   });
 
   it("reports only the first bad access in a chain (no cascade)", async () => {
-    const e = await errs(`aggregate Customer { name: string display }
+    const e = await errs(`aggregate Customer { name: string }
       aggregate Order { customerId: Customer id
         operation f() { let x = this.customerId.naem.nope } }`);
     expect(unknownMember(e), e.join("\n")).toHaveLength(1);

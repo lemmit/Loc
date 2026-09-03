@@ -550,6 +550,12 @@ function walkerRenderedExprs(host: PageIR | ComponentIR): ExprIR[] {
 // set is reproducible from the enriched model.
 // -------------------------------------------------------------------------
 
+/** Lowering's placeholder name for a call whose callee is not a plain
+ *  identifier (`applySuffixToRecv` in `src/ir/lower/lower-expr.ts`).  It is an
+ *  internal marker, never source text — a diagnostic that quotes it back at
+ *  the author is telling them to rename something they did not write. */
+const UNNAMED_CALLEE = "<expr>";
+
 /** Names a free call in a render-tree position may legitimately carry. */
 interface CallableNames {
   components: ReadonlySet<string>;
@@ -588,7 +594,16 @@ function checkUnknownPageElements(
       diags.push({
         severity: "error",
         code: "loom.unknown-page-element",
-        message: diagMessage("loom.unknown-page-element", { where, name }),
+        // `<expr>` is lowering's placeholder for a call whose CALLEE is not a
+        // plain name (`lower-expr.ts`) — a page `action` invoked with
+        // arguments is the way an author reaches it.  Rendering the
+        // placeholder into the message ("`<expr>(…)` names no walker
+        // primitive … declare a `component <expr>(…)`") asks the author to
+        // fix an identifier they never wrote, so that case gets its own text.
+        message:
+          name === UNNAMED_CALLEE
+            ? diagMessage("loom.unknown-page-element#computed-callee")
+            : diagMessage("loom.unknown-page-element", { where, name }),
         source: where,
       });
     });
