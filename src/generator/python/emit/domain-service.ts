@@ -239,31 +239,18 @@ function collectEntityNames(t: TypeIR, into: Set<string>): void {
   }
 }
 
-/** Recursive import collection over a statement's expressions (mirror of
- *  the aggregate emitter's `collectStmtExprImports`). */
-function collectStmtExprImports(st: StmtIR, into: Set<string>): void {
-  switch (st.kind) {
-    case "precondition":
-    case "requires":
-    case "let":
-    case "expression":
-      collectPyExprImports(st.expr, into);
-      return;
-    case "assign":
-    case "add":
-    case "remove":
-      collectPyExprImports(st.value, into);
-      return;
-    case "emit":
-      for (const f of st.fields) collectPyExprImports(f.value, into);
-      return;
-    case "call":
-      for (const a of st.args) collectPyExprImports(a, into);
-      return;
-    case "return":
-      collectPyExprImports(st.value, into);
-      return;
-  }
+/** Import collection over a statement's expressions — rides the shared,
+ *  `never`-checked walker (`walkStmtExprsDeep`) instead of a hand-enumerated
+ *  switch, so a new `StmtIR` kind (e.g. `variant-match`, whose nested arm/else
+ *  bodies previously contributed no imports here) fails to compile instead of
+ *  silently emitting an unbound name (M-T6.50). Mirrors the two exported
+ *  collectors below, which already ride this walker. Exported for direct
+ *  pinning: a `variant-match` never actually reaches a rendered domain-service
+ *  body (`renderPyStatements` throws on it first, mirroring every other
+ *  backend — it's frontend-only), so the only way to observe this collector's
+ *  exhaustiveness is a unit test over the collector itself. */
+export function collectStmtExprImports(st: StmtIR, into: Set<string>): void {
+  walkStmtExprsDeep(st, (e) => collectPyExprImports(e, into));
 }
 
 // ---------------------------------------------------------------------------

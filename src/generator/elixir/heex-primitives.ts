@@ -18,6 +18,7 @@ import { humanize, plural, snake } from "../../util/naming.js";
 import { iconA11yAttr } from "../_walker/a11y-emit.js";
 import { tryDetectApiHook } from "../_walker/api-hook-detector.js";
 import { isEntityHistoryRead } from "../_walker/history-read.js";
+import { lookupBuiltinIcon } from "../_walker/icons.js";
 import { queryShape } from "../_walker/paged-query.js";
 import { simpleAccessorField } from "../_walker/primitives/data-grid-shape.js";
 import { gridCols, slugify } from "../_walker/shared/args.js";
@@ -30,6 +31,7 @@ import {
   localizedHeexAttr,
   type PrimitiveSpec,
   positionalRole,
+  renderAttrValue,
   renderChild,
   renderExpr,
   renderInTemplate,
@@ -1398,10 +1400,12 @@ const CLOSED_PRIMITIVE_SPECS: Record<string, PrimitiveSpec> = {
   Badge: { tag: ".badge", takesChildren: true },
   // `to:`/`disabled:`/`type:`/`variant:` are the four knobs `<.button>` declares
   // (`to` = render as a nav link, `variant` = the pack's rank vocabulary,
-  // `disabled`/`type` its global/`attr`).  Everything else a `Button` can carry
-  // (`icon:`, `loading:`, `iconPosition:`) is dropped: an undeclared attribute
-  // on a Phoenix function component is a compile WARNING, i.e. a build failure
-  // under `mix compile --warnings-as-errors`.
+  // `disabled`/`type` its global/`attr`).  `icon:`/`iconSvg:`/`iconPosition:`
+  // and `loading:` are NOT attributes on this spec — `renderButton` turns them
+  // into an inner-block glyph and an `aria-busy` ARIA global respectively,
+  // because an undeclared attribute on a Phoenix function component is a
+  // compile WARNING, i.e. a build failure under
+  // `mix compile --warnings-as-errors`.
   Button: {
     tag: ".button",
     takesChildren: true,
@@ -1959,8 +1963,67 @@ export function renderEmpty(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCo
 export function renderBadge(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   return renderPrimitive(CLOSED_PRIMITIVE_SPECS.Badge!, expr, ctx);
 }
+/** `Button("Save", icon: "plus", iconPosition: "left", loading: <expr>)`.
+ *
+ *  `icon:` / `iconSvg:` / `iconPosition:` / `loading:` used to be DROPPED here
+ *  (G2667-C7): the four are not attrs `<.button>` declares, and an undeclared
+ *  attribute on a Phoenix function component is a compile WARNING — a build
+ *  failure under `mix compile --warnings-as-errors`.  Both shipping HEEx packs'
+ *  buttons do, however, carry an `inner_block` slot and `attr :rest, :global`,
+ *  and that is enough to render all four without touching the pack:
+ *
+ *    - the glyph goes in the CHILDREN slot as a `<span class="loom-icon">`
+ *      sibling of the label — the exact shape the shadcn / flowbite /
+ *      shadcnSvelte templates emit — positioned by `iconPosition:`
+ *      (default `"right"`, matching `_walker/primitives/controls.ts`);
+ *    - `loading:` becomes `aria-busy={…}` (the `aria-` prefix is one of
+ *      Phoenix's global prefixes, so `:global` accepts it) AND disables the
+ *      button, since a busy button that still fires is the defect the drop was
+ *      hiding.  With an author `disabled:` the two OR together.
+ *
+ *  A builtin `icon:` name resolves through the SAME `lookupBuiltinIcon`
+ *  registry the JSX walker uses, so the two targets ship the same glyph. */
 export function renderButton(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
-  return renderPrimitive(CLOSED_PRIMITIVE_SPECS.Button!, expr, ctx);
+  const spec = CLOSED_PRIMITIVE_SPECS.Button!;
+  // `icon:` / `iconSvg:` / `iconPosition:` and `loading:` — the four knobs the
+  // TSX `emitButton` consumes that HEEx used to DROP (ledger G2667-C7), and the
+  // reason they were dropped: `<.button>` declares none of them, and an
+  // undeclared attribute on a Phoenix function component is a compile warning,
+  // i.e. a failure under `mix compile --warnings-as-errors`.  Neither needs to
+  // be an attribute, so neither has to touch the packs:
+  //
+  //   - the GLYPH is markup — an inline `<span class="loom-icon">` spliced into
+  //     the button's inner block on the authored side (`iconPosition:`,
+  //     defaulting to `"right"` exactly as the TSX emitter does).  It is
+  //     `aria-hidden` because the button's text (or its `label:` aria-label) is
+  //     already the accessible name — the same decorative-by-default contract
+  //     `renderIcon` applies.
+  //   - `loading:` becomes `aria-busy`, an ARIA global Phoenix's `:global`
+  //     attr accepts on any component, so the busy state reaches assistive tech
+  //     instead of vanishing.  It deliberately does NOT also force `disabled`:
+  //     that is the author's `disabled:` knob, which already passes through,
+  //     and emitting both would put two `disabled` attributes on one tag.
+  const loadingArg = namedArg(expr, "loading");
+  const loadingValue = loadingArg ? renderAttrValue(loadingArg, ctx, false) : undefined;
+  const iconSvg =
+    stringNamedLit(expr, "iconSvg") ??
+    ((n) => (n === undefined ? undefined : lookupBuiltinIcon(n)))(stringNamedLit(expr, "icon"));
+  const iconHeex = iconSvg
+    ? `<span class="loom-icon" aria-hidden="true">${iconSvg}</span>`
+    : undefined;
+  const iconLeads = stringNamedLit(expr, "iconPosition") === "left";
+  return renderPrimitive(
+    {
+      ...spec,
+      extraAttrs: loadingValue
+        ? [...(spec.extraAttrs ?? []), `aria-busy=${loadingValue}`]
+        : spec.extraAttrs,
+      leadingChildHeex: iconLeads ? iconHeex : undefined,
+      trailingChildHeex: iconLeads ? undefined : iconHeex,
+    },
+    expr,
+    ctx,
+  );
 }
 /** `Paper(…children)` — a Card with no title slot (positional 0 is a child). */
 export function renderPaper(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {

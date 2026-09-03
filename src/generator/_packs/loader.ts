@@ -190,16 +190,81 @@ export interface LoadedPack {
   setChromeI18n(enabled: boolean): void;
 }
 
-let helpersRegistered = false;
+/** A Handlebars environment — the isolation unit.  `Handlebars.create()`
+ *  returns a fresh registry of helpers and partials sharing the same compiler,
+ *  so two packs can register the same logical name without either seeing the
+ *  other's. */
+type HbsEnv = ReturnType<typeof Handlebars.create>;
 
-/** Register IR-semantic helpers globally — naming utilities + a
- *  `lookup`-by-default-key helper.  Called lazily on first pack load.
- *  Helpers are NOT pack-overridable: they're invariants of the IR
- *  contract, not theme decisions (a pack can't redefine "humanize"
- *  to mean something different and still consume the same VMs). */
-export function registerHelpersOnce(): void {
-  if (helpersRegistered) return;
-  helpersRegistered = true;
+/** True when `expr` is EXACTLY a canonical JSON string literal — i.e. it
+ *  round-trips through `JSON.parse`/`JSON.stringify` unchanged.
+ *
+ *  `Image`/`Avatar`'s `src:`/`alt:` values reach the Vue/Angular templates
+ *  as plain rendered-JS-expression text (`src/generator/_walker/primitives
+ *  /text.ts`'s `attrArgValue`): a LITERAL argument is always produced by
+ *  `JSON.stringify` (`navArgValue`'s literal branch), and a DYNAMIC one is
+ *  arbitrary rendered JS (`emitExpr`) — a member access, a concatenation, a
+ *  call.  The two shapes are distinguished here, by content, rather than by
+ *  a flag the template layer doesn't receive: a dynamic expression can only
+ *  pass this round-trip if it is, character for character, ALSO a bare
+ *  quoted string — in which case treating it as a literal is still CORRECT
+ *  (both shapes evaluate to the identical value), so there is no unsafe
+ *  case, only an occasionally-cosmetic one. */
+function isJsonStringLiteral(expr: string): boolean {
+  if (!expr.startsWith('"') || !expr.endsWith('"')) return false;
+  try {
+    const parsed: unknown = JSON.parse(expr);
+    return typeof parsed === "string" && JSON.stringify(parsed) === expr;
+  } catch {
+    return false;
+  }
+}
+
+/** Quote a JS expression for splicing into an HTML attribute value, picking
+ *  the delimiter the expression itself doesn't use — mirrors `quoteAttrExpr`
+ *  in `src/generator/vue/walker/vue-target.ts` (and the inline equivalent in
+ *  `src/generator/angular/walker/angular-target.ts`) for `renderAttrBinding`:
+ *  an expression carrying BOTH quote kinds is entity-escaped (`"`→`&quot;`)
+ *  under a double-quote delimiter, never rejected — Vue and Angular both
+ *  decode HTML entities in an attribute value before compiling the bound
+ *  expression, so the entity round-trips to a literal `"` in the expression. */
+function quoteJsExprForAttr(expr: string): string {
+  const hasDouble = expr.includes('"');
+  const hasSingle = expr.includes("'");
+  if (!hasDouble) return `"${expr}"`;
+  if (!hasSingle) return `'${expr}'`;
+  return `"${expr.replace(/&/g, "&amp;").replace(/"/g, "&quot;")}"`;
+}
+
+/** Render a `src`/`alt`-shaped attribute for Vue (`:name="…"`) or Angular
+ *  (`[name]="…"`) — the markup-attribute half of M-T1.26's vue/angular
+ *  residue (see `docs/new-plan/waves/handoffs/wave-1-python-macros.md`): a
+ *  LITERAL value renders exactly as every pack has always emitted it (the
+ *  plain, unbound attribute — byte-identical), and a DYNAMIC value binds
+ *  properly instead of splicing raw JS text into a plain attribute, which
+ *  either silently drops the binding (Vue) or produces a broken/no-op
+ *  attribute (Angular). Returns the fragment WITH a leading space (or
+ *  nothing when `value` is absent), the same calling convention as
+ *  `navAttrFragment`'s `{{{navAttr "to"}}}`. */
+function bindableAttrFragment(
+  kind: "vue" | "angular",
+  name: unknown,
+  value: unknown,
+): Handlebars.SafeString {
+  const attrName = String(name);
+  const expr = String(value);
+  if (isJsonStringLiteral(expr)) return new Handlebars.SafeString(` ${attrName}=${expr}`);
+  const quoted = quoteJsExprForAttr(expr);
+  const bound = kind === "vue" ? `:${attrName}=${quoted}` : `[${attrName}]=${quoted}`;
+  return new Handlebars.SafeString(` ${bound}`);
+}
+
+/** Register IR-semantic helpers on ONE pack environment — naming utilities +
+ *  a `lookup`-by-default-key helper.  Helpers are NOT pack-overridable:
+ *  they're invariants of the IR contract, not theme decisions (a pack can't
+ *  redefine "humanize" to mean something different and still consume the same
+ *  VMs), which is why every environment gets the identical set. */
+function registerCoreHelpers(Handlebars: HbsEnv): void {
   Handlebars.registerHelper("humanize", (s: unknown) => humanize(String(s)));
   Handlebars.registerHelper("camel", (s: unknown) => lowerFirst(String(s)));
   Handlebars.registerHelper("pascal", (s: unknown) => upperFirst(String(s)));
@@ -245,6 +310,16 @@ export function registerHelpersOnce(): void {
     if (!Number.isFinite(count) || count <= 0) return [];
     return Array.from({ length: Math.floor(count) }, (_, i) => i);
   });
+  // `Image`/`Avatar` `src:`/`alt:` binding for Vue/Angular (M-T1.26) — see
+  // `bindableAttrFragment` above.  `{{{vueAttr "src" src}}}` /
+  // `{{{ngAttr "src" src}}}` replace the templates' hardcoded ` src={{{src}}}`
+  // so a computed value binds instead of being spliced as a plain attribute.
+  Handlebars.registerHelper("vueAttr", (name: unknown, value: unknown) =>
+    bindableAttrFragment("vue", name, value),
+  );
+  Handlebars.registerHelper("ngAttr", (name: unknown, value: unknown) =>
+    bindableAttrFragment("angular", name, value),
+  );
 }
 
 /** Register pack-declared lookup-table helpers.  Each entry in the
@@ -254,13 +329,14 @@ export function registerHelpersOnce(): void {
  *  import-resolve errors at TS-compile time rather than being
  *  silently dropped.
  *
- *  Helpers register globally on Handlebars (no per-pack scoping).
- *  In practice each generation loads exactly one pack, so the
- *  global registration is fine; if two packs declared the same
- *  helper name with different tables, the most recently loaded
- *  pack wins.  shadcn's `lucide` helper (tabler→lucide name
- *  remap) is the only built-in user today. */
-function registerPackHelpers(manifest: PackManifest): void {
+ *  Registered on THIS PACK's own Handlebars environment, so two packs
+ *  declaring the same helper name with different tables cannot clobber each
+ *  other — a `react + vue + svelte + angular` system loads four packs in one
+ *  process, and the "one pack per generation" assumption that made global
+ *  registration safe has not held since the second frontend shipped.
+ *  shadcn's `lucide` helper (tabler→lucide name remap) is the only built-in
+ *  user today. */
+function registerPackHelpers(Handlebars: HbsEnv, manifest: PackManifest): void {
   for (const [name, table] of Object.entries(manifest.helpers ?? {})) {
     Handlebars.registerHelper(name, (key: unknown) => {
       const k = String(key);
@@ -301,8 +377,15 @@ export function compilePack(
    *  40+ primitive set just to assert one manifest field parses. */
   options: { validateRequired?: boolean } = {},
 ): LoadedPack {
-  registerHelpersOnce();
-  registerPackHelpers(manifest);
+  // One environment per pack: helpers and partials registered below are
+  // visible ONLY to this pack's templates.  Registering into the module-global
+  // `Handlebars` was safe only while a generation loaded exactly one pack —
+  // a multi-framework system loads four, and their identically-named partials
+  // (`primitive-button`, `app-shell`, …) overwrote each other in load order,
+  // an invariant nothing enforced (G2667-D8).
+  const env = Handlebars.create();
+  registerCoreHelpers(env);
+  registerPackHelpers(env, manifest);
   if (!manifest.emits || typeof manifest.emits !== "object") {
     throw new Error(
       `loader: pack at ${rootDir} has no \`emits\` map in pack.json.  Add { emits: { "page-list": "page-list.hbs", ... } }.`,
@@ -315,7 +398,7 @@ export function compilePack(
   // so the same shared file produces Mantine output under one pack
   // and shadcn output under another.
   for (const [name, source] of Object.entries(sharedSources)) {
-    Handlebars.registerPartial(name, source);
+    env.registerPartial(name, source);
   }
 
   const templates = new Map<string, CompiledTemplate>();
@@ -330,7 +413,7 @@ export function compilePack(
     // silently rendering them as empty.  Forces preparer + template
     // to stay in sync; missing fields surface immediately during
     // tests instead of leaking blanks into generated output.
-    const fn = Handlebars.compile(source, {
+    const fn = env.compile(source, {
       strict: true,
       noEscape: false,
     });
@@ -352,7 +435,7 @@ export function compilePack(
     // (page-list.hbs, page-detail.hbs, …) keep their explicit
     // import header and we use partials only where the parent
     // already imports the relevant components.
-    Handlebars.registerPartial(logicalName, source);
+    env.registerPartial(logicalName, source);
   }
   // Shared templates the pack hasn't overridden also become
   // renderable via `pack.render(name, ctx)` — orchestration code
@@ -362,7 +445,7 @@ export function compilePack(
   // already won the templates.set race when names collide.
   for (const [name, source] of Object.entries(sharedSources)) {
     if (templates.has(name)) continue;
-    const fn = Handlebars.compile(source, {
+    const fn = env.compile(source, {
       strict: true,
       noEscape: false,
     });

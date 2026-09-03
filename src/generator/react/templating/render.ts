@@ -21,6 +21,7 @@
 import type {
   AggregateIR,
   BoundedContextIR,
+  PageIR,
   ThemeIR,
   WorkflowIR,
 } from "../../../ir/types/loom-ir.js";
@@ -98,6 +99,9 @@ export function renderAppShell(
    *  (`buildPageModuleIndex`).  Lets the shell import where each scaffold page
    *  ACTUALLY landed instead of reconstructing the path by convention. */
   pageModules: ReadonlyMap<string, string> = new Map(),
+  /** The ui's pages, so a DEFAULT sidebar entry inherits the `requires` gate of
+   *  the page it links to (M-T3.15-C3). */
+  uiPages: readonly PageIR[] = [],
 ): string {
   return pack.render("app-shell", {
     hasRealtimeHandlers,
@@ -116,6 +120,7 @@ export function renderAppShell(
       authUi,
       i18nEnabled,
       pageModules,
+      uiPages,
     ),
     // Router 7 (stack v3) renamed the package react-router-dom →
     // react-router; library mode keeps the v6 API so only the

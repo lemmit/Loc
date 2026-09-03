@@ -43,6 +43,7 @@ import {
   buildExternFunctionShim,
   buildExternFunctionSignature,
 } from "../_frontend/extern-functions.js";
+import { renderGateExpr } from "../_frontend/gate-expr.js";
 import { pageFileBase } from "../_frontend/page-identity.js";
 import { buildPageObjectModule } from "../_frontend/page-objects-builder.js";
 import { buildWalkerPageObject } from "../_frontend/walker-page-objects.js";
@@ -279,34 +280,54 @@ export function emitSveltePagesForUi(ui: UiIR, ctx: SveltePageEmitContext): Map<
  *  sidebar (Aggregates / Workflows) mirroring the react
  *  shell's hardcoded grouping, overridden by an explicit `ui.menu`
  *  via the shared `deriveSidebarFromUi`. */
+interface DefaultNavEntry {
+  to: string;
+  label: string;
+  testId: string;
+  requiresJs?: string;
+}
+
 export function defaultNavSections(
   scaffoldedAggregates: readonly AggregateIR[],
   scaffoldedWorkflows: readonly WorkflowIR[],
   hasWorkflowsIndex: boolean,
-): Array<{ label: string; entries: Array<{ to: string; label: string; testId: string }> }> {
-  const sections: Array<{
-    label: string;
-    entries: Array<{ to: string; label: string; testId: string }>;
-  }> = [];
+  /** The ui's pages, so a DEFAULT entry inherits the `requires` gate of the
+   *  page it links to (resolved by route, which is what the entry carries).
+   *  A scaffolded List page CLONES the `find all … requires` gate guarding the
+   *  very read it makes, so "scaffold pages carry no `requires`" was false and
+   *  the default sidebar advertised routes the backend refuses (M-T3.15-C3). */
+  uiPages: readonly PageIR[] = [],
+  /** `auth: ui` — without a client-side session user there is nothing to test,
+   *  so every entry stays ungated and the output is byte-identical. */
+  authUi = false,
+): Array<{ label: string; entries: DefaultNavEntry[] }> {
+  const gateForRoute = (route: string): string | undefined => {
+    if (!authUi) return undefined;
+    const page = uiPages.find((p) => p.route === route);
+    return page?.requires ? renderGateExpr(page.requires, "currentUser") : undefined;
+  };
+  const entry = (to: string, label: string, testId: string): DefaultNavEntry => {
+    const requiresJs = gateForRoute(to);
+    return { to, label, testId, ...(requiresJs ? { requiresJs } : {}) };
+  };
+  const sections: Array<{ label: string; entries: DefaultNavEntry[] }> = [];
   if (scaffoldedAggregates.length > 0) {
     sections.push({
       label: "Aggregates",
       entries: scaffoldedAggregates.map((a) => {
         const slug = snake(plural(a.name));
-        return { to: `/${slug}`, label: plural(a.name), testId: `nav-${slug}` };
+        return entry(`/${slug}`, plural(a.name), `nav-${slug}`);
       }),
     });
   }
-  const wfEntries: Array<{ to: string; label: string; testId: string }> = [];
+  const wfEntries: DefaultNavEntry[] = [];
   if (hasWorkflowsIndex) {
-    wfEntries.push({ to: "/workflows", label: "All workflows", testId: "nav-workflows" });
+    wfEntries.push(entry("/workflows", "All workflows", "nav-workflows"));
   }
   for (const wf of scaffoldedWorkflows) {
-    wfEntries.push({
-      to: `/workflows/${snake(wf.name)}`,
-      label: wf.name,
-      testId: `nav-workflow-${snake(wf.name)}`,
-    });
+    wfEntries.push(
+      entry(`/workflows/${snake(wf.name)}`, wf.name, `nav-workflow-${snake(wf.name)}`),
+    );
   }
   if (wfEntries.length > 0) sections.push({ label: "Workflows", entries: wfEntries });
   return sections;

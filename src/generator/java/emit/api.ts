@@ -579,6 +579,95 @@ function initBinderLines(
 /** RFC 7807 problem+json advice — the DomainExceptionFilter / Hono
  *  onError analog: same statuses, same envelope, same 422 `errors[]`
  *  extension shape, so the frontend ACL works against any backend. */
+/** The servlet filter that turns a wrong verb on a STATIC sub-path into the
+ *  honest 405 + `Allow`, instead of the `{id}` route's `422`.
+ *
+ *  Spring's `RequestMappingHandlerMapping` ranks a DIRECT path match above a
+ *  pattern one, but it ranks by PATH before it considers the method: for
+ *  `DELETE /api/customers/by_email` the GET-only find is eliminated on method
+ *  and `DELETE /api/customers/{id}` is left standing as a full match, so the
+ *  `{id}` converter answers 422 for a path with no DELETE at all (schemathesis
+ *  F18). The check therefore has to run BEFORE handler mapping, which puts it
+ *  in the servlet filter chain rather than a `HandlerInterceptor` (those run
+ *  after the handler is already chosen).
+ *
+ *  It RAISES Spring's own `HttpRequestMethodNotSupportedException` and hands it
+ *  to the `handlerExceptionResolver` rather than writing a body itself. A
+ *  filter sits outside `DispatcherServlet`, so a thrown exception would never
+ *  reach `@RestControllerAdvice`; resolving it explicitly puts it back on the
+ *  advice's own path. The payoff is that this emits NO envelope of its own —
+ *  the 405 body, and the `Allow` header the F26 fix now forwards off
+ *  `ErrorResponse.getHeaders()`, are produced by exactly the code that answers
+ *  a framework-detected method miss. There is nothing here that can drift.
+ *
+ *  (Writing the body directly was tried first and rejected: it needs an
+ *  `ObjectMapper`, and a raw one does not carry Spring's
+ *  `ProblemDetailJacksonMixin` — the suppression that keeps `type` from being
+ *  emitted twice, once by the getter and once by the `setProperty` any-getter.) */
+export function renderStaticSubpathMethodFilter(
+  basePkg: string,
+  statics: Record<string, string[]>,
+): string {
+  const entries = Object.entries(statics).sort(([a], [b]) => a.localeCompare(b));
+  return lines(
+    `package ${basePkg}.api;`,
+    ``,
+    `import java.io.IOException;`,
+    `import java.util.List;`,
+    `import java.util.Map;`,
+    ``,
+    `import org.springframework.beans.factory.annotation.Qualifier;`,
+    `import org.springframework.stereotype.Component;`,
+    `import org.springframework.web.HttpRequestMethodNotSupportedException;`,
+    `import org.springframework.web.filter.OncePerRequestFilter;`,
+    `import org.springframework.web.servlet.HandlerExceptionResolver;`,
+    ``,
+    `import jakarta.servlet.FilterChain;`,
+    `import jakarta.servlet.ServletException;`,
+    `import jakarta.servlet.http.HttpServletRequest;`,
+    `import jakarta.servlet.http.HttpServletResponse;`,
+    ``,
+    `/** A STATIC one-segment sub-path is captured by the sibling {id} route under`,
+    ` *  any verb it does not itself serve, and the {id} converter then answers 422`,
+    ` *  for a path that has no such method at all.  405 is the honest answer and`,
+    ` *  the only one that can carry an Allow the caller can act on (RFC 9110`,
+    ` *  15.5.6).  Runs before handler mapping, which is why it is a filter. */`,
+    `@Component`,
+    `public class StaticSubpathMethodFilter extends OncePerRequestFilter {`,
+    `    private static final Map<String, List<String>> ALLOWED = Map.ofEntries(`,
+    ...entries.map(
+      ([path, methods], i) =>
+        `        Map.entry(${JSON.stringify(path)}, List.of(${methods
+          .map((m) => JSON.stringify(m))
+          .join(", ")}))${i === entries.length - 1 ? "" : ","}`,
+    ),
+    `    );`,
+    ``,
+    `    private final HandlerExceptionResolver resolver;`,
+    ``,
+    `    public StaticSubpathMethodFilter(@Qualifier("handlerExceptionResolver") HandlerExceptionResolver resolver) {`,
+    `        this.resolver = resolver;`,
+    `    }`,
+    ``,
+    `    @Override`,
+    `    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)`,
+    `            throws ServletException, IOException {`,
+    `        var allow = ALLOWED.get(request.getRequestURI());`,
+    `        if (allow == null || allow.contains(request.getMethod())) {`,
+    `            chain.doFilter(request, response);`,
+    `            return;`,
+    `        }`,
+    // The handler argument is null on purpose: no handler was selected (that
+    // is the point), and ExceptionHandlerExceptionResolver still finds
+    // @RestControllerAdvice handlers for a null handler.
+    `        resolver.resolveException(`,
+    `            request, response, null, new HttpRequestMethodNotSupportedException(request.getMethod(), allow));`,
+    `    }`,
+    `}`,
+    ``,
+  );
+}
+
 export function renderApiExceptionAdvice(
   basePkg: string,
   hasUniqueKeys = false,
@@ -927,7 +1016,14 @@ export function renderApiExceptionAdvice(
     `                default -> er.getBody().getDetail() != null ? er.getBody().getDetail() : reason;`,
     `            };`,
     `            CatalogLog.event(${javaLogEvent("clientError")}, "error", detail, "status", status);`,
-    `            return respond(problem(status, reason, detail, request), status);`,
+    // F26 — `ErrorResponse.getHeaders()` is where the framework puts the
+    // SEMANTICS of a refusal: `Allow` on a 405 (RFC 9110 15.5.6 makes it a
+    // MUST), `WWW-Authenticate` on a 401. Re-wrapping the body in our own
+    // ResponseEntity dropped them, so every 405 this backend answered — on
+    // every operation, `/health` and `/ready` included — told the caller it had
+    // used the wrong verb without ever naming a right one. Forwarded verbatim;
+    // node, python and .NET have always sent them.
+    `            return respond(problem(status, reason, detail, request), status, er.getHeaders());`,
     `        }`,
     `        CatalogLog.event(${javaLogEvent("internalError")}, "error", e.getMessage(), "status", 500);`,
     `        e.printStackTrace();`,
@@ -944,7 +1040,10 @@ export function renderApiExceptionAdvice(
     // suppressed getType() is why this cannot produce a duplicate key.
     // (`instance` needs no such help — Spring's message converter fills a null
     // instance with the request URI on the way out.)
-    `    private static ProblemDetail problem(int status, String title, String detail, WebRequest request) {`,
+    // Package-private, not private: `StaticSubpathMethodFilter` renders its
+    // 405 through this very factory, so the guard's envelope cannot drift from
+    // the framework-miss envelope beside it.
+    `    static ProblemDetail problem(int status, String title, String detail, WebRequest request) {`,
     `        var problem = ProblemDetail.forStatus(HttpStatus.valueOf(status));`,
     `        problem.setTitle(title);`,
     `        problem.setDetail(detail);`,
@@ -953,7 +1052,15 @@ export function renderApiExceptionAdvice(
     `    }`,
     ``,
     `    private static ResponseEntity<ProblemDetail> respond(ProblemDetail problem, int status) {`,
+    `        return respond(problem, status, org.springframework.http.HttpHeaders.EMPTY);`,
+    `    }`,
+    ``,
+    // The header-carrying arm. Content-Type is set AFTER the framework's own
+    // headers so a stray one can never displace application/problem+json.
+    `    private static ResponseEntity<ProblemDetail> respond(`,
+    `            ProblemDetail problem, int status, org.springframework.http.HttpHeaders headers) {`,
     `        return ResponseEntity.status(status)`,
+    `            .headers(headers)`,
     `            .contentType(MediaType.APPLICATION_PROBLEM_JSON)`,
     `            .body(problem);`,
     `    }`,

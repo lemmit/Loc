@@ -866,11 +866,18 @@ export function renderDocNamedOpFunction(
   // relational `renderNamedOpFunction` audit path.  The `before` snapshot is the
   // pre-mutation document (`row` is never rebound — only `record = row.data` is —
   // so `wireSnapshot("row")` still sees the stored blob); `after` is the saved
-  // row.  The document `wireSnapshot` form (`isDoc`) merges `id` onto the embed's
-  // `Map.from_struct(row.data)` since the embed carries no `id`.
+  // row.  Both snapshots route through `<App>.Audit.Wire.wire/1` — the shared
+  // per-aggregate `wireShape` dispatcher, whose document arm already flattens
+  // `row.data` under the row `id` with camelCase keys.  The legacy `isDoc`
+  // fallback (`Map.merge(%{id: row.id}, Map.from_struct(row.data))`) dumped the
+  // embed's SNAKE_CASE struct fields instead, so a document aggregate's audit
+  // history disagreed with both its own `GET /{id}` body and the other four
+  // backends' snapshots (ledger M-T6.2-s14, document arm).
   const hasAudit = op.audited === true;
   const appModule = facadeMod.split(".")[0]!;
-  const auditBeforeBind = hasAudit ? [`    audit_before = ${wireSnapshot("row", true)}`] : [];
+  const auditBeforeBind = hasAudit
+    ? [`    audit_before = ${wireSnapshot("row", true, appModule)}`]
+    : [];
   // The re-embed persist tail.  Guard-free/audit-free: the plain `put_embed` pipe.
   // Audited: build the changeset, then persist + record the audit row in ONE
   // `Repo.transaction` (the audit commits iff the write does).
@@ -901,7 +908,7 @@ export function renderDocNamedOpFunction(
           targetType: aggPascal,
           targetId: "saved.id",
           before: "audit_before",
-          after: wireSnapshot("saved", true),
+          after: wireSnapshot("saved", true, appModule),
           indent: "          ",
         }),
         "          saved",
@@ -1023,7 +1030,7 @@ export function renderDocReturningOpFunction(
         targetType: aggPascal,
         targetId: "saved.id",
         before: "audit_before",
-        after: wireSnapshot("saved", true),
+        after: wireSnapshot("saved", true, appModule),
         indent: "          ",
       })
     : "";
@@ -1099,7 +1106,9 @@ export function renderDocReturningOpFunction(
   const recordBind = usesRecord ? [`    record = row.data`] : [];
   // An audited op captures the pre-mutation snapshot before `record = row.data`
   // (row is never rebound, so `row.data` still sees the stored blob).
-  const auditBeforeBind = hasAudit ? [`    audit_before = ${wireSnapshot("row", true)}`] : [];
+  const auditBeforeBind = hasAudit
+    ? [`    audit_before = ${wireSnapshot("row", true, appModule)}`]
+    : [];
   const rowName = persists || usesRecord ? "row" : "_row";
   // A guarded op hoists its guards into a leading `with ensure(...)` chain
   // (403/422 denials): the `audit_before` capture + `record = row.data` + params

@@ -81,8 +81,8 @@ describe("field mask — IR gates", () => {
         salary: decimal mask unless currentUser.permissions.contains(permissions.unmask)
       }
       projection Earners {
-        from P
-        select name
+        from P as p
+        select who = p.name
       }
     }
   }

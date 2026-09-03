@@ -104,6 +104,11 @@ const SCAFFOLD: Case = {
 const SHOWCASE: Case = {
   name: "showcase",
   angularDir: "web",
+  // The required-money form control is the surface this case exists to compile
+  // for M-T1.24: a `FormControl(0)` behind the `price: string` request field is
+  // exactly the TS2345 `ng build` catches.  Pinning both halves (the string seed
+  // and the non-numeric input) keeps a green build honest.
+  mustEmit: ['price: new FormControl("0"', 'inputmode="decimal"'],
   source: `
     system Shop {
       api SalesApi from Sales
@@ -116,6 +121,11 @@ const SHOWCASE: Case = {
             priority: int
             rush: bool
             placedAt: datetime
+            // REQUIRED money — the only shape that reaches a non-null money
+            // FormControl (M-T1.24 / audit F6).  \`total: money?\` below stays
+            // because the optional arm seeds \`null\` and compiled either way;
+            // it never proved the string seed.
+            price: money
             total: money?
             operation confirm() { }
           }

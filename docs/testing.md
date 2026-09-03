@@ -28,7 +28,7 @@ the heavy cross-backend/runtime behavioral coverage is nightly.
 
 | Tier | Proves | Run | CI workflow | Per-PR? |
 | --- | --- | --- | --- | --- |
-| **Fast vitest suite** | Parsing, validation, macro expansion, lowering, IR validate, per-backend **emission** (string-match), printer round-trips, layering invariants. The bulk of the suite. | `npm test` | `test.yml` | ✅ |
+| **Fast vitest suite** | Parsing, validation, macro expansion, lowering, IR validate, per-backend **emission** (string-match), printer round-trips, layering invariants. The bulk of the suite. | `npm test` (`npm run test:changed` = only the files whose import graph reaches a change vs `origin/main`; opt-in — the graph costs ~90s to compute and a generator edit still selects most of the suite) | `test.yml` | ✅ |
 | **Langium drift** | `ddd.langium` ↔ committed `src/language/generated/` are in sync. | `npm run langium:generate` | `langium-generated.yml` | ✅ |
 | **Behavioral — api / unit** | The **generated Hono backend** behaves: boots on PGlite (in-process, no docker) and runs the DSL-emitted `test e2e … against <node>` (api) + aggregate `test "…"` (unit) suites. DoD rollup onto the requirements graph. | `cd test/behavioral && npm ci && node run.mjs` | `behavioral-e2e.yml` | ✅ |
 | **Behavioral — ui** | The **generated React frontend** behaves: `vite build` it, serve it + the Hono backend from one in-process origin, run the emitted `test e2e … against <react>` Playwright round-trips in headless Chromium. | `cd test/behavioral && npm ci && node run-ui.mjs` | `behavioral-ui-e2e.yml` | ✅ |
@@ -128,7 +128,7 @@ fails the fast suite.
 
 | Workflow | Local command | Needs |
 |---|---|---|
-| `test.yml` | `npm test` (shards: `-- --shard=i/4`); lint job: `npm run lint && npm run test:biome-gen && npm run test:contrast && cd web && npx tsc -b && npm run test:ddl` | — |
+| `test.yml` | `npm test` (shards: `-- --project unit --project mocked --shard=i/4`; corpus job: `-- --project corpus`; nightly coverage: `npm run test:coverage`); lint job: `npm run lint && npm run test:biome-gen && npm run test:contrast && cd web && npx tsc -b && npm run test:ddl` | — |
 | `langium-generated.yml` | `npm run langium:generate && git diff --exit-code src/language/generated` | — |
 | `workflow-lint.yml` | `docker run --rm -v "$PWD":/repo -w /repo rhysd/actionlint:latest -color` | docker |
 | `pr-gate.yml` | nothing to run — it aggregates the other checks; its decision core: `npx vitest run test/system/pr-gate.test.ts` | — |

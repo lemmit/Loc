@@ -123,6 +123,35 @@ describe("elixir/vanilla generator — first-boot seeding", () => {
     expect(seeds).toContain(`dataset == "default" or MapSet.member?(requested, dataset)`);
   });
 
+  // Ledger G2667-D6: the seeder committed per row and wrote the completion
+  // marker LAST, so a crash mid-dataset left rows behind with NO marker and the
+  // next boot re-seeded them on top.  Python's seeder was already one commit.
+  it("commits each dataset's rows and its ship-once marker in ONE transaction", async () => {
+    const seeds = (await generateSystemFiles(SEEDED)).get(SEEDS)!;
+    for (const ds of ["default", "demo", "wired"]) {
+      // The whole dataset body — every row AND `mark_seeded` — lives inside one
+      // `Repo.transaction`, so a mid-dataset raise rolls the rows back with it.
+      const body = seeds.slice(
+        seeds.indexOf(`defp seed_${ds}(requested) do`),
+        seeds.indexOf(`defp seed_${ds}(requested) do`) + 800,
+      );
+      const txStart = body.indexOf("Repo.transaction(fn ->");
+      const txEnd = body.indexOf("        end)");
+      expect(txStart, `seed_${ds} opens no transaction`).toBeGreaterThan(-1);
+      expect(body.indexOf(`mark_seeded("${ds}")`)).toBeGreaterThan(txStart);
+      expect(body.indexOf(`mark_seeded("${ds}")`)).toBeLessThan(txEnd);
+    }
+    // The two `default` rows are inside the same transaction as its marker —
+    // the partial-apply window the per-row commit left open.
+    const dflt = seeds.slice(
+      seeds.indexOf("defp seed_default(requested) do"),
+      seeds.indexOf("defp seed_demo(requested) do"),
+    );
+    const tx = dflt.indexOf("Repo.transaction(fn ->");
+    expect(dflt.indexOf(`PartRepository.insert(%{name: "Alpha"`)).toBeGreaterThan(tx);
+    expect(dflt.indexOf(`PartRepository.insert(%{name: "Beta"`)).toBeGreaterThan(tx);
+  });
+
   it("INVOKES the seeder at boot — after the Repo, BEFORE the Endpoint", async () => {
     const files = await generateSystemFiles(SEEDED);
     const app = files.get(APPLICATION)!;
@@ -156,6 +185,40 @@ describe("elixir/vanilla generator — first-boot seeding", () => {
     // The canonical `mix run priv/repo/seeds.exs` entry calls the SAME module,
     // so a hand-run and a boot cannot disagree.
     expect(files.get(SEEDS_EXS)).toContain("Api1.Catalog.Seeds.run()");
+  });
+
+  // G2667-D6 — each dataset is ONE transaction.  The seeder committed per row
+  // and wrote the `__loom_seed` marker LAST, so a crash mid-dataset left rows
+  // behind with no marker and the next boot re-seeded them: duplicates from an
+  // ordinary restart.  Python's seeder is one commit; elixir now matches.
+  it("commits each dataset's rows and its applied-marker in ONE transaction", async () => {
+    const files = await generateSystemFiles(SEEDED);
+    const mod = files.get(SEEDS) as string;
+    expect(mod).toBeTruthy();
+    for (const [fn, dataset] of [
+      ["seed_default", "default"],
+      ["seed_demo", "demo"],
+      ["seed_wired", "wired"],
+    ] as const) {
+      const body = mod.slice(mod.indexOf(`defp ${fn}(`));
+      const end = body.indexOf("\n  end\n");
+      const clause = body.slice(0, end === -1 ? undefined : end);
+      expect(clause, `${fn} opens a transaction`).toContain("Repo.transaction(fn ->");
+      // The marker is INSIDE the transaction — that is the whole point: rows
+      // and marker commit together or not at all.
+      const txStart = clause.indexOf("Repo.transaction(fn ->");
+      const txEnd = clause.indexOf("end)", txStart);
+      expect(txEnd, `${fn} closes its transaction`).toBeGreaterThan(txStart);
+      const tx = clause.slice(txStart, txEnd);
+      expect(tx, `${fn} marks '${dataset}' seeded inside the transaction`).toContain(
+        `mark_seeded("${dataset}")`,
+      );
+      // Every write of this dataset is inside it too — a row left outside would
+      // commit on its own and reintroduce the partial-seed window.
+      const writes = (clause.match(/insert!\(|Repo\.query!\(/g) ?? []).length;
+      const writesInTx = (tx.match(/insert!\(|Repo\.query!\(/g) ?? []).length;
+      expect(writesInTx, `${fn}: every write inside the transaction`).toBe(writes);
+    }
   });
 
   it("emits nothing for a seedless system (strict additivity)", async () => {

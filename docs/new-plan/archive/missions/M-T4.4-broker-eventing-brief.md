@@ -1,6 +1,6 @@
 # M-T4.4 kickoff brief — cross-deployable eventing (external brokers)
 
-*Kickoff brief for the implementing agent. This mission is **design-first**: the first deliverable is a design doc for maintainer sign-off, not code. Read this whole brief, then follow [`../RUNBOOK.md`](../RUNBOOK.md). Owning proposal: [channels.md](../../old/proposals/channels.md) (Part I; §"Surface — transport binding", §"Choosing the broker", §"Slice plan").*
+*Kickoff brief for the implementing agent. This mission is **design-first**: the first deliverable is a design doc for maintainer sign-off, not code. Read this whole brief, then follow [`../RUNBOOK.md`](../../RUNBOOK.md). Owning proposal: [channels.md](../../../old/proposals/channels.md) (Part I; §"Surface — transport binding", §"Choosing the broker", §"Slice plan").*
 
 ## Problem — "declared, not provisioned"
 

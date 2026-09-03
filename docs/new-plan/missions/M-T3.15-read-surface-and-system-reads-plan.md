@@ -101,6 +101,12 @@ command gates the way `ensureHistoryFind` copies `find all`'s (free for existing
 systems, but "who may start" ≠ "who may read", and a workflow with several
 command entries has no single gate to inherit).
 
+**Follow-on, done:** the SCAFFOLD did not inherit that gate — it emitted an
+ungated page over the now-guarded route, so the client fired the read and ate
+the 403. Closed by [#2581](https://github.com/lemmit/Loc/pull/2581) (a
+`requires` option on the `page()` macro factory — the grammar had `RequiresProp`
+all along). The nav-link half is **not** closed: see **C3**.
+
 ### A3 — give provenance a read endpoint, *through* A1
 Not as another bespoke route. **Size: M**, blocked on A1.
 
@@ -205,6 +211,43 @@ lands on reads `denyByDefault` cannot see.** **Size: M**, wants B1 first.
 *(judgement)* Probably: list and by-id stop being public. That closes the by-id
 hole **by subtraction rather than by adding a gate**, and it removes a surface
 instead of securing one. Also makes E2 moot. **Size: M, breaking.**
+
+### C3 — the generated nav shows links to routes the backend refuses
+The scaffolded PAGES now inherit the gate their route is guarded by
+([#2581](https://github.com/lemmit/Loc/pull/2581)) — the workflow header gate
+onto both instance pages, the `find all` gate onto the aggregate List page — so
+the client renders `Forbidden` instead of firing a read that 403s. The **nav
+link is still ungated**, and it is a *different* defect from the one #2581
+fixed:
+
+`prepareAppShellVM` (`src/generator/react/templating/preparers/app-shell.ts`)
+builds the default sidebar from `aggregates`/`workflows` and **receives no
+`PageIR[]` at all**, so no page's `requires` can reach it. Its own comment
+states the assumption #2581 invalidated: *"The default hardcoded sidebar entries
+(aggregates/workflows) are scaffold pages with no `requires`, so they never
+carry `requiresJs` and stay ungated; only the `sidebarOverride` (menu-derived)
+entries can be gated."*
+
+So today, under `auth: ui`:
+
+- ✅ the page guards itself
+- ✅ an explicit `menu { … }` block's links hide correctly — `navEntryForLink`
+  (`_frontend/menu-emitter.ts`) already reads `page.requires`
+- ❌ the **default** sidebar shows the aggregate List entry to a principal the
+  backend will refuse
+
+**Not scaffold-specific:** a hand-written `page X { requires … }` has the same
+problem unless its author also writes a `menu { … }` block. **Size: M** — thread
+pages into `prepareAppShellVM` and its five sibling frontend preparers (a
+six-frontend signature change), then gate the derived entries the way
+`navEntryForLink` already does.
+
+NB the workflow-instance pages have **no** default nav entry at all — the
+hardcoded sidebar ignores page `menu:` metadata and lists aggregates plus
+workflow *command* pages only, so the visible-and-refused link is the aggregate
+List one.
+
+---
 
 ---
 

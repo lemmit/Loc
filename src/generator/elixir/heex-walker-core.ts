@@ -61,10 +61,10 @@ import {
 } from "../../ir/util/projection-read.js";
 import { intrinsicFor, intrinsicKey } from "../../util/intrinsics.js";
 import { elixirString, humanize, snake, upperFirst } from "../../util/naming.js";
-import { PROVENANCE_VALUE_FIELD } from "../../util/provenance-carrier.js";
 import { DURATION_UNIT_MS, type DurationUnit } from "../../util/temporal.js";
 import { USER_VISIBLE_SLOTS } from "../../util/user-visible-slots.js";
 import { tryRenderGate } from "../_frontend/gate-expr.js";
+import { PROVENANCE_VALUE_FIELD, provenancedFieldNames } from "../_payload/provenanced-wire.js";
 import { icuFromConcat, messageKey } from "../_walker/i18n-extract.js";
 import { WALKER_PRIMITIVES } from "../_walker/registry.js";
 import { heexTarget, renderHeexStoreActionCall, renderHeexStoreFieldRead } from "./heex-target.js";
@@ -847,33 +847,12 @@ function renderMember(expr: Extract<ExprIR, { kind: "member" }>, ctx: WalkContex
   if (
     expr.member === PROVENANCE_VALUE_FIELD &&
     expr.receiver.kind === "member" &&
-    provenancedFieldNames(ctx).has(expr.receiver.member)
+    provenancedFieldNames(ctx.aggregatesByName).has(expr.receiver.member)
   ) {
     return renderExpr(expr.receiver, ctx);
   }
   return `${renderExpr(expr.receiver, ctx)}.${snake(expr.member)}`;
 }
-
-/** Every `provenanced` field NAME declared by an aggregate (or entity part) in
- *  scope.  A page body carries unresolved receiver types (`walker-core.ts`
- *  documents the same limitation for the JSX walkers), so the carrier hop is
- *  recognised by field NAME rather than by type.  The residual ambiguity — a
- *  value object that happens to declare a field with the same name AS WELL AS a
- *  sub-field literally called `value` — is narrow, and the mis-render it would
- *  cause is a dropped `.value`, not a wrong value. */
-function provenancedFieldNames(ctx: WalkContext): ReadonlySet<string> {
-  const cached = provNamesCache.get(ctx.aggregatesByName);
-  if (cached) return cached;
-  const names = new Set<string>();
-  for (const agg of ctx.aggregatesByName.values()) {
-    for (const f of agg.fields) if (f.provenanced) names.add(f.name);
-    for (const p of agg.parts) for (const f of p.fields) if (f.provenanced) names.add(f.name);
-  }
-  provNamesCache.set(ctx.aggregatesByName, names);
-  return names;
-}
-
-const provNamesCache = new WeakMap<ReadonlyMap<string, AggregateIR>, ReadonlySet<string>>();
 
 /** JS-frontend collection ops that aren't in the shared `isCollectionOp`
  *  catalogue (`src/util/collection-ops.ts`) but DO render verbatim on the
@@ -1557,6 +1536,15 @@ export interface PrimitiveSpec {
    *  that renders several roots (a `Table` plus its pager) would occupy two
    *  grid cells instead of one. */
   childWrapper?: string;
+  /** Ready-made markup spliced into the inner block BEFORE / AFTER the
+   *  rendered children — the seam for a slot that is markup rather than an
+   *  attribute.  `Button`'s `icon:` is the case that needs it: the glyph is an
+   *  inline `<span>` inside the button, and it cannot be an attribute because
+   *  `<.button>` declares none (an undeclared attr on a Phoenix function
+   *  component is a `mix compile --warnings-as-errors` failure).  Computed by
+   *  the primitive's own renderer at call time, like `baseClass`. */
+  leadingChildHeex?: string;
+  trailingChildHeex?: string;
 }
 
 /** The attribute NAME of a rendered HEEx attribute fragment (`aria-label={…}` →
@@ -1672,13 +1660,15 @@ export function renderPrimitive(
       ? positional.map((c, i) => renderChild(c, ctx, positionalRole(expr.name, i)))
       : []),
   ];
-  const childrenHeex = (
-    spec.childWrapper
+  const childrenHeex = [
+    ...(spec.leadingChildHeex ? [spec.leadingChildHeex] : []),
+    ...(spec.childWrapper
       ? renderedChildren.map(
           (c) => `<${spec.childWrapper}>\n${indent(c, 2)}\n</${spec.childWrapper}>`,
         )
-      : renderedChildren
-  ).join("\n");
+      : renderedChildren),
+    ...(spec.trailingChildHeex ? [spec.trailingChildHeex] : []),
+  ].join("\n");
   const attrs = namedAttrs.length > 0 ? " " + namedAttrs.join(" ") : "";
   if (childrenHeex.length === 0) {
     return spec.tag.startsWith(".") ? `<${spec.tag}${attrs} />` : `<${spec.tag}${attrs} />`;
@@ -1909,7 +1899,11 @@ export function isAttrRenderable(arg: ExprIR): boolean {
 
 /** Render an attribute VALUE, or `undefined` when the authored value cannot be
  *  one (see {@link isAttrRenderable}) — callers must skip the attribute then. */
-function renderAttrValue(arg: ExprIR, ctx: WalkContext, isStatic: boolean): string | undefined {
+export function renderAttrValue(
+  arg: ExprIR,
+  ctx: WalkContext,
+  isStatic: boolean,
+): string | undefined {
   if (!isAttrRenderable(arg)) return undefined;
   // Quote a literal attribute value with `"` / `&` entity-escaped so a
   // `.ddd`-sourced value can't close the attribute or open an entity
@@ -2040,7 +2034,9 @@ function renderStmt(stmt: StmtIR, ctx: WalkContext): string {
       // page handler can't raise the way a domain action does.
       const pred = renderExpr(stmt.expr, { ...ctx, position: "handler" });
       const msg = stmt.kind === "requires" ? "Forbidden" : "Precondition failed";
-      return `|> then(fn socket -> if ${pred}, do: socket, else: put_flash(socket, :error, ${JSON.stringify(`${msg}: ${stmt.source}`)}) end)`;
+      // `stmt.source` is verbatim `.ddd` source text (it can carry a string
+      // literal, hence a `#{`) — through the escaping funnel, not spliced raw.
+      return `|> then(fn socket -> if ${pred}, do: socket, else: put_flash(socket, :error, ${elixirString(`${msg}: ${stmt.source}`)}) end)`;
     }
     case "emit": {
       // Broadcast a domain event over Phoenix.PubSub.  No changeset in a
@@ -2439,7 +2435,10 @@ export function stateInitFor(f: StateFieldIR): string {
 function elixirLiteral(lit: string, value: string): string {
   switch (lit) {
     case "string":
-      return JSON.stringify(value);
+      // Through the shared escaping funnel — a page `state` string init is
+      // `.ddd` text spliced into the LiveView `mount/3` assigns, so a raw `#{`
+      // would interpolate as Elixir when the page mounts.
+      return elixirString(value);
     case "int":
     case "long":
       return value;
@@ -2452,7 +2451,8 @@ function elixirLiteral(lit: string, value: string): string {
     case "null":
       return "nil";
     default:
-      return JSON.stringify(value);
+      // datetime / date / any other string-carried literal — same funnel.
+      return elixirString(value);
   }
 }
 

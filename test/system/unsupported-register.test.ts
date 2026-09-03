@@ -164,8 +164,24 @@ const REGISTER_FILE = path.join(srcRoot, "diagnostics", "unsupported-register.ts
  *  hoisting this needs for a component's `state { … }` and named `action`s and
  *  stopped there; draining this extends the same `ComponentActionInfo` +
  *  `gather*` seam to the walker's form / query / upload / table-control
- *  accumulators, deletes the row, and lowers this back to 41. */
-const MAX_OPEN_GAPS = 46;
+ *  accumulators, deletes the row, and lowers this back to 41.
+ *
+ *  46 -> 47: `loom.sensitive-wire-unsupported` (W1 validator packet, ledger row
+ *  `M-T3.8-sensitivity-phases-2-4`).  A raise taken deliberately on a
+ *  SECURITY-class row, because the alternative was worse than a gap: the word
+ *  `sensitive(pii)` reads as protection, and the only consequence that ships is
+ *  the synthesized `inspect` printing `<redacted>` -- the DEBUG surface, not the
+ *  API one.  Every backend builds its response DTO from the wire shape with no
+ *  sensitivity arm, so the field is served in cleartext to any caller allowed to
+ *  read the aggregate, and it is unmarked at every log / event / resource sink.
+ *  A silent almost-protection is the one shape a security marker must never
+ *  have.  The warning suppresses itself where the author already HAS the
+ *  guarantee (`mask unless`, `internal`, `secret`), so it marks real cleartext
+ *  exposure only.  Draining it is M-T3.8 phases 2-4 -- route `sensitivity`
+ *  through the same response-boundary seam `mask unless` already uses on all
+ *  five backends -- which deletes the row, the check module, and lowers this
+ *  back to 46. */
+const MAX_OPEN_GAPS = 47;
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
