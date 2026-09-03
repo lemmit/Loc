@@ -79,6 +79,7 @@ import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
 import { intrinsicFor, intrinsicKey, isQueryableBoolIntrinsic } from "../../../util/intrinsics.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
+import { MAKE_INTERVAL_ARG, temporalInterval } from "../../_expr/pg-interval.js";
 import { SQL_LIKE_ESCAPE_CLAUSE, tsSubtreeLikePattern } from "../../_expr/subtree-like.js";
 import { isReservedIdent } from "../../sql-reserved.js";
 import { joinColumnName, joinTableConstName } from "../emit.js";
@@ -1231,6 +1232,86 @@ function boolIntrinsicFragment(e: ExprIR, acc: string): MikroRawFragment | null 
   return sql === null ? null : { sql, params };
 }
 
+/** Raw-SQL comparison operators — the FilterQuery `$lt`/`$gte` vocabulary does
+ *  not reach inside a `raw()` fragment, which is plain SQL text. */
+const RAW_COMPARE_OP: Record<string, string> = {
+  "==": "=",
+  "!=": "<>",
+  "<": "<",
+  "<=": "<=",
+  ">": ">",
+  ">=": ">=",
+};
+
+/** Render EITHER side of a comparison to raw SQL: a column (or an intrinsic
+ *  over one) inlines, a temporal interval recurses, and anything else binds as
+ *  a `?`.  Null for a shape with no raw spelling at all. */
+function mikroOperandSql(e: ExprIR, params: string[], acc: string): string | null {
+  const asColumn = mikroColumnSql(e, params, acc);
+  if (asColumn !== null) return asColumn;
+  const interval = temporalInterval(e);
+  if (interval) {
+    const side = mikroOperandSql(interval.operand, params, acc);
+    if (side === null) return null;
+    const amount = mikroOperandSql(interval.duration.amount, params, acc);
+    if (amount === null) return null;
+    const arg = MAKE_INTERVAL_ARG[interval.duration.unit];
+    // A BOUND datetime (`?`) carries no type, and Postgres resolves
+    // `unknown + interval` to `interval` — so the comparison becomes
+    // `timestamptz < interval` and the query fails at run time.  Cast exactly
+    // the bare bind: a column is already typed by the table, and a nested
+    // fragment must not be cast or the suffix binds to `make_interval(...)`
+    // rather than to the sum.  Same rule as the drizzle twin.
+    const typedSide = side === "?" ? "?::timestamptz" : side;
+    return `(${typedSide} ${interval.op} make_interval(${arg} => ${amount}))`;
+  }
+  // A bound value.  `filterValue` THROWS on a shape it cannot bind (`now()`,
+  // say), and here that is not fatal — it just means this comparison has no
+  // raw spelling, so the caller falls through to the ordinary FilterQuery path
+  // and, failing that, to the adapter's runtime-throwing stub.
+  const before = params.length;
+  try {
+    params.push(filterValue(e, acc));
+  } catch {
+    params.length = before;
+    return null;
+  }
+  return "?";
+}
+
+/** A5 temporal — a comparison with `datetime ± days/hours/minutes(n)` on
+ *  EITHER side, as one `raw()` FilterQuery entry.
+ *
+ *  A FilterQuery has no arithmetic vocabulary at all, so unlike an intrinsic
+ *  (which keeps the comparison's operator as a `$lt` payload) the WHOLE
+ *  comparison becomes SQL text with the empty-array value — the same
+ *  `RawQueryFragment` shape the deep-scope sentinel uses.  One path serves both
+ *  orientations: the column side (`this.due + days(30) < q`) and the value side
+ *  (`this.due < q + days(2)`), which differ only in which operand inlines a
+ *  column and which binds.
+ *
+ *  Null when either side has no raw spelling, leaving the ordinary path to run.
+ *  `MIKROORM_SUBSET` already admits this shape — a comparison's operands are
+ *  walked only for the adapter-wide rejections — so before this arm the
+ *  descriptor promised a lowering the emitter did not have, and the find
+ *  emitted a stub that threw at RUNTIME (a 500, not a `loom.*` refusal).  The
+ *  corpus `temporal` fixture is what drove it. */
+function temporalComparisonEntry(
+  e: Extract<ExprIR, { kind: "binary" }>,
+  acc: string,
+): string | null {
+  if (!temporalInterval(e.left) && !temporalInterval(e.right)) return null;
+  const op = RAW_COMPARE_OP[e.op];
+  if (!op) return null;
+  // Params bind in `?` order, so render left before right.
+  const params: string[] = [];
+  const left = mikroOperandSql(e.left, params, acc);
+  if (left === null) return null;
+  const right = mikroOperandSql(e.right, params, acc);
+  if (right === null) return null;
+  return rawEntry({ sql: `${left} ${op} ${right}`, params }, "[]");
+}
+
 /** `[raw("<sql>", [<params>])]: <value>` — one FilterQuery entry. */
 function rawEntry(frag: MikroRawFragment, value: string): string {
   return `[raw(${JSON.stringify(frag.sql)}, [${frag.params.join(", ")}])]: ${value}`;
@@ -1246,6 +1327,11 @@ function rawEntry(frag: MikroRawFragment, value: string): string {
  *  left instead is what made that validator-accepted shape emit the
  *  `not yet supported` runtime-throwing stub. */
 function comparisonEntry(e: Extract<ExprIR, { kind: "binary" }>, acc: string): string {
+  // A5 temporal first: `datetime ± duration` is arithmetic, which the
+  // FilterQuery vocabulary cannot express on either side, so the whole
+  // comparison lowers to one raw fragment.
+  const temporal = temporalComparisonEntry(e, acc);
+  if (temporal !== null) return temporal;
   // FilterQuery keys are entity PROPERTY names (== field names), not DB
   // columns — or, for an intrinsic over a column, a `raw()` SQL fragment.
   // Either spelling counts as a column position for orientation purposes.

@@ -110,7 +110,9 @@ export function findRoutes(
 
 /** The scalar KIND a find param must be coerced to, or `undefined` when the
  *  query-string form is already right (string / guid / enum / id). */
-function findParamCoercion(t: TypeIR | undefined): "int" | "decimal" | "bool" | undefined {
+function findParamCoercion(
+  t: TypeIR | undefined,
+): "int" | "decimal" | "bool" | "datetime" | undefined {
   const inner = t?.kind === "optional" ? t.inner : t;
   if (inner?.kind !== "primitive") return undefined;
   switch (inner.name) {
@@ -122,6 +124,8 @@ function findParamCoercion(t: TypeIR | undefined): "int" | "decimal" | "bool" | 
       return "decimal";
     case "bool":
       return "bool";
+    case "datetime":
+      return "datetime";
     default:
       return undefined;
   }
@@ -165,6 +169,8 @@ function findParamRead(p: { name: string; type?: TypeIR }): string {
       return `__find_decimal(${raw})`;
     case "bool":
       return `__find_bool(${raw})`;
+    case "datetime":
+      return `__find_datetime(${raw})`;
     default:
       return raw;
   }
@@ -346,7 +352,7 @@ ${absentArm}
     httpFindsOf(ctx, agg)
       .flatMap((f) => f.params)
       .map((p) => findParamCoercion(p.type))
-      .filter((k): k is "int" | "decimal" | "bool" => k !== undefined),
+      .filter((k): k is "int" | "decimal" | "bool" | "datetime" => k !== undefined),
   );
   const findParamHelpers = [
     neededCoercions.has("int")
@@ -383,6 +389,27 @@ ${absentArm}
   defp __find_bool("true"), do: true
   defp __find_bool("false"), do: false
   defp __find_bool(v), do: v`
+      : "",
+    neededCoercions.has("datetime")
+      ? `
+  # A declared find's \`datetime\`/\`date\` query param.  Unlike the int and
+  # decimal cases, leaving this one a STRING is not a silent wrong answer but a
+  # hard 500: the value is pinned straight into the Ecto query, and Postgrex
+  # refuses to encode a binary where the parameter is a timestamp
+  # (\`DBConnection.EncodeError: expected %DateTime{} or %NaiveDateTime{}\`).
+  # A value that does not parse is passed through unchanged so the existing
+  # 422 path still reports it, rather than being swallowed here.
+  defp __find_datetime(%DateTime{} = v), do: v
+  defp __find_datetime(%NaiveDateTime{} = v), do: v
+
+  defp __find_datetime(v) when is_binary(v) do
+    case DateTime.from_iso8601(v) do
+      {:ok, dt, _offset} -> dt
+      _ -> v
+    end
+  end
+
+  defp __find_datetime(v), do: v`
       : "",
   ].join("");
 

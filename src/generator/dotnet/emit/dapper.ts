@@ -49,6 +49,7 @@ import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
 import { intrinsicFor, intrinsicKey } from "../../../util/intrinsics.js";
 import { escapeCsharpIdent, plural, snake, upperFirst } from "../../../util/naming.js";
+import { MAKE_INTERVAL_ARG, temporalInterval } from "../../_expr/pg-interval.js";
 import { PG_INTRINSIC_SQL } from "../../_expr/pg-intrinsics.js";
 import { renderCreateTableIfNotExists } from "../../sql-pg.js";
 import { isReservedIdent } from "../../sql-reserved.js";
@@ -705,6 +706,17 @@ export function whereToSql(e: ExprIR, sqlCtx?: WhereSqlCtx): string {
       if (e.op === "!") return `(NOT ${whereToSql(e.operand, sqlCtx)})`;
       throw new Error("dapper: unsupported unary in find");
     case "binary": {
+      // A5 temporal — `datetime ± days/hours/minutes(n)` is not a comparison,
+      // so it has no `SQL_BINOP` row; it is Postgres interval arithmetic and
+      // must be recognised BEFORE the operator lookup, which would otherwise
+      // reject the `+` and hand the caller a NotImplementedException body.
+      const interval = temporalInterval(e);
+      if (interval) {
+        const side = whereToSql(interval.operand, sqlCtx);
+        const amount = whereToSql(interval.duration.amount, sqlCtx);
+        const arg = MAKE_INTERVAL_ARG[interval.duration.unit];
+        return `(${side} ${interval.op} make_interval(${arg} => ${amount}))`;
+      }
       const op = SQL_BINOP[e.op];
       if (!op) throw new Error(`dapper: unsupported operator '${e.op}' in find`);
       return `(${whereToSql(e.left, sqlCtx)} ${op} ${whereToSql(e.right, sqlCtx)})`;

@@ -1,0 +1,366 @@
+{
+  "case": "temporal",
+  "oracle": "node",
+  "entries": [
+    {
+      "seq": 0,
+      "method": "POST",
+      "path": "/api/invoices",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 1,
+      "method": "POST",
+      "path": "/api/invoices",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 2,
+      "method": "GET",
+      "path": "/api/invoices/overdue_by?q=<timestamp>",
+      "status": 200,
+      "body": [
+        {
+          "code": "INV-B",
+          "deliveredAt": "<timestamp>",
+          "dueDate": "<timestamp>",
+          "gracePeriod": 1,
+          "id": "<volatile:key>",
+          "orderedAt": "<timestamp>",
+          "padded": false,
+          "roomy": false,
+          "slack": false,
+          "tight": true,
+          "version": 1
+        }
+      ]
+    },
+    {
+      "seq": 3,
+      "method": "GET",
+      "path": "/api/invoices/overdue_by?q=<timestamp>",
+      "status": 200,
+      "body": [
+        {
+          "code": "INV-A",
+          "deliveredAt": "<timestamp>",
+          "dueDate": "<timestamp>",
+          "gracePeriod": 1,
+          "id": "<volatile:key>",
+          "orderedAt": "<timestamp>",
+          "padded": true,
+          "roomy": true,
+          "slack": true,
+          "tight": false,
+          "version": 1
+        },
+        {
+          "code": "INV-B",
+          "deliveredAt": "<timestamp>",
+          "dueDate": "<timestamp>",
+          "gracePeriod": 1,
+          "id": "<volatile:key>",
+          "orderedAt": "<timestamp>",
+          "padded": false,
+          "roomy": false,
+          "slack": false,
+          "tight": true,
+          "version": 1
+        }
+      ]
+    },
+    {
+      "seq": 4,
+      "method": "GET",
+      "path": "/api/invoices/due_before?q=<timestamp>",
+      "status": 200,
+      "body": [
+        {
+          "code": "INV-B",
+          "deliveredAt": "<timestamp>",
+          "dueDate": "<timestamp>",
+          "gracePeriod": 1,
+          "id": "<volatile:key>",
+          "orderedAt": "<timestamp>",
+          "padded": false,
+          "roomy": false,
+          "slack": false,
+          "tight": true,
+          "version": 1
+        }
+      ]
+    },
+    {
+      "seq": 5,
+      "method": "GET",
+      "path": "/api/invoices/due_before?q=<timestamp>",
+      "status": 200,
+      "body": [
+        {
+          "code": "INV-A",
+          "deliveredAt": "<timestamp>",
+          "dueDate": "<timestamp>",
+          "gracePeriod": 1,
+          "id": "<volatile:key>",
+          "orderedAt": "<timestamp>",
+          "padded": true,
+          "roomy": true,
+          "slack": true,
+          "tight": false,
+          "version": 1
+        },
+        {
+          "code": "INV-B",
+          "deliveredAt": "<timestamp>",
+          "dueDate": "<timestamp>",
+          "gracePeriod": 1,
+          "id": "<volatile:key>",
+          "orderedAt": "<timestamp>",
+          "padded": false,
+          "roomy": false,
+          "slack": false,
+          "tight": true,
+          "version": 1
+        }
+      ]
+    },
+    {
+      "seq": 6,
+      "method": "GET",
+      "path": "/api/invoices/overdue_via?q=<timestamp>",
+      "status": 200,
+      "body": [
+        {
+          "code": "INV-B",
+          "deliveredAt": "<timestamp>",
+          "dueDate": "<timestamp>",
+          "gracePeriod": 1,
+          "id": "<volatile:key>",
+          "orderedAt": "<timestamp>",
+          "padded": false,
+          "roomy": false,
+          "slack": false,
+          "tight": true,
+          "version": 1
+        }
+      ]
+    },
+    {
+      "seq": 7,
+      "method": "GET",
+      "path": "/api/invoices/overdue_via?q=<timestamp>",
+      "status": 200,
+      "body": [
+        {
+          "code": "INV-A",
+          "deliveredAt": "<timestamp>",
+          "dueDate": "<timestamp>",
+          "gracePeriod": 1,
+          "id": "<volatile:key>",
+          "orderedAt": "<timestamp>",
+          "padded": true,
+          "roomy": true,
+          "slack": true,
+          "tight": false,
+          "version": 1
+        },
+        {
+          "code": "INV-B",
+          "deliveredAt": "<timestamp>",
+          "dueDate": "<timestamp>",
+          "gracePeriod": 1,
+          "id": "<volatile:key>",
+          "orderedAt": "<timestamp>",
+          "padded": false,
+          "roomy": false,
+          "slack": false,
+          "tight": true,
+          "version": 1
+        }
+      ]
+    },
+    {
+      "seq": 8,
+      "method": "GET",
+      "path": "/api/invoices/{id}",
+      "status": 200,
+      "body": {
+        "code": "INV-A",
+        "deliveredAt": "<timestamp>",
+        "dueDate": "<timestamp>",
+        "gracePeriod": 1,
+        "id": "<volatile:key>",
+        "orderedAt": "<timestamp>",
+        "padded": true,
+        "roomy": true,
+        "slack": true,
+        "tight": false,
+        "version": 1
+      }
+    },
+    {
+      "seq": 9,
+      "method": "GET",
+      "path": "/api/invoices/{id}",
+      "status": 200,
+      "body": {
+        "code": "INV-B",
+        "deliveredAt": "<timestamp>",
+        "dueDate": "<timestamp>",
+        "gracePeriod": 1,
+        "id": "<volatile:key>",
+        "orderedAt": "<timestamp>",
+        "padded": false,
+        "roomy": false,
+        "slack": false,
+        "tight": true,
+        "version": 1
+      }
+    },
+    {
+      "seq": 10,
+      "method": "GET",
+      "path": "/api/invoices?dir=asc&sort=code",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "code": "INV-A",
+            "deliveredAt": "<timestamp>",
+            "dueDate": "<timestamp>",
+            "gracePeriod": 1,
+            "id": "<volatile:key>",
+            "orderedAt": "<timestamp>",
+            "padded": true,
+            "roomy": true,
+            "slack": true,
+            "tight": false,
+            "version": 1
+          },
+          {
+            "code": "INV-B",
+            "deliveredAt": "<timestamp>",
+            "dueDate": "<timestamp>",
+            "gracePeriod": 1,
+            "id": "<volatile:key>",
+            "orderedAt": "<timestamp>",
+            "padded": false,
+            "roomy": false,
+            "slack": false,
+            "tight": true,
+            "version": 1
+          }
+        ],
+        "page": 1,
+        "pageSize": 20,
+        "total": 2,
+        "totalPages": 1
+      }
+    },
+    {
+      "seq": 11,
+      "method": "POST",
+      "path": "/api/invoices/{id}/update",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 12,
+      "method": "GET",
+      "path": "/api/invoices/{id}",
+      "status": 200,
+      "body": {
+        "code": "INV-B2",
+        "deliveredAt": "<timestamp>",
+        "dueDate": "<timestamp>",
+        "gracePeriod": 1,
+        "id": "<volatile:key>",
+        "orderedAt": "<timestamp>",
+        "padded": false,
+        "roomy": false,
+        "slack": false,
+        "tight": true,
+        "version": 2
+      }
+    },
+    {
+      "seq": 13,
+      "method": "DELETE",
+      "path": "/api/invoices/{id}",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 14,
+      "method": "GET",
+      "path": "/api/invoices?dir=asc&sort=code",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "code": "INV-A",
+            "deliveredAt": "<timestamp>",
+            "dueDate": "<timestamp>",
+            "gracePeriod": 1,
+            "id": "<volatile:key>",
+            "orderedAt": "<timestamp>",
+            "padded": true,
+            "roomy": true,
+            "slack": true,
+            "tight": false,
+            "version": 1
+          }
+        ],
+        "page": 1,
+        "pageSize": 20,
+        "total": 1,
+        "totalPages": 1
+      }
+    },
+    {
+      "seq": 15,
+      "method": "PATCH",
+      "path": "/api/invoices",
+      "status": 405,
+      "body": {
+        "detail": "method PATCH is not supported for /api/invoices",
+        "instance": "/api/invoices",
+        "status": 405,
+        "title": "Method Not Allowed",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 16,
+      "method": "GET",
+      "path": "/__loom_no_such_path",
+      "status": 404,
+      "body": {
+        "detail": "no route for GET /__loom_no_such_path",
+        "instance": "/__loom_no_such_path",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 17,
+      "method": "POST",
+      "path": "/api/invoices",
+      "status": 400,
+      "body": {
+        "detail": "Malformed JSON in request body",
+        "instance": "/api/invoices",
+        "status": 400,
+        "title": "Bad Request",
+        "type": "about:blank"
+      }
+    }
+  ]
+}

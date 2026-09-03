@@ -1432,7 +1432,7 @@ function emitProjectFromContexts(
   const spaFw = system?.deployable.uiFramework;
   const spaOutDir = spaFw === "svelte" ? "build" : spaFw === "angular" ? "dist/browser" : "dist";
   // Feliz (F#/Fable) builds via `dotnet fable` + `vite build`, so its spa-build
-  // stage needs a .NET SDK + Node image, not `node:22-alpine`.  Every other
+  // stage needs a .NET SDK + Node image, not `node:24-alpine`.  Every other
   // hosted frontend is npm-only ("vite").  Its vite output is still flat `dist/`.
   const spaBuildKind = spaFw === "feliz" ? "feliz" : "vite";
   out.set("Dockerfile", renderDockerfile({ embeddedSpa: hasEmbeddedSpa, spaOutDir, spaBuildKind }));

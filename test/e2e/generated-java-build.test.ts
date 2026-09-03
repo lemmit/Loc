@@ -109,7 +109,7 @@ const FIXTURES: Array<[string, string]> = [
   ["test/e2e/fixtures/java-build/hosts-angular.ddd", "hsa_app"],
   // `hosts:` fullstack embed — Feliz (F#/Fable) arm.  Feliz builds via
   // `dotnet fable` + `vite build`, so the host Dockerfile's spa-build stage is
-  // a .NET SDK + Node image, not `node:22-alpine`; its vite output is flat
+  // a .NET SDK + Node image, not `node:24-alpine`; its vite output is flat
   // `dist/`.  This gate is a BACKEND compile (gradle testClasses bootJar) — it
   // verifies the java project compiles with feliz wiring + emits the Dockerfile,
   // with no dotnet-fable cost (the SPA itself isn't built here).

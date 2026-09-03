@@ -1489,7 +1489,25 @@ function renderEctoTemporalBinary(l: string, r: string, e: BinaryExpr): string |
   // the filter target's duration leaf.
   const side = rightDur ? l : r;
   const amount = rightDur ? r : l;
-  return `fragment("? ${e.op} make_interval(${MAKE_INTERVAL_ARG[dur.unit]} => ?)", ${side}, ${amount})`;
+  // A BOUND datetime on the value side (`^q`, `^DateTime.utc_now()`) reaches
+  // Postgres as an untyped parameter, and `unknown + interval` resolves the
+  // parameter to `interval` — so the comparison becomes `timestamptz <
+  // interval` and the query fails at run time.  Spell the type out.  A column
+  // side is already typed by the table, and a nested interval fragment must
+  // NOT be cast (the suffix would bind to `make_interval(...)`, not the sum),
+  // so this is a POSITIVE test for the bound-scalar shapes only.
+  const cast = isBoundDatetimeOperand(otherRaw) ? "::timestamptz" : "";
+  return `fragment("?${cast} ${e.op} make_interval(${MAKE_INTERVAL_ARG[dur.unit]} => ?)", ${side}, ${amount})`;
+}
+
+/** Is this where-position operand a datetime the query BINDS (rather than a
+ *  column it reads, or a nested fragment)?  Those are the operands whose SQL
+ *  parameter carries no type, and so the ones `renderEctoTemporalBinary` has
+ *  to cast. */
+function isBoundDatetimeOperand(e: ExprIR): boolean {
+  if (e.kind === "paren") return isBoundDatetimeOperand(e.inner);
+  if (isNowLiteral(e)) return true;
+  return e.kind === "ref" && e.refKind === "param";
 }
 
 // ---------------------------------------------------------------------------

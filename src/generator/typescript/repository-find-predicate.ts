@@ -379,11 +379,19 @@ export function lowerToDrizzle(
     const dur = rightDur ?? leftDur;
     const other = rightDur ? e.left : leftDur ? e.right : null;
     if (!dur || !other || durationCtorOperand(other)) return null;
-    const side = renderColumnRef(other) ?? renderValue(other);
+    const column = renderColumnRef(other);
+    const side = column ?? renderValue(other);
     const amount = renderValue(dur.amount) ?? renderColumnRef(dur.amount);
     if (side === null || amount === null) return null;
     ops.add("sql");
-    return `sql\`\${${side}} ${e.op} make_interval(${MAKE_INTERVAL_ARG[dur.unit]} => \${${amount}})\``;
+    // A BOUND datetime on the value side needs its type spelled out: the
+    // driver sends it as an untyped `$n`, and Postgres cannot resolve
+    // `unknown + interval` (`could not determine data type of parameter`),
+    // so the whole query fails at runtime.  A column side is already typed
+    // by the table, and a nested interval fragment must NOT be cast — the
+    // suffix would bind to `make_interval(...)`, not to the sum.
+    const sideSql = column !== null ? `\${${side}}` : `\${${side}}::timestamptz`;
+    return `sql\`${sideSql} ${e.op} make_interval(${MAKE_INTERVAL_ARG[dur.unit]} => \${${amount}})\``;
   }
 
   function renderColumnRef(e: ExprIR): string | null {

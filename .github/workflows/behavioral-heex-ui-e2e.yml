@@ -124,6 +124,20 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
+      - name: Pin npm 11
+        # node 22 ships npm 10, which currently crashes in arborist's peer-set
+        # walk (`Cannot read properties of null (reading 'edgesOut')`) while
+        # resolving vitest's OPTIONAL peer `@vitest/browser-playwright`, whose
+        # 5.0.0 was published 2026-09-03 against the `vitest@4` the stacks pin.
+        # 38 test files `npm install` a generated node project, so this hits
+        # most heavy gates.  Reproduced in a clean node:22-alpine container on
+        # npm 10.9.8 with an empty cache, so it is not local state.
+        #
+        # Node 24 would ship npm 11 natively, but #2763 pinned CI back to 22
+        # because node 24.20.0 breaks `langium generate` in npm ci's prepare
+        # step (jsonschema@1.5.0 + the stricter URL parser).  So the npm bump
+        # has to ride on node 22 rather than come along with a runtime bump.
+        run: npm i -g npm@11
 
       # Pinned to match behavioral-e2e-elixir.yml / phoenix-ui-e2e.yml so the
       # generated project's dep set resolves deterministically.

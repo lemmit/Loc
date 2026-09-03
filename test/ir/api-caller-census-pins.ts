@@ -338,6 +338,22 @@ export const R = {
   gateProbe:
     "unreachable: e2e has no can_<op> probe verb (the gate's 409 is exercised via the operation)",
   /**
+   * UNRECORDABLE — a `find` whose predicate reads `now()`, so its answer is a
+   * function of wall-clock time.  The wire golden compares whole response
+   * bodies against a recording, so any caller would be green on the run that
+   * captured it and red on every later one.
+   *
+   * The one pin: `temporal`'s `dueWithin(n: int)`, declared so the compile tier
+   * covers the shape that needs a BOUND parameter inside a SQL interval
+   * (`this.dueDate - hours(n)`) rather than a literal — the interval's other
+   * arms are all driven by the same fixture's e2e, and the parameterised one is
+   * the only shape whose comparand cannot be pinned.
+   *
+   * Draining this needs a harness clock the e2e can freeze, not a caller.
+   */
+  clockDependentFind:
+    "unrecordable: the find's predicate reads now(), so a recorded response body is green only on the run that captured it",
+  /**
    * BLOCKED ON A LIVE DEFECT — an operation whose in-process subscriber CRASHES
    * the backend, so a caller cannot be written without turning the tier red on
    * a bug this PR does not own.
@@ -402,6 +418,10 @@ export const R = {
 /** `<case key> → { <derived operationId>: reason }`.  Case keys match
  *  `POPULATION` in `api-caller-census.test.ts`. */
 export const UNCALLED_PINS: Record<string, Record<string, string>> = {
+  // ── THE CLOCK-DEPENDENT FIND ─────────────────────────────────────────────
+  "corpus/temporal": {
+    dueWithinInvoice: R.clockDependentFind,
+  },
   // ── THE TENANT REGISTRIES ────────────────────────────────────────────────
   // Many pins, one cause: the derived self-scope filter narrows every read
   // (and every write's load-before-save) to the row whose id IS the principal's
@@ -717,4 +737,5 @@ export const PIN_CLASS_CENSUS: Readonly<Record<string, number>> = {
   seededListReadUnwritten: 2,
   gateProbe: 1,
   principalLessSubscriberCrash: 1,
+  clockDependentFind: 1,
 };

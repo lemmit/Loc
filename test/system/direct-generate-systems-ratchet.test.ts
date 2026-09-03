@@ -189,7 +189,6 @@ const PINNED: readonly string[] = [
   "test/generator/python/repository-port.test.ts",
   "test/generator/python/routes-create-default.test.ts",
   "test/generator/python/routes-cross-aggregate-id-import.test.ts",
-  "test/generator/python/temporal.test.ts",
   "test/generator/python/trunc-mod.test.ts",
   "test/generator/python/value-objects-utc-import.test.ts",
   "test/generator/python/vo-invariant-422.test.ts",
