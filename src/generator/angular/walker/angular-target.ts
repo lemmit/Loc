@@ -15,6 +15,7 @@
 // ---------------------------------------------------------------------------
 
 import type { ExprIR, TypeIR } from "../../../ir/types/loom-ir.js";
+import { optionalChainedMemberRead } from "../../_frontend/optional-member.js";
 import type { DetectedApiCall } from "../../_walker/api-hook-detector.js";
 import { jsExprLeaves } from "../../_walker/js-expr-leaves.js";
 import {
@@ -277,6 +278,14 @@ export const angularTarget: WalkerTarget = {
     if (paged) return `${handle}.data()!`;
     return single ? `${handle}.data()!` : `(${handle}.data() ?? [])`;
   },
+
+  /** An OPTIONAL field's member read is null-safe (`p.budget?.amount`).  A
+   *  `Budget?` ships `null` on the wire, and Angular type-checks the template
+   *  under `strictTemplates`: the verbatim `p.budget.amount` is a TS2531
+   *  "Object is possibly 'null'" that fails `ng build` outright (and would
+   *  throw at runtime on the row that has no budget).  Non-optional receivers
+   *  fall through to the walker's verbatim emit. */
+  renderMemberRead: optionalChainedMemberRead,
 
   /** The magic route `id` reads the bound class field `id` (the page-shell
    *  binds `readonly id = this.route.snapshot.paramMap.get("id") ?? ""` when
