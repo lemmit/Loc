@@ -71,4 +71,17 @@ export const BACKEND_PINS = {
     "@types/pg": "^8.11.0",
     "pino-pretty": "^13.0.0",
   },
+  // vitest 4's optional peer set is walked by npm through the `vite` range
+  // it accepts (`^6 || ^7 || ^8`). Since 2026-09-03 (vitest 5.0.0 +
+  // @vitejs/devtools 0.5 + @vitest/browser-playwright 5.0.0 published
+  // together) that walk reaches a vite-8 devtools chain whose peers point
+  // at vitest 5, and npm's arborist dies with
+  // `Cannot read properties of null (reading 'edgesOut')` on EVERY fresh
+  // install of an emitted project — pinning `vitest` itself does not
+  // help, only keeping vite on 7 does. Lift this override when vitest 4
+  // stops accepting vite 8, or when the generated project moves to
+  // vitest 5. Reproduced and proved on #2766 (hono-oidc-e2e).
+  overrides: {
+    vite: "^7.0.0",
+  },
 } as const;
