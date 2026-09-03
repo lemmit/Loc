@@ -14,7 +14,7 @@ resource   the configured binding        resource ordersState { for: Orders, kin
 deployable wires the resources it hosts  deployable api { … dataSources: [ordersState] }
 ```
 
-Everything below was generated from one scratch `system Shop` (one `Orders` context, one `node` backend) via `node bin/cli.js generate system infra.ddd -o out`; the compose, route, and artefact excerpts are verbatim from that run.
+Everything below is verbatim from two `generate system` runs over scratch models: an infrastructure `system Shop` (an `Orders` context on node + a `Shipping` context on python, with postgres / localDisk / rabbitmq / smtp storages and a cross-service api binding), and a route/handler model emitted once per backend (node / dotnet / python / java / elixir).
 
 ## `api`
 
@@ -141,13 +141,13 @@ get "/quotes/:sku", DElixirWeb.OrdersApiRoutesController, :get_quote
 
 Handler gates (all `src/ir/validate/checks/api-checks.ts` unless noted): a `queryHandler` may not mutate (`loom.query-handler-saves`); a `commandHandler` touches one aggregate (`loom.command-handler-multi-aggregate`); a handler parameter may not be named `id` (`loom.handler-param-reserved-id`); a nullable load has no null-handling vocabulary in a handler body (`loom.handler-load-nullable-unsupported` — use `getById`); a non-`extern` handler needs a body and an `extern` one must be bodyless (`loom.handler-missing-body` / `loom.extern-handler-has-body`); and a handler name may not collide with another handler *or a workflow `handle`* in the same context (`loom.duplicate-handler`, `src/language/validators/duplicates.ts`) — the route reference `<Context>.<Name>` would be ambiguous. A route that names a **workflow `handle`** resolves in the validator but emits nothing today ([Workflows](13-workflows.md#create--handle--starters--continuations)).
 
-### `serves:` and the OpenAPI document
-
-`serves: OrdersApi` on a backend deployable mounts that api's explicit routes and pins its contract identity. It does **not** gate the spec document: every backend publishes its own OpenAPI 3.1 spec at `GET /openapi.json` whether or not a `serves:` clause exists (Hono `app.doc`, Swashbuckle with the document name pinned to `/openapi.json`, FastAPI, springdoc's `api-docs.path`, and a Phoenix `OpenapiController`). Python additionally serves Swagger UI at `/docs` unless `LOOM_OPENAPI_UI=false`.
-
 `urlStyle` only changes the **route segment of custom operations** — `op.routeSlug` is `op.name` under `literal` and `plural(op.name)` under `resource` (`src/platform/hono/v4/routes-builder.ts`, enriched per-subdomain in `enrichments.ts`). The base CRUD paths above are identical either way; the operationId, request DTO names, and extern-handler keys always stay keyed on the op name.
 
 `httpStatus <Error> -> <Code>` overrides the HTTP status the RFC-7807 ProblemDetails translator emits for an exception-less operation returning that `error` variant. It only surfaces on an operation that actually returns the named error (`operation cancel(): Order or NotFound`); with no such operation it emits nothing, and the validator (`structural-checks.ts`) warns when a returned custom error has neither a stdlib default nor an `httpStatus` mapping (it would default to 500). The per-error → status map carries into every backend's error translator (`errorStatuses` in the IR; consumed by the .NET `[ProducesResponseType]`, Python `errors.py`, Java/Hono ProblemDetails emitters).
+
+### `serves:` and the OpenAPI document
+
+`serves: OrdersApi` on a backend deployable mounts that api's explicit routes and pins its contract identity. It does **not** gate the spec document: every backend publishes its own OpenAPI 3.1 spec at `GET /openapi.json` whether or not a `serves:` clause exists (Hono `app.doc`, Swashbuckle with the document name pinned to `/openapi.json`, FastAPI, springdoc's `api-docs.path`, and a Phoenix `OpenapiController`). Python and Java additionally serve a Swagger UI (`/docs`, `springdoc.swagger-ui`), both gated by `LOOM_OPENAPI_UI`.
 
 ## `storage`
 

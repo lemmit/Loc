@@ -18,17 +18,21 @@
 
 ## 1. Vision
 
-Today's React generator is a procedural emitter that prints TSX from the
-domain IR. There is no source representation of "a page", so any UI choice
-that diverges from the implicit list/new/detail-per-aggregate shape requires
-forking the generator in TypeScript. This RFC promotes the page to a
-first-class language construct, with the existing CRUD behaviour recovered
-as a `scaffold` macro that desugars into the same metamodel.
+Before the metamodel, the React generator was a procedural emitter that printed
+TSX straight from the domain IR.  There was no source representation of "a
+page", so any UI choice diverging from the implicit list/new/detail-per-aggregate
+shape meant forking the generator in TypeScript.  This document promoted the page
+to a first-class language construct, with the CRUD behaviour recovered as a
+`scaffold` macro that desugars into the same metamodel — and the same `ui`
+source now drives **six frontends** (react, vue, svelte, angular, feliz, flutter)
+plus Phoenix LiveView on `platform: elixir`.
 
 Three rules:
 
-1. **Closed and minimal.** Six declaration keywords. No user-extensible
-   macros. The standard component library is closed in v0.
+1. **Closed and minimal.** A small declaration vocabulary and a closed
+   primitive library (56 primitives + 2 sub-elements).  Extension happens at
+   the edges — user `component`s, `extern` components/functions, and the macro
+   API — never by adding primitives.
 2. **Reuse the existing IR for typing.** Data sources resolve to repository
    finds, operations, workflows, external APIs — every name typed
    via the existing signature. No parallel type system.
@@ -743,7 +747,7 @@ the table below is the map.
 |---|---|
 | `CreateForm { of: T }`, `OperationForm { of: <record>.<op> }`, `WorkflowForm { runs: <wf> }`, `DestroyForm { of: T }` | The four named-leaf forms (the old polymorphic `Form { creates: \| runs: \| into: }` split into these). `DestroyForm`'s `of:` names the **aggregate**, not a loaded record — the emitter resolves it through the aggregate map, and anything else degrades to a comment on every target with no diagnostic (an honest gap to know about). |
 | `Stack`, `Group`, `Grid`, `Tabs` (+ `Tab`), `Card`, `Toolbar`, `Container`, `Paper`, `Breadcrumbs`, `Divider`, `Section`, `Sticky` | Layout primitives. `Section` is a semantic anchor target; `Sticky` a sticky-position wrapper; `Tab` is the sub-element of `Tabs` — `Tab { <label>, …children }`, a children container like `Card`: every positional after the label renders in the panel. |
-| `Heading`, `Text`, `Bold`, `Italic`, `InlineCode`, `Badge`, `Stat`, `Empty`, `Anchor`, `Image`, `Avatar`, `Loader`, `Skeleton`, `Alert`, `KeyValueRow`, `Icon` | Display primitives. `Bold`/`Italic`/`InlineCode` are inline-emphasis spans; `Icon` is a builtin-name or `svg:` literal, decorative-by-default (`aria-hidden`) unless `label:` gives it meaning — which makes it a named `role="img"` and makes that name a user-visible slot, translated through the message catalog. |
+| `Heading`, `Text`, `Bold`, `Italic`, `InlineCode`, `Badge`, `Stat`, `Empty`, `Anchor`, `Image`, `Avatar`, `Loader`, `Skeleton`, `Alert`, `KeyValueRow`, `Icon`, `Slot` | Display primitives. `Bold`/`Italic`/`InlineCode` are inline-emphasis spans; `Slot { }` renders the children a caller passed (component bodies only — `loom.slot-outside-component`); `Icon` is a builtin-name or `svg:` literal, decorative-by-default (`aria-hidden`) unless `label:` gives it meaning — which makes it a named `role="img"` and makes that name a user-visible slot, translated through the message catalog. |
 | `Field`, `NumberField`, `PasswordField`, `MultilineField`, `Toggle`, `SelectField { label, bind, options }`, `FileUpload` | Bindable inputs, each `bind:`-bound to a `state` field. `MultilineField` is the textarea twin of `Field`; `SelectField` is a controlled single-select over a string-array `options:` expression; `FileUpload` binds a `File` state field (`loom.file-upload-not-file-field`). All accept an optional `error:` expression rendered in the pack's inline error slot (§8.2). |
 | `Chart { of:, kind:, x:, y: }` | Line / bar series over a **grouped** query-time `projection` — `kind:` is `"line"` or `"bar"` (`loom.chart-kind-invalid`), `of:` must be a grouped projection (`loom.chart-of-not-grouped`), and the accessors must be simple row fields (`loom.chart-accessor-not-field`). Ships on every frontend, LiveView included (inline SVG there — no JS charting library). |
 | `Timeline { of: <entries> }` | An `audited` aggregate's history (the `AuditEntry[]` served at `GET /<agg>/{id}/history`) as an ordered action / time / actor / field-change list. |
@@ -783,6 +787,19 @@ disappears — wrap the extra markup in a `Stack { … }` and pass that as the s
 or use the state-controlled `Modal { …children, open: <stateBool> }`, which *is*
 a children container.
 
+
+**Accessibility is part of the primitive contract, not a pack concern.**  Each
+registry entry declares its role / naming obligation, and three gates fire at
+validation time: `loom.a11y-missing-alt` (an `Image` / `Avatar` with neither
+`alt:` nor `decorative: true` — alt text is human content Loom cannot derive),
+`loom.a11y-icon-only-no-name` (an icon-only `Button`, which a screen reader
+would announce as the meaningless default), and `loom.a11y-theme-contrast` (a
+`theme { … }` pair whose contrast ratio fails WCAG).
+
+**Named arguments are read by name, so an unknown one is an error**
+(`loom.page-primitive-unknown-arg`) — the vocabulary per primitive lives in
+`src/util/walker-primitive-args.ts` and is tabulated in
+[`language-reference/16`](language-reference/16-ui-walker-primitives.md).
 
 A bare name in a rendered slot must resolve to a route parameter, a `state`
 field, a `derived` binding, an enclosing lambda's parameter, or a store field.
@@ -1236,26 +1253,35 @@ state + match + block-body lambdas + navigation. Two shapes both work:
 ```ddd
 page PlaceOrderWizard {
   route: "/orders/new"
+  state { step: int = 0  customerName: string = ""  note: string = "" }
+  derived canContinue: bool = customerName != ""
 
-  state {
-    step:  int               = 0
-    draft: PlaceOrderRequest = {}
-  }
+  action toReview() { step := 1 }
+  action back()     { step := 0 }
+  action submit()   { toast("Draft saved")  navigate(Home) }
 
-  action toItems()  { step := 1 }
-  action toReview() { step := 2 }
-  action submitOrder() {
-    call placeOrder(draft)
-    navigate(OrderConsole, { customerId: draft.customerId })
-  }
-  body: match {
-    step == 0 => Form {into: draft, fields: [customerId], onSubmit: toItems}
-    step == 1 => Form {into: draft, fields: [items],      onSubmit: toReview}
-    step == 2 => Review(of: draft,                        onSubmit: submitOrder)
-    else      => Empty {}
-  }
+  body: Stack { match {
+    step == 0 => Stack {
+      Field         { "Customer", bind: customerName },
+      MultilineField { "Note",    bind: note },
+      Button { "Continue", onClick: toReview, disabled: !canContinue }
+    }
+    step == 1 => Stack {
+      KeyValueRow { "Customer", customerName },
+      KeyValueRow { "Note", note.toUpper() },
+      Button { "Back", onClick: back },
+      Button { "Place order", onClick: submit }
+    }
+    else => Empty { "Unknown step" }
+  } }
+  menu { section: "Sales", label: "New order", order: 2 }
 }
 ```
+
+Note the `Stack { match { … } }` wrapper — a bare top-level `match` body is
+currently dropped by the React and Svelte emitters (§7).  A real remote submit
+would go through `match await` (§8) on a page that has the route id, or through
+`CreateForm { of: Order }`.
 
 ### Multi-page wizard (URL-encoded state, deep-linkable)
 
@@ -1280,8 +1306,10 @@ page ReviewStep(customerId: Customer id, items: OrderLine[]) {
 }
 ```
 
-Both fall out of existing primitives. Type safety on the final
-`call placeOrder(…)` enforces draft completeness.
+Both fall out of existing primitives. Type safety on the final call enforces
+draft completeness.  The `Form { fields: … }` / `Review(of: …)` shapes in the
+multi-page sketch predate the named-leaf form split (§9) — read them as
+`CreateForm` / `WorkflowForm` plus a hand-composed summary `Stack`.
 
 ---
 
@@ -1490,34 +1518,86 @@ paren form (`Action(order.confirm)`); the brace form is the documented spelling.
 
 ## 16. LiveView lowering (`platform: elixir`)
 
-A deployable that picks `platform: elixir` consumes the same
-`ui { … }` source the React platform consumes — the metamodel is
-framework-neutral by design.  The generator (`src/generator/elixir/`)
-lowers the IR onto Phoenix LiveView semantics.  Per-construct mapping:
+A deployable that picks `platform: elixir` consumes the same `ui { … }` source
+every other platform consumes — the metamodel is framework-neutral by design.
+The generator (`src/generator/elixir/`) lowers the IR onto Phoenix LiveView
+semantics.  Per-construct mapping:
 
 | Metamodel construct | LiveView lowering |
 |---|---|
 | `page X { route: "/path", body: … }` | `lib/<app>_web/live/<page_snake>_live.ex` — a `Phoenix.LiveView` module with `mount/3`, `handle_params/3`, `handle_event/3`, `render/1`. |
-| `state { step: int = 0, draft: T = {} }` | `socket.assigns.step` / `socket.assigns.draft`; `mount/3` initialises via `assign(socket, :step, …)`. |
-| `step := 1` (inside a lambda body) | `assign(socket, :step, 1)` inside the corresponding `handle_event/3` clause. |
-| `match { p1 => v1, … else => fallback }` | `cond do p1 -> v1; … true -> fallback end` (expressions); `<%= cond do … end %>` in HEEx templates. |
-| `requires <expr>` (page-level) | guard in `handle_params/3` that `push_navigate`s home with a `flash` on failure (v0 stub: bind only — full guard is a follow-up). |
-| `navigate(<Page>, {…})` (in a lambda) | `push_navigate(socket, to: ~p"/route?…")` with the target page's route + interpolated args. |
-| `CreateForm { of: T }` (and the illustrative `into: state` draft binding) | `<.simple_form for={@form} phx-submit="save">` over `to_form(changeset)` (or a draft assign for wizard steps). |
-| Body of an aggregate-scaffolded page | `pack.render("page-list" | "page-new" | "page-detail", vm)` → HEEx inline in the LiveView's `render/1` — the same framework-neutral preparer VMs the React generator uses (`src/generator/react/templating/preparers/`). |
-| `Sales.Customer.create.mutate(args)` (api binding) | direct context call `<App>.Sales.create_customer!(args)` — no hook hoisting, since LiveView reads in `mount/3` / `handle_event/3`. |
+| `state { step: int = 0 }` | `socket.assigns.step`; `mount/3` initialises via `assign(socket, :step, …)`. |
+| `step := 1` (inside an `action`) | `assign(socket, :step, 1)` inside the corresponding `handle_event/3` clause — every handler is a hoisted clause, never an inline closure. |
+| `store Cart { … }` | its own `lib/<app>_web/stores/<store_snake>.ex` module — a server-side per-process struct, so `persist:` beyond `memory` is rejected (`loom.store-lifetime-liveview-invalid`). |
+| `match { p1 => v1, … else => fallback }` | `cond do p1 -> v1; … true -> fallback end`; `<%= cond do … end %>` in template position. |
+| `requires <expr>` (page-level) | a guard in `handle_params/3` / the read-side predicate, rendered as Elixir. |
+| `navigate(<Page>, {…})` | `push_navigate(socket, to: ~p"/route?…")` with the target page's route + interpolated args. |
+| `CreateForm { of: T }` / `OperationForm` / `WorkflowForm` | `<.simple_form for={@form} phx-submit="save">` over `to_form(changeset)`. |
+| Scaffolded page bodies | the same macro-emitted walker body every other frontend gets, rendered through the HEEx engine into `render/1`. |
+| `Sales.Customer.create(args)` | a direct context call `<App>.Sales.create_customer!(args)` — no hook hoisting, since LiveView reads in `mount/3` / `handle_event/3`. |
 | Page object emission | unchanged — Playwright drives any rendered HTML, including LiveView, via the same testid-keyed page objects. |
 
-The framework-specific seams (state read/write, `match` lowering,
-api-call lowering, navigation, helper imports) live behind the
-`WalkerTarget` interface in `src/generator/_walker/target.ts`.  v0
-covers scaffold-driven pages end-to-end; pages with explicit `body:`
-expressions emit a TODO stub pending the HEEx walker.
+**HEEx does not ride the shared walker.**  Five frontends (react, vue, svelte,
+angular, feliz, flutter) drive `walkBody` through the `WalkerTarget` seam
+(`src/generator/_walker/target.ts`); LiveView runs a **parallel engine**,
+`src/generator/elixir/heex-walker-core.ts` (+ `heex-primitives.ts`), because its
+output topology diverges — hoisted `handle_event` clauses instead of inline
+lambdas, `for … do` comprehensions instead of `.map`, `if`-blocks instead of
+ternaries.  `heex-target.ts` remains as a conformance shim over the same seams.
+
+Both engines dispatch per primitive off the **same** registry
+(`src/generator/_walker/registry.ts`), where a primitive carries a `tsx`
+renderer and optionally a `heex` one — so coverage has one source of truth and
+`test/generator/elixir/heex-parity.test.ts` freezes the gap:
+
+- **The pinned gap list holds exactly one entry today: `DataGrid`** — a TanStack
+  client row model has no LiveView analogue (`loom.datagrid-unsupported-target`;
+  use `Table`, which is server-driven with real sort + pagination on HEEx).
+- Everything else the TSX walker renders now has a HEEx renderer, including the
+  standalone input family (which writes bound page state back through a hoisted
+  `handle_event`), `ProvenanceInfo` (a `<details>` disclosure over the
+  co-located `<field>_provenance` jsonb column) and `Chart` (inline SVG — no JS
+  charting library).
+- Adding a TSX-only primitive fails that test until it gets a `heex` renderer or
+  is pinned with a reason; closing a gap fails it too (delete the entry).
 
 ## 17. See also
 
-- [`examples/sales-ui.ddd`](../examples/sales-ui.ddd) — concrete example
-  exercising every construct above.
-- `experience_gathered.md` slice 10 — page-object lessons the new
-  metamodel must continue to honour (1:1 page ↔ route, chainable methods,
-  testid-driven, no abstraction over Mantine quirks).
+**Chaptered reference (the normative surface):**
+
+- [`language-reference/15-ui-pages-structure.md`](language-reference/15-ui-pages-structure.md)
+  — `ui` / `page` / `component` / `state` / `derived` / `action` / `area` / `menu` /
+  `with scaffold(...)`, each with generated output.
+- [`language-reference/16-ui-walker-primitives.md`](language-reference/16-ui-walker-primitives.md)
+  — the full primitive inventory (slots, named args, per-target coverage) and the
+  arity / argument / placement gates.
+
+**Feature docs:**
+
+- [`actions.md`](actions.md) — named `action`s, lambda-vs-action, `match await`,
+  the effect marker, error variants.
+- [`scaffold-macros.md`](scaffold-macros.md) — the macro stdlib (`scaffold`
+  family incl. `scaffoldDashboard`, `crudish`, `softDelete`) and what `unfold`
+  writes back.
+- [`customization-gradient.md`](customization-gradient.md) — the no-code →
+  full-code override path.
+- [`design-packs.md`](design-packs.md) — how a pack renders these primitives;
+  [`generators.md`](generators.md) — the per-target feature matrix.
+- [`auth.md`](auth.md) (page `requires`, `auth: ui`), [`channels.md`](channels.md)
+  (the `channel` / `on` ui members), [`provenance.md`](provenance.md)
+  (`ProvenanceInfo`), [`architecture.md`](architecture.md) (deployable binding).
+
+**Examples:**
+
+- [`examples/acme.ddd`](../examples/acme.ddd) and
+  [`examples/acme-order-explicit.ddd`](../examples/acme-order-explicit.ddd) —
+  scaffolded and hand-written spellings of the same pages.
+- [`web/src/examples/action-showcase.ddd`](../web/src/examples/action-showcase.ddd)
+  — aggregate-typed component params and `Action`.
+- [`examples/sales-ui.ddd`](../examples/sales-ui.ddd) — the original prototype
+  for this document.  **Historical: it does not parse** (it uses the withdrawn
+  `Dashboard` / `Review` / `Stat { api … }` shapes); read it as the design
+  sketch it is, not as working source.
+- `experience_gathered.md` — page-object lessons the metamodel continues to
+  honour (1:1 page ↔ route, chainable methods, testid-driven, no abstraction
+  over pack quirks).

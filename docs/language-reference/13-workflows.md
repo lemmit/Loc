@@ -114,7 +114,7 @@ The handler builds each repository, logs `workflow_started`, runs the body, `sav
 ::: tabs backend
 == node
 ```ts
-// http/workflows.ts — POST /place_order handler
+// http/workflows.ts — POST /api/workflows/place_order
 async (httpCtx) => {
   const body = httpCtx.req.valid("json");
   const customerId = Ids.CustomerId(body.customerId);
@@ -147,7 +147,7 @@ public async ValueTask<Unit> Handle(PlaceOrderCommand command, CancellationToken
 ```
 == python
 ```python
-# app/http/workflows_routes.py — POST /place_order
+# app/http/workflows_routes.py — POST /api/workflows/place_order
 async def place_order_workflow(body: PlaceOrderRequest, session: SessionDep) -> Response:
     customer_id = CustomerId(body.customerId)
     placed_at = body.placedAt
@@ -165,15 +165,35 @@ async def place_order_workflow(body: PlaceOrderRequest, session: SessionDep) -> 
 ```
 == java
 ```java
-// application/workflows/SalesWorkflows.java
+// application/workflows/SalesWorkflows.java — @Service, class-level @Transactional
 public void placeOrder(PlaceOrderRequest request) {
-    var customerId = new CustomerId(request.customerId());
-    var placedAt = Instant.parse(request.placedAt());
-    var customer = customersRepository.getById(customerId);
-    var order = Order.create(customerId, OrderStatus.Draft, placedAt);
-    { var __ev = new OrderPlaced(order.id(), placedAt); CatalogLog.event("event_dispatched", "info", "event_type", __ev.getClass().getSimpleName()); }
-    ordersRepository.save(order);
+    try (var __frame = RequestContext.openChild()) {
+        CatalogLog.event("workflow_started", "info", "workflow", "placeOrder");
+        var customerId = new CustomerId(request.customerId());
+        var placedAt = Instant.parse(request.placedAt());
+        var customer = customersRepository.getById(customerId);
+        var order = Order.create(customerId, OrderStatus.Draft, placedAt, 0);
+        { var __ev = new OrderPlaced(order.id(), placedAt); CatalogLog.event("event_dispatched", "info", "event_type", __ev.getClass().getSimpleName()); }
+        ordersRepository.save(order);
+        CatalogLog.event("workflow_completed", "info", "workflow", "placeOrder");
+    }
 }
+```
+== elixir
+```elixir
+# lib/api_elixir/sales/workflows/place_order.ex — a `with` chain over the context API
+def run(params) when is_map(params) do
+  ApiElixir.RequestContext.with_child_frame(fn ->
+  Logger.info("workflow_started", event: "workflow_started", workflow: "placeOrder")
+  %{"customerId" => customer_id, "placedAt" => placed_at} = params
+  with {:ok, _customer} <- Context.get_customer(customer_id),
+       {:ok, order} <- Context.create_order(%{customer_id: customer_id, status: :Draft, placed_at: placed_at, priority: 0}) do
+    Phoenix.PubSub.broadcast(ApiElixir.PubSub, "events", %Context.Events.OrderPlaced{order: order.id, at: placed_at})
+    Logger.info("workflow_completed", event: "workflow_completed", workflow: "placeOrder")
+    {:ok, order}
+  end
+  end)
+end
 ```
 ::: end
 
@@ -317,7 +337,7 @@ export function createInProcessDispatcher(db: NodePgDatabase<typeof schema>): Do
 ```
 ::: end
 
-> Honest gap: the `.NET` / `Python` / `Java` reactors emit the equivalent load-or-allocate handler (a Mediator `INotificationHandler<TEvent>` on .NET, a dispatcher-routed coroutine on Python, a dispatch method on Java) over a backend-mapped saga-state row — documented in [`../workflow.md`](../workflow.md) §"Status". They're not re-excerpted here; the Node handler above is the canonical shape and the dispatch wiring is structurally identical per backend.
+The other four backends emit the same load-or-allocate shape over a backend-mapped saga-state row (a Mediator notification handler on .NET, a dispatcher-routed coroutine on Python, a dispatch method on Java, a `Workflows.<Wf>.On<Event>` module on Phoenix); only the Node handler is excerpted here for length. Per-backend shapes: [`../workflow.md`](../workflow.md) §"Generated code".
 
 ## `timerSource` — time as an event source
 
@@ -425,7 +445,7 @@ The tick rides the ordinary in-process dispatcher, so a reactor sees no differen
 
 ## `apply` — the `eventSourced` fold
 
-Mark a workflow `eventSourced` and its truth becomes its own event stream (a `<wf>_events` table) instead of a `<Wf>State` row. There, `create` / `on` bodies may only `emit`; each emitted event must be folded by an `apply(param: Event) { body }` block — a pure fold (`:=` assignments only), exactly like an aggregate [applier](06-behavior-and-statements.md#applye-event--the-event-sourcing-fold). An emitted event with no applier is an error (`Event 'X' is emitted … but no applier folds it`).
+Mark a workflow `eventSourced` and its truth becomes its own event stream (a `<wf>_events` table) instead of a `<Wf>State` row. There, `create` / `on` bodies may only `emit`; each emitted event must be folded by an `apply(param: Event) { body }` block — a pure fold (`:=` assignments only), exactly like an aggregate [applier](06-behavior-and-statements.md#applye-event--the-event-sourcing-fold). An emitted event with no applier is `loom.workflow-emitted-event-no-applier`; an `apply` on a non-`eventSourced` workflow is `loom.workflow-applier-on-non-event-sourced`, a duplicate one `loom.workflow-duplicate-applier`, and any non-`:=` mutation in an `eventSourced` body is `loom.workflow-event-sourced-mutation`.
 
 ```ddd
 workflow settlement eventSourced {
@@ -506,7 +526,7 @@ The isolation level is threaded into each backend's native transaction API.
 ::: tabs backend
 == node
 ```ts
-// http/workflows.ts — POST /transfer_credit
+// http/workflows.ts — POST /api/workflows/transfer_credit
 await db.transaction(async (tx) => {
   const customers = new CustomerRepository(tx, events);
   if (!(amount > 0)) throw new DomainError("Precondition failed: amount > 0");
@@ -539,7 +559,7 @@ catch { await tx.RollbackAsync(cancellationToken); throw; }
 ```
 == python
 ```python
-# app/http/workflows_routes.py — POST /transfer_credit
+# app/http/workflows_routes.py — POST /api/workflows/transfer_credit
 async def transfer_credit_workflow(body: TransferCreditRequest, session: SessionDep) -> Response:
     await session.connection(execution_options={"isolation_level": "SERIALIZABLE"})
     payer = CustomerId(body.payer)
@@ -595,7 +615,7 @@ The same vendor-neutral verbs lower to idiomatic native clients per backend (`@a
 ::: tabs backend
 == node
 ```ts
-// http/workflows.ts — POST /archive_order
+// http/workflows.ts — POST /api/workflows/archive_order
 import { files$get, files$put } from "../resources/s3";
 // …
 const target = Ids.OrderId(body.target);

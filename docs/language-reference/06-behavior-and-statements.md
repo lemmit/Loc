@@ -4,7 +4,7 @@ How an aggregate changes state: the four action members — `operation` (a mutat
 
 > **Grammar:** `Operation`, `Create`, `Destroy`, `Apply`, `CommandHandler` / `QueryHandler`, `Statement` (`PreconditionStmt`, `RequiresStmt`, `LetStmt`, `EmitStmt` / `EmitField`, `ReturnStmt`, `AssignOrCallStmt` / `LValue`, `MatchStmt` / `VariantStmtArm`; `ForStmt` / `IfLetStmt` are workflow-body only — see [Workflows](13-workflows.md)) · **Validators:** `loom.this-id-in-create`, `loom.extern-body-not-precondition`, `loom.lifecycle-body-dropped` / `loom.named-lifecycle-dropped` / `loom.lifecycle-guard-unreadable` / `loom.lifecycle-guard-event-sourced`, `loom.applier-*` / `loom.emitted-event-*`, `loom.audited-backend-unsupported` / `loom.audited-returning-operation-unsupported`, `loom.when-unsupported` / `loom.operation-return-unsupported` / `loom.unmapped-error-status`, `loom.missing-effect-marker` / `loom.effect-in-lambda` / `loom.match-await-*` / `loom.instance-effect-needs-route-id`, `loom.handler-*` / `loom.query-handler-saves` / `loom.command-handler-multi-aggregate` (`src/language/validators/statements.ts`, `handlers.ts`; `src/ir/validate/checks/structural-checks.ts`, `system-checks.ts`, `api-checks.ts`, `ui-checks.ts`) · **Lowering:** [`src/ir/lower/lower-stmt.ts`](../../src/ir/lower/lower-stmt.ts), `lower-members.ts`, `lower-workflow.ts` (handler bodies); shared dispatch in [`_stmt/target.ts`](../../src/generator/_stmt/target.ts) · **Docs:** [`../language.md`](../language.md), [`../actions.md`](../actions.md), [`../workflow.md`](../workflow.md), [`../auth.md`](../auth.md)
 
-Every aggregate body lowers through one shared `lowerStatement`, so an `operation`, a `create`, a `destroy`, and an `apply` all draw from the same statement set; the **kind tag** (not the body syntax) carries the lifecycle asymmetry. The lowered `StmtIR` has **11 kinds** — `precondition`, `requires`, `let`, `assign`, `add`, `remove`, `emit`, `call`, `expression`, `return`, `variant-match` — and `src/generator/_stmt/target.ts` owns the dispatch once; each backend's `render-stmt.ts` is a leaf table. Every tab below was generated from one scratch system with one deployable per backend (`node bin/cli.js generate system … -o out`) and excerpted; statements are separated by newlines (there is no `;` statement separator).
+Every aggregate body lowers through one shared `lowerStatement`, so an `operation`, a `create`, a `destroy`, and an `apply` all draw from the same statement set; the **kind tag** (not the body syntax) carries the lifecycle asymmetry. The lowered `StmtIR` has **11 kinds** — `precondition`, `requires`, `let`, `assign`, `add`, `remove`, `emit`, `call`, `expression`, `return`, `variant-match` — and `src/generator/_stmt/target.ts` owns the dispatch once; each backend's `render-stmt.ts` is a leaf table. Every tab below was generated from one scratch system with one deployable per backend (`node bin/cli.js generate system … -o out`) and excerpted; statements are separated by newlines (there is no `;` statement separator). The C# tabs are excerpted one step further than the rest: the .NET emitter weaves a C#10 `#line (a,b)-(c,d) "…ddd"` directive ahead of each mapped statement of a named operation (`weaveLineDirectives`, `src/generator/dotnet/emit/entity.ts`), so a debugger steps the `.ddd` source; those directives are elided here.
 
 ## `operation` — a mutating method
 
@@ -117,7 +117,9 @@ def confirm_order(%ExApi.Orders.Order{} = record, params) when is_map(params) do
       |> Ecto.Changeset.change(%{})
       |> Ecto.Changeset.force_change(:status, record.status)
       |> Ecto.Changeset.optimistic_lock(:version)
-      |> ExApi.Orders.OrderChangeset.validate_invariants()
+      # |> ExApi.Orders.OrderChangeset.validate_invariants()  ← only when the
+      #    aggregate carries a RESIDUAL invariant (cross-field, or messaged);
+      #    a single-field rule rides a native Ecto `validate_*` instead.
 
     case ExApi.Orders.OrderRepository.persist_change(changeset) do
       {:ok, saved} ->
@@ -353,7 +355,7 @@ changeset =
 
 ## `create` / `destroy` — lifecycle actions
 
-`create [name](params) [audited] { body }` is the factory marker: an **unnamed** `create(...)` makes the aggregate constructible over HTTP (`POST /<aggs>` + a static factory whose input is **derived from the field set**, not from the parameter list); `destroy [name][(params)] [audited] { body }` is the terminator (`DELETE /{id}`). Neither is ever `private` or `extern`. The `crudish` capability injects the canonical pair plus an `update`; an aggregate with no `create` and every required field defaulted gets a synthesised parameterless one.
+`create [name](params) [audited] { body }` is the factory marker: an **unnamed** `create(...)` makes the aggregate constructible over HTTP (`POST /<aggs>` + a static factory whose input is **derived from the field set**, not from the parameter list); `destroy [name][(params)] [audited] { body }` is the terminator (`DELETE /{id}`). Neither is ever `private` or `extern`. The `crudish` capability injects the canonical pair plus an `update`. Two gates are distinct: the **domain factory** `Agg.create(...)` is emitted for every *constructible* aggregate — one that declares a create, or whose every invariant is satisfiable from the create input (`isConstructible`, `src/ir/enrich/wire-projection.ts`) — and is parameterized over the create-input field set, while the **REST** `POST /<aggs>` appears only when a canonical `create` is actually declared (by hand or by `crudish`). Field defaults do not decide either: a default only makes that field optional *input*.
 
 On a **state-based** aggregate the braces are a contract, not a body: no backend renders `canonicalCreate.statements` / `canonicalDestroy.statements`, so the validator refuses any statement that would silently vanish (`loom.lifecycle-body-dropped`, an error): a `precondition`, an `emit`, a `+=`/`-=`, a call, or an assignment whose value the emitted factory does not already reproduce. Two assignments *are* reproduced and therefore admitted — `field := <same-named param>` (the field-derived input supplies it) and `field := <literal>` when the field declares that same literal default. A **named** `create open(...)` / `destroy close(...)` on a state-based aggregate reaches no emitter at all and is refused whole (`loom.named-lifecycle-dropped`) — with one exception: on an **event-sourced** aggregate the single `create` is canonical whether or not it is named, so `create open(owner: string) { emit Opened { … } }` is emitted and ungated. Reading the identity as the explicit `this.id` inside a `create` body is `loom.this-id-in-create`; a bare `id` is not gated, and is what the event-sourced `create` above emits.
 
@@ -749,4 +751,15 @@ An `extern` handler keeps the routed dispatch but calls a scaffold-once, user-ow
 
 ## `for` & `if let` — workflow bodies only
 
-`for x in xs { … }` and `if let x = Repo.find(C) { … } else { … }` parse via the same `Statement` rule but are meaningful only inside `workflow` (and handler) bodies — there they lower (`lower-workflow.ts`) to `for-each` / `if-let` IR with per-iteration / per-branch repository saves. The aggregate-body lowerer (`lower-stmt.ts`) has no arm for them: today a `for` inside an `operation` parses clean, raises no diagnostic, and the TS backend emits an uncompilable `this.<unknown>();` in its place — don't write one there. They're covered in [Workflows](13-workflows.md).
+`for x in xs { … }` and `if let x = Repo.find(C) { … } else { … }` parse via the same `Statement` rule but are meaningful only inside `workflow` (and handler) bodies — there they lower (`lower-workflow.ts`) to the `for-each` / `if-let` `WorkflowStmtIR` kinds with per-iteration / per-branch repository saves. The iterable is a `ForIterable` (a name plus optional postfix suffixes), so `for n in notes` parses but `for n in [1, 2]` does not.
+
+The aggregate-body lowerer (`lower-stmt.ts`) has **no arm for either**, and nothing gates them there: an `operation touch() { for n in notes { owner := n } }` validates clean (`0 error(s), 0 warning(s)`) and the node backend then emits
+
+```ts
+public touch(): void {
+  this.<unknown>();
+  this._assertInvariants();
+}
+```
+
+— source that does not compile. Don't write one there; they're covered in [Workflows](13-workflows.md).

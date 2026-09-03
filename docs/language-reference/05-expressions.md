@@ -404,7 +404,7 @@ emits `this._note2.toUpper()` (node), `this.note2.toUpper()` (java), `self._note
 
 The closed set over a list-typed receiver: `.count`, `.first`, `.firstOrNull`, `.distinct` (members, no parens), `.sum(λ)`, `.all(λ)`, `.any(λ)`, `.where(λ)`, `.map(λ)`, `.sortBy(λ, desc?)`, `.min(λ)`, `.max(λ)`, `.avg(λ)`, `.take(n)`, `.skip(n)`, `.join(sep)`, `.contains(x)`. Typing: `count` → `int`; `sum`/`map` → the lambda's body type; `min`/`max`/`firstOrNull` → optional; `avg` → `money?` for a money projection else `decimal?`. Gates: `.sum` without a lambda is `loom.bare-collection-accessor`; `.distinct` over entities / id references is `loom.distinct-non-scalar`; `.join` over a non-string list is `loom.join-non-string`; `.min`/`.max` over a non-comparable projection is `loom.reduction-non-comparable`; `.avg` over a non-numeric one is `loom.avg-non-numeric`. Each is flagged `isCollectionOp` at lowering and lowered to the host's idiom — there is no shared runtime.
 
-**Backend-only.** In a page or component expression only `.map` (and `.join`) render; every other op is `loom.collection-op-in-ui` / `loom.frontend-collection-op-unsupported` — compute it in a `derived`, a `find`, or a `projection` and bind the result.
+**Backend-only.** The collection vocabulary is a backend one: `.map` is the *only* op with a real frontend renderer (`Array.prototype.map` on the JS frontends, `Enum.map/2` on HEEx, `Iterable.map` on Dart — and even it is gated on Feliz, which has no lambda seam yet). Every other op in a page / component / store body emits verbatim and breaks the generated project's own compiler, so it is gated: `loom.frontend-collection-op-unsupported` (`src/ir/validate/checks/ui-checks.ts`, the whole catalogue) plus the narrower AST-level `loom.collection-op-in-ui` for `sortBy` / `distinct` / `take` / `skip` / `min` / `max` / `avg`. Compute the value in a `derived`, a repository `find`, or a `projection` and bind the result.
 
 ```ddd
 aggregate Order {
@@ -676,7 +676,7 @@ def as_money(self) -> Decimal:
 
 ## `await`
 
-`await` is admitted in exactly one position: the subject of a variant `match` (`match await Orders.Order.place() { … }`) inside a page or component `action`. It marks the remote command's async boundary so its `or`-union result is matched; a bare remote mutating call in an action body is `loom.missing-effect-marker`. `await` is a soft keyword, so a field named `await` still parses. See [Statements](06-behavior-and-statements.md#match--the-effect-form-variant-match) and [`../actions.md`](../actions.md).
+`await` is admitted in exactly one position: the subject of a variant `match` (`match await Orders.Order.place() { … }`) inside a page or component `action`. It marks the remote command's async boundary so its `or`-union result is matched; a bare remote mutating call in an action body is `loom.missing-effect-marker`. `await` is a soft keyword (it is in the `LooseName` set), so a field named `await` still parses. There is no *spurious*-marker diagnostic to pair with `loom.missing-effect-marker`: `await` appears only in the `MatchSubject` rule, so an `await` anywhere else is a plain parse error. See [Statements](06-behavior-and-statements.md#match--the-effect-form-variant-match) and [`../actions.md`](../actions.md).
 
 ## Magic references
 
