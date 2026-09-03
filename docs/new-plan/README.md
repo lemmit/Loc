@@ -2,7 +2,7 @@
 
 *One roadmap, divided into feature tracks and agent-pickable missions. Created 2026-07-13 from a full re-classification of the design corpus (118 proposals, 71 plans, the DEBT backlog, the parity registers, the audits); it supersedes every earlier status table. The archived corpus under [`../old/`](../old/) is the design record — missions link into it; nothing was deleted.*
 
-*Last refreshed: **2026-09-02**, against `main` @ `5dc8b4e`. This pass was a plan-hygiene audit and a layout change, not a feature pass:*
+*Last refreshed: **2026-09-02**, against `main` @ `36d8516`. This pass was a plan-hygiene audit and a layout change, not a feature pass:*
 
 - *Every one of the 208 mission headings was cross-checked against the merged-PR record on `main` (3,253 commits, 304 of them naming a mission id) and the 12 open PRs. Four statuses were stale in the direction that matters — **three missions marked `open` had their fix merged** (M-T2.14 #2669, M-T6.44 #2670, M-T6.46 #2677; each PR carries the full fix plus witnesses, not a claim stub) — and four numeric-audit missions are `in-flight` on ready-for-review PRs (M-T1.21–M-T1.24). Four `done` headings had no PR citation and now do (M-T1.25 #2673, M-T6.17 #1955, M-T6.24 #2340, M-T6.45 #2676). Everything else the audit checked was current as written: the `partial` bodies are maintained PR-by-PR by their owners and matched the log. One `partial` was closed by owner decision: **M-T4.1 scheduling** — `every:` + durable `cron:` timers ship on all five backends, and the sugar its "Remaining" list named is not open work; agents had been re-proposing "temporal" features on the strength of that heading.*
 - ***The track files now list only live missions.*** *The 76 closed missions (`done` / `shipped` / `closed` / `concluded` / `withdrawn`) moved, verbatim, to [`archive/T<n>-done.md`](archive/); the design docs of closed missions moved to [`archive/missions/`](archive/missions/); the ten stacked "Last refreshed" notes and the 08-24 shortlist that used to head this file are preserved in [`archive/refresh-log.md`](archive/refresh-log.md). `coverage.md` rows that pointed at a closed mission now say so and link into the archive.*
@@ -50,10 +50,10 @@ The unsupported-diagnostic register (`src/diagnostics/unsupported-register.ts`) 
 | [T6 — Backend parity & generated-code quality](T6-backend-parity.md) | Phoenix gaps register, adapter subsets, numeric ingress, saga/workflow emission holes, ES seeding | 14 | 38 | P1/P2 (small missions, wrong failure modes today) |
 | [T7 — Deployment & operations](T7-deployment-ops.md) | k8s hardening, proxy/networking, terraform, PaaS deploy | 8 | 1 | P2 |
 | [T8 — DX, tooling & the AI platform](T8-dx-tooling-ai.md) | Debugger frontier, sourcemaps, LSP tail, playground chat/agent loop, builder, packaging split, mutation testing | 13 | 2 | P2/P3 |
-| [T9 — Toolchain & process health](T9-toolchain-health.md) | Per-PR boot gates, test-coverage phases, the numeric wire-codec seam, `RouteTarget`, doc hygiene, the recurring sweeps | 21 | 9 | **P1 — prerequisite to trusting the matrix** |
+| [T9 — Toolchain & process health](T9-toolchain-health.md) | Per-PR boot gates, test-coverage phases, the numeric wire-codec seam, `RouteTarget`, doc hygiene, the recurring sweeps | 24 | 9 | **P1 — prerequisite to trusting the matrix** |
 | [T10 — New targets](T10-new-targets.md) | Go/PHP/NestJS/Blazor/HTMX/Next.js studies **retired to design-record**; **matrix frozen — decided 2026-07-17, no more targets** | 7 (all `frozen`) | 0 | — (closed) |
 
-Live = every heading that is not closed (`open` 49 · `partial` 62 · `in-flight` 4 · `blocked` 6 · `plan`/`deferred`/`recurring` 4 · `frozen` 7 — 132 in all, 2026-09-02 count; regenerate with `grep -c '^## M-T' docs/new-plan/T*.md`).
+Live = every heading that is not closed (`open` 51 · `partial` 63 · `in-flight` 4 · `blocked` 6 · `plan`/`deferred`/`recurring` 4 · `frozen` 7 — 135 in all, 2026-09-02 count; regenerate with `grep -c '^## M-T' docs/new-plan/T*.md`).
 
 ## Sequencing — the load-bearing dependencies
 
