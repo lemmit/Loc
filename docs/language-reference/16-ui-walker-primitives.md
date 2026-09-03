@@ -1,6 +1,6 @@
 # 16. UI: the walker primitive library
 
-Page bodies are written in a **closed primitive library** — 55 top-level primitives (`Stack`, `Heading`, `Field`, `Table`, `CreateForm`, `QueryView`, `Chart`, `For`, …) plus the two sub-elements `Tab` and `Column`, and the `match` expression. There is no escape hatch to raw markup; every primitive is dispatched by the body walker into the page's active **design pack**, so one `.ddd` body renders as Mantine, shadcn, Vuetify, Angular Material, daisyUI (Feliz), Material 3 (Flutter) or HEEx depending on the hosting frontend. Reach for this chapter to see what each primitive takes, what it emits, and where a target honestly declines.
+Page bodies are written in a **closed primitive library** — 56 top-level primitives (`Stack`, `Heading`, `Field`, `Table`, `CreateForm`, `QueryView`, `Chart`, `For`, …) plus the two sub-elements `Tab` and `Column`, and the `match` expression. There is no escape hatch to raw markup; every primitive is dispatched by the body walker into the page's active **design pack**, so one `.ddd` body renders as Mantine, shadcn, Vuetify, Angular Material, daisyUI (Feliz), Material 3 (Flutter) or HEEx depending on the hosting frontend. Reach for this chapter to see what each primitive takes, what it emits, and where a target honestly declines.
 
 > **Grammar:** primitives are `BuilderCall`s whose names come from the registry `src/generator/_walker/registry.ts` (`WALKER_PRIMITIVES`), mirrored for the validator by `src/util/walker-primitive-names.ts` (`WALKER_LAYOUT_PRIMITIVES`, `WALKER_SUB_PRIMITIVES`, `WALKER_PRIMITIVE_SLOTS`) and `src/util/walker-primitive-args.ts` (`WALKER_PRIMITIVE_NAMED_ARGS`) · **Validators:** `loom.unknown-page-element` · `loom.unresolved-page-ref` · `loom.page-primitive-unknown-arg` · `loom.page-primitive-extra-children` · `loom.sub-primitive-misplaced` · `loom.slot-outside-component` · `loom.component-prop-type` · `loom.a11y-missing-alt` · `loom.a11y-icon-only-no-name` · `loom.file-upload-not-file-field` · `loom.frontend-collection-op-unsupported` · `loom.user-visible-concat` · `loom.chart-kind-invalid` · `loom.chart-of-not-grouped` · `loom.chart-accessor-not-field` · `loom.datagrid-selection-not-state` · `loom.datagrid-selection-not-array` · `loom.table-filter-server-paged` · `loom.op-form-needs-route-id` · `loom.create-unknown-field` · `loom.create-server-field` · `loom.create-field-type` · per-target: `loom.datagrid-unsupported-target` · `loom.chart-unsupported-target` · `loom.table-filter-unsupported` · `loom.modal-controlled-op-form-unsupported` · `loom.flutter-primitive-unsupported` · **Docs:** [`../page-metamodel.md`](../page-metamodel.md) §9, [`../design-packs.md`](../design-packs.md), [`../actions.md`](../actions.md)
 
@@ -65,7 +65,7 @@ Positional **slots** are what a primitive renders positionally (`WALKER_PRIMITIV
 | Forms | `CreateForm` | 1 — the aggregate | `of`, `onSubmit` | |
 | Forms | `OperationForm` | 1 — `record.op` | `of`, `op` | |
 | Forms | `WorkflowForm` | 1 — the workflow | `runs`, `onSubmit` | |
-| Forms | `DestroyForm` | 1 — the record | `of`, `then` | |
+| Forms | `DestroyForm` | 1 — the aggregate | `of`, `then` | deletes the record at the route `:id` |
 
 `Tab` and `Column` have no renderer of their own — their parent consumes them inline.
 
@@ -919,7 +919,54 @@ function openArchiveModal(mut: ReturnType<typeof useArchiveProduct>): void {
 ElevatedButton(onPressed: () => showDialog(context: context, builder: (dialogContext) => AlertDialog(title: Text(t('page.ProductDetail.modalTitle.umy5vy', 'Archive product')), content: SizedBox(width: double.maxFinite, child: SingleChildScrollView(child: ArchiveProductForm(id: id))))), child: Text(t('page.ProductDetail.button.v0v5o9', 'Archive…'))),
 ```
 
-The op-form spelling `OperationForm { of: Product, op: archive }` names no record, so it targets the page's `:id` route param — on a route without one it is rejected (`loom.op-form-needs-route-id`). A `Modal` has two shapes that do not combine everywhere: the **trigger** shape above, and the **state-controlled** shape `Modal { …children, open: <stateBool> }` (a children container, dialog title via `title:`). Putting an `OperationForm` inside the controlled shape is an error on React, Vue, Svelte and Flutter (`loom.modal-controlled-op-form-unsupported`); an extra positional next to the op form is `loom.page-primitive-extra-children#modal-op-form`. `WorkflowForm { runs: <wf> }` and `DestroyForm { of: <record>, then: }` follow the create shape over a workflow start / a delete ([page-metamodel.md §9](../page-metamodel.md), [13-workflows](13-workflows.md)).
+The op-form spelling `OperationForm { of: Product, op: archive }` names no record, so it targets the page's `:id` route param — on a route without one it is rejected (`loom.op-form-needs-route-id`). A `Modal` has two shapes that do not combine everywhere: the **trigger** shape above, and the **state-controlled** shape `Modal { …children, open: <stateBool> }` (a children container, dialog title via `title:`). Putting an `OperationForm` inside the controlled shape is an error on React, Vue, Svelte and Flutter (`loom.modal-controlled-op-form-unsupported`); an extra positional next to the op form is `loom.page-primitive-extra-children#modal-op-form`. `WorkflowForm { runs: <wf> }` and `DestroyForm { of: <Aggregate>, then: navigate(Page) }` follow the create shape over a workflow start / the aggregate's canonical destroy ([page-metamodel.md §9](../page-metamodel.md), [13-workflows](13-workflows.md)). `DestroyForm` names the **aggregate**, never a loaded record — it deletes the record at the page's `:id` route param, confirms through the pack's dialog, and navigates to `then:` (default: the aggregate's list route). It needs a canonical `destroy { }` (`with crudish` gives one). Spelling `of: p` over a `QueryView` binding is **not** rejected today — it degrades to a `DestroyForm(of: p): aggregate not found` comment on every target.
+
+```ddd
+workflow registerProduct {
+  create(name: string) { let p = Product.create({ name: name, price: 0.0 }) }
+}
+// …
+page ProductNew { route: "/products/register" body: WorkflowForm { runs: registerProduct, testid: "register" } }
+page ProductDetail(id: Product id) {
+  route: "/products/:id"
+  body: QueryView { of: Shop.Product.byId(id), single: true,
+    data: p => Stack { Heading { p.name, level: 2 }, DestroyForm { of: Product, then: navigate(Home) } } }
+}
+```
+
+```tsx
+// react — pages/product_new.tsx: the workflow's create(…) params are the field set
+const run = useRegisterProductWorkflow();
+<form onSubmit={handleSubmit(async (vals) => {
+  await run.mutateAsync(vals);
+  notifications.show({ color: "green", message: "Register Product completed" });
+  navigate("/workflows");
+})} data-testid="register">
+  <TextInput label="Name" {...register("name")} data-testid="register-input-name" error={errors.name?.message} />
+  <Button type="submit" loading={ run.isPending } data-testid="register-submit">Run</Button>
+
+// react — pages/product_detail.tsx: DestroyForm is one confirm-then-delete button
+const deleteProduct = useDeleteProduct();
+<Button onClick={() => { if (window.confirm(t("chrome.deleteConfirm", "Delete this {entity}?", { entity: "product" }))) void deleteProduct.mutateAsync(id ?? "").then(() => { navigate("/"); }); }}
+  loading={deleteProduct.isPending} data-testid="products-destroy">{t("chrome.deleteEntity", "Delete {entity}", { entity: "Product" })}</Button>
+```
+
+```heex
+<%!-- phoenix — product_new_live.ex.  The HEEx workflow form ships a single
+      `_placeholder` input instead of the create(…) params (heex-primitives.ts:388) --%>
+<.simple_form for={@form} phx-submit="run_register_product" data-testid="register">
+  <.input field={@form[:_placeholder]} label="Field" />
+  <:actions><.button type="submit" data-testid="register-submit">Submit</.button></:actions>
+</.simple_form>
+
+<%!-- product_detail_live.ex --%>
+def handle_event("destroy_product", %{"id" => id}, socket) do
+  Lv.Shop.destroy_product!(id)
+  {:noreply, socket |> put_flash(:info, "Delete succeeded") |> push_navigate(to: ~p"/products")}
+end
+…
+<.button phx-click="destroy_product" phx-value-id={@id} data-confirm="Delete this product? This cannot be undone." class="btn-danger">Delete Product</.button>
+```
 
 ## `QueryView` — async data branching
 
