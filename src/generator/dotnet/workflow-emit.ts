@@ -1964,7 +1964,8 @@ function collectReadingServices(wf: WorkflowIR, ctx: EnrichedBoundedContextIR): 
       if (e.kind === "call" && e.callKind === "domain-service" && e.serviceRef) {
         const svc = ctx.domainServices?.find((x) => x.name === e.serviceRef?.service);
         const op = svc?.operations.find((o) => o.name === e.serviceRef?.op);
-        if (op && readPortsForOperation(op).length > 0 && e.serviceRef) out.add(e.serviceRef.service);
+        if (op && readPortsForOperation(op).length > 0 && e.serviceRef)
+          out.add(e.serviceRef.service);
       }
     });
   }

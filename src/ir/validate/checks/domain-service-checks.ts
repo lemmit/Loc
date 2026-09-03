@@ -61,8 +61,8 @@ import type {
 } from "../../types/loom-ir.js";
 import { aggregateOpResolver, classifyDomainServiceTier } from "../../util/domain-service-tier.js";
 import { isWriteMethod } from "../../util/repo-methods.js";
+import { walkStmtExprsDeep } from "../../util/walk.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
-import { walkExpr } from "./shared.js";
 
 export function validateDomainServices(
   ctx: BoundedContextIR,
@@ -448,32 +448,12 @@ function callReceiverName(e: ExprIR): string | undefined {
   return undefined;
 }
 
-/** Visit every sub-expression reachable from a statement. */
+/** Visit every sub-expression reachable from a statement.
+ *
+ *  Rides `walkStmtExprsDeep` (M-T6.50 class, wave-2 packet 2.3): the switch
+ *  this replaced had no `variant-match` arm, so a domain-service call nested
+ *  in an arm/else body was invisible to every check that scans a body via
+ *  this function. */
 function forEachStmtExpr(stmt: StmtIR, visit: (e: ExprIR) => void): void {
-  switch (stmt.kind) {
-    case "precondition":
-    case "requires":
-      walkExpr(stmt.expr, visit);
-      break;
-    case "let":
-      walkExpr(stmt.expr, visit);
-      break;
-    case "assign":
-    case "add":
-    case "remove":
-      walkExpr(stmt.value, visit);
-      break;
-    case "emit":
-      for (const f of stmt.fields) walkExpr(f.value, visit);
-      break;
-    case "call":
-      for (const a of stmt.args) walkExpr(a, visit);
-      break;
-    case "expression":
-      walkExpr(stmt.expr, visit);
-      break;
-    case "return":
-      walkExpr(stmt.value, visit);
-      break;
-  }
+  walkStmtExprsDeep(stmt, visit);
 }

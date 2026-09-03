@@ -75,6 +75,18 @@ function walkReadExprs(s: StmtIR, visit: (e: ExprIR) => void): void {
     case "return":
       walkExpr(s.value, visit);
       break;
+    case "variant-match":
+      // Wave 2 packet 2.3 (M-T6.50 class) — this arm was missing, so a
+      // stamp-field read nested inside a `variant-match` arm/else body
+      // silently never tripped the read-before-flush gate.
+      walkExpr(s.subject, visit);
+      for (const a of s.arms) for (const st of a.body) walkReadExprs(st, visit);
+      for (const st of s.elseBody ?? []) walkReadExprs(st, visit);
+      break;
+    default: {
+      const _exhaustive: never = s;
+      void _exhaustive;
+    }
   }
 }
 
