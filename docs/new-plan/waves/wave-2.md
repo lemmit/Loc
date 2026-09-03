@@ -1,0 +1,47 @@
+# Wave 2 — seams: fix the class, not the next instance (coordinator log)
+
+*Plan: [`../improvement-waves-2026-09.md`](../improvement-waves-2026-09.md) §Wave 2 and §3a. Base: `main` @ `86c498d` (Wave 1 #2752 and the plan #2751 merged). One PR for the wave; packets work on `claude/wave-2-<packet>` sub-branches (git refuses `claude/wave-2/<packet>` while `claude/wave-2` exists) and are folded here by the coordinator. This file is the claim: any agent reading the PR list sees every packet, row and tree fence below. Hand-off notes are appended verbatim under §Hand-offs as packets land.*
+
+## Status: **claimed — packets in progress** (2026-09-03)
+
+Every packet is a refactor plus a completeness census. Two hard gates per packet, restated from the plan: **byte-identical emission** across the refactor (corpus snapshot diff before and after, stated in the hand-off note — the coordinator re-diffs on the folded tree, because two byte-identical refactors can compose into a non-identical one), and the **census test mutation-proved** by adding one unregistered boundary / reader / walk and quoting the failing assertion.
+
+## Packets
+
+Fold order: 2.1–2.5 and 2.7 as they land; **2.6 last**, on the folded branch, because a mechanical split of a hotspot file conflicts with every other change to it.
+
+| packet | model | tree fence | rows / deliverable | state |
+|---|---|---|---|---|
+| 2.1 numeric-codec | Opus | new `src/generator/_numeric/**` (the per-backend codec table + boundary registry); the numeric decode/encode arms of the five backends — `src/generator/dotnet/**`, `src/generator/java/**`, `src/generator/python/**`, `src/generator/elixir/**`, `src/generator/typescript/**`, `src/platform/hono/**`; `test/generator/_numeric/**`. **Frontends excluded** — the numeric fleet (#2671 #2672 #2674 #2678) owns flutter/feliz/JSX money. | `M-T9.36`: one codec decision per backend (money = F4 string, decimal = float64, int/long = integer) consumed at every read boundary; a boundary-enumeration test so a new read path must declare its codec. Retires the #2545→#2631→#2675/#2677 series. | claimed |
+| 2.2 escape-funnel | Opus | `src/generator/_expr/target.ts` (string-literal leaf contract), `src/generator/_walker/target.ts` (`escapeText`/`escapeAttr`), the per-target leaf tables (`*/render-expr.ts`, `feliz/fs-expr.ts`, `flutter/dart-expr.ts`, `angular/walker/angular-target.ts` text slots, `elixir/heex-*`), the string-splice sites under `src/generator/elixir/**`; `test/system/escape-funnel-census.test.ts` | the class `F2-ELX-ESCAPE-FUNNEL` belongs to: one `escapeStringLiteral`/`escapeAttr` pair per target, on the seams; a lint-style census that classifies every `JSON.stringify(` in `src/generator/**` by destination (154 in the elixir emitters today) and fails on one that lands in a non-JS literal position; the Wave 1 elixir hand-off (`seed-emit.ts` `exStr` duplicates `elixirString` — delete; `elixirString` has no enforcement); Angular text slots (A15) | claimed |
+| 2.3 walk-census | Opus | `src/ir/util/walk.ts`, `test/system/ir-walk-census.test.ts`, and the offender sites it finds (135 `switch (x.kind)` over `ExprIR`/`StmtIR`/`WorkflowStmtIR` outside the four sanctioned dispatchers and the lowerers, across 41 files) — **except** `system-checks.ts` / `ui-checks.ts` / `mikroorm.ts`, which 2.6 splits after this packet folds | census: every such switch is `never`-checked (exhaustive) or waived with a reason that ratchets; migrate the offenders of the #2720/#2705/M-T6.50 class onto `walk.ts`. Pairs with #2713's `model-exprs.ts` census. | claimed |
+| 2.4 emission-mode | Opus | `src/generator/_expr/target.ts` render context (a declared `mode`), `src/generator/java/render-jpql.ts` + `emit/query-projection-reads.ts` (`principalAccessors`), the sibling query-language arms (python SQLAlchemy, dotnet LINQ/dapper SQL, elixir Ecto); `test/generator/_expr/emission-mode.test.ts` | §F2: the java JPQL `principalAccessors` branch and its siblings become a declared mode on the shared render context that refuses out-of-vocabulary constructs, instead of a per-arm `if`. Small; mostly a contract test. | claimed |
+| 2.5 seeder-contract | Opus | `src/generator/_persistence/seed-datasets.ts` (grows into the shared seeder model), `src/generator/dotnet/emit/seed.ts`, `src/generator/elixir/vanilla/seed-emit.ts`, `src/generator/python/emit/seed.ts`, `src/generator/typescript/emit/seed.ts`, the java seeding site (verify where it lives — no `seed.ts` under `java/`); `test/generator/_persistence/**` | `M-T6.52`: one shared "what does the seeder know" model (aggregate shape, principal, dataset identity) with five readers and a reader census; the remaining event-sourced seeding on elixir/java/dotnet rides it | claimed |
+| 2.6 hotspot-splits | Sonnet | `src/ir/validate/checks/system-checks.ts` (4.3k) → per-theme leaves; `src/ir/validate/checks/ui-checks.ts` (3.0k) → per-theme leaves; `src/generator/typescript/emit/mikroorm.ts` (3.5k) → by shape (relational/document/embedded/ES) | mechanical; diagnostic set byte-identical (the M-T9.33 firing census is the proof), emitted output byte-identical. **Starts only when 2.1–2.5 and 2.7 are folded.** | waiting |
+| 2.7 wave-1 residue | Opus | `src/generator/java/emit/query-projection-reads.ts` (the `G2667-D3` java arm), `docs/conformance-semantics.md` (the RS rule for the absent joined value), `src/generator/_walker/walker-core.ts` (`provenanced-bare-read-in-page-body` — patch shape in `handoffs/wave-1-python-macros.md`), the `M-T1.8` error-boundary arms on `src/generator/feliz/**`, `src/generator/flutter/**`, `src/generator/elixir/heex-*` | the hand-offs Wave 1 recorded that have a named fix: LEFT-JOIN on java + one RS rule for the absent value across the five backends; the provenanced page-body read; `M-T1.8` on the three non-JS frontends | claimed |
+
+Recorded, not scheduled here (no named fix yet — owner decisions or their own mission): **B20** (a channel-less `projection … on(Event)` folds on no backend — implicit in-process subscription or a refusal; `enrichments.ts`), outbox capture relational-only on both node adapters (wants a ledger row), the sub-second datetime wire form (`.12Z`/`.120Z`/`.120000Z`) that `response-diff.ts` normalises away, `M-T5.14` on four backends, `F2-W-08`/`F2-W-09` wire-openapi, the Flutter bearer credential (plan amendment), `dapper-no-schema-evolution` (needs a phase-⑨ owner).
+
+## In-flight fence (read before touching a file)
+
+Open PRs whose trees overlap a packet. A packet reads the PR's diff first, avoids its files, and stacks on it only when the fix cannot wait. The lesson from Wave 1: two fleets drained the same rows a day apart because the ledger's `claimed` bucket did not carry one fleet's claim — so this table, not the ledger, is the fence.
+
+| PR | state | overlaps |
+|---|---|---|
+| #2671 #2672 #2674 #2678 (numeric fleet, M-T1.21–M-T1.24) | ready, unmerged | 2.1 must not touch frontend numeric codecs; 2.2 must not touch `fs-expr.ts` literal suffixes / `dart-expr.ts` money literals |
+| #2720 #2721 #2723 (W2 frontend-js / feliz / flutter) | ready, unmerged | 2.2 and 2.7 on `feliz/**`, `flutter/**`, `_walker/**` |
+| #2729 (W4 frontend collection ops) | draft | 2.2 / 2.7 on `_walker/walker-core.ts`, `heex-walker-core.ts`, `fs-expr.ts`, `dart-expr.ts`, `_expr/js-collection-ops.ts` |
+| #2736 (M-FT.1 wire `== null`) | draft | 2.3 lists `zod-refine.ts` |
+| #2737 #2741 (M-FT.10 / M-FT.26 .NET) | draft / ready | 2.1 dotnet read arms; 2.5 `dotnet/emit/seed.ts` unlikely |
+| #2742 (M-FT.27 Hono hardening) | draft | 2.1 hono read arms; 2.6 `mikroorm.ts` unlikely |
+| #2766 (verification waves: gate promotion + tests) | ready | none on `src/`; its G3 sibling adds tests under `test/_frontend`, `test/util` — 2.3's census test name must not collide |
+
+## Fold protocol (coordinator)
+
+1. Packet hands over `claude/wave-2-<packet>` + a hand-off note under `handoffs/wave-2-<packet>.md` (row table: fixed / gated / handed-off / already-done-verified; the byte-identical diff result; the census mutation-proof assertion; local gate results).
+2. Coordinator merges the sub-branch into `claude/wave-2`, runs `npx tsc -b`, `npm test`, the corpus snapshot diff and the packet's compile leg on the folded tree, appends the note under §Hand-offs, and pushes — at most once a day.
+3. Rebase onto `main` only on a real conflict. Flip to ready once, when the whole wave is green locally. Revert a packet rather than hold the wave for it.
+
+## Hand-offs
+
+*(appended as packets land)*
