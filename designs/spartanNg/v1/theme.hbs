@@ -56,7 +56,7 @@ h6 {
 .loom-stack {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 1rem;
 }
 .loom-group {
   display: flex;
@@ -69,7 +69,7 @@ h6 {
   flex-direction: row;
   align-items: center;
   justify-content: space-between;
-  gap: 0.5rem;
+  gap: 1rem;
 }
 .loom-container {
   max-width: 64rem;
@@ -90,13 +90,13 @@ h6 {
   box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
 }
 .loom-card-title {
-  padding: 1rem 1.5rem 0;
+  padding: 1rem 1rem 0;
   font-weight: 600;
   font-size: 1rem;
   letter-spacing: -0.01em;
 }
 .loom-card-content {
-  padding: 1.5rem;
+  padding: 1rem;
 }
 .loom-stat {
   display: flex;
@@ -216,13 +216,19 @@ h6 {
 }
 .loom-key-value-row {
   display: flex;
-  justify-content: space-between;
-  gap: 1rem;
+  align-items: flex-start;
+  gap: 0.5rem;
   padding: 0.375rem 0;
   border-bottom: 1px solid hsl(var(--border));
 }
+.loom-kv-value {
+  min-width: 0;
+  flex: 1;
+}
 .loom-kv-label {
   color: hsl(var(--muted-foreground));
+  min-width: 140px;
+  flex-shrink: 0;
 }
 .loom-empty {
   display: flex;
@@ -300,6 +306,11 @@ h6 {
 .loom-anchor:hover {
   text-decoration: underline;
 }
+.loom-breadcrumbs > *:not(:last-child)::after {
+  content: "/";
+  margin-inline-start: 8px;
+  opacity: 0.5;
+}
 .loom-breadcrumbs {
   display: flex;
   flex-direction: row;
@@ -353,6 +364,10 @@ h6 {
   background: hsl(var(--background));
   color: hsl(var(--foreground));
   box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+}
+.loom-table-scroll {
+  width: 100%;
+  overflow-x: auto;
 }
 .loom-table {
   width: 100%;

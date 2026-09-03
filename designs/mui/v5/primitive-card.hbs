@@ -1,14 +1,14 @@
 {{#if hasTitle}}{{#if hasContent}}<Card{{{testidAttr}}}{{{styleAttr}}}>
-{{indent}}<CardContent>
+{{indent}}<CardContent sx=\{{ p: 2, "&:last-child": { pb: 2 } }}>
 {{indent}}<Typography variant="h6">{{{titleText}}}</Typography>
 {{indent}}{{{contentJsx}}}
 {{indent}}</CardContent>
 {{closeIndent}}</Card>{{else}}<Card{{{testidAttr}}}{{{styleAttr}}}>
-{{indent}}<CardContent>
+{{indent}}<CardContent sx=\{{ p: 2, "&:last-child": { pb: 2 } }}>
 {{indent}}<Typography variant="h6">{{{titleText}}}</Typography>
 {{indent}}</CardContent>
 {{closeIndent}}</Card>{{/if}}{{else}}{{#if hasContent}}<Card{{{testidAttr}}}{{{styleAttr}}}>
-{{indent}}<CardContent>
+{{indent}}<CardContent sx=\{{ p: 2, "&:last-child": { pb: 2 } }}>
 {{indent}}{{{contentJsx}}}
 {{indent}}</CardContent>
 {{closeIndent}}</Card>{{else}}<Card{{{testidAttr}}}{{{styleAttr}}} />{{/if}}{{/if}}

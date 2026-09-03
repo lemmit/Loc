@@ -110,7 +110,7 @@ export function KeyValueRow({
   "data-testid"?: string;
 }) {
   return (
-    <Group wrap="nowrap" align="flex-start" gap="md">
+    <Group wrap="nowrap" align="flex-start" gap="sm">
       <Text component="span" c="dimmed" fw={500} miw={140}>{label}</Text>
       <Stack gap={2} data-testid={testid} style=\{{ flex: 1, minWidth: 0 }}>{children}</Stack>
     </Group>

@@ -16,6 +16,6 @@
   walker-derived `aria-label` (same contract as primitive-data-grid).  One
   series, so the legend is off: the label names the measure already. --}}
     <div role="img" aria-label="{{ariaLabel}}"{{{testidAttr}}}>
-{{#if isLine}}      <LineChart dataset={ {{{dataExpr}}} } xAxis={[{ dataKey: "{{dataKey}}", scaleType: "point" }]} series={[{ dataKey: "{{seriesField}}" }]} height={300} hideLegend />
-{{else}}      <BarChart dataset={ {{{dataExpr}}} } xAxis={[{ dataKey: "{{dataKey}}", scaleType: "band" }]} series={[{ dataKey: "{{seriesField}}" }]} height={300} hideLegend />
+{{#if isLine}}      <LineChart dataset={ {{{dataExpr}}} } xAxis={[{ dataKey: "{{dataKey}}", scaleType: "point" }]} series={[{ dataKey: "{{seriesField}}" }]}{{#if hasIntegerAxis}} yAxis={[{ tickMinStep: ({{{integerAxisExpr}}}) ? 1 : undefined }]}{{/if}} height={300} hideLegend />
+{{else}}      <BarChart dataset={ {{{dataExpr}}} } xAxis={[{ dataKey: "{{dataKey}}", scaleType: "band" }]} series={[{ dataKey: "{{seriesField}}" }]}{{#if hasIntegerAxis}} yAxis={[{ tickMinStep: ({{{integerAxisExpr}}}) ? 1 : undefined }]}{{/if}} height={300} hideLegend />
 {{/if}}    </div>

@@ -89,7 +89,7 @@ export function KeyValueRow({
   "data-testid"?: string;
 }) {
   return (
-    <Stack direction="row" alignItems="flex-start" gap={2}>
+    <Stack direction="row" alignItems="flex-start" gap={1}>
       <Typography component="span" color="text.secondary" fontWeight={500} sx=\{{ minWidth: 140, flexShrink: 0 }}>{label}</Typography>
       <Stack gap={0.5} data-testid={testid} sx=\{{ flex: 1, minWidth: 0 }}>{children}</Stack>
     </Stack>

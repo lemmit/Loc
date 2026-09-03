@@ -18,14 +18,14 @@
 {{#if isLine}}        <LineChart data={ {{{dataExpr}}} }>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
           <XAxis dataKey="{{dataKey}}" stroke="var(--muted-foreground)" fontSize={12} />
-          <YAxis stroke="var(--muted-foreground)" fontSize={12} />
+          <YAxis stroke="var(--muted-foreground)" fontSize={12}{{#if hasIntegerAxis}} allowDecimals={!({{{integerAxisExpr}}})}{{/if}} />
           <Tooltip contentStyle=\{{ background: "var(--popover)", border: "1px solid var(--border)", borderRadius: "var(--radius)", color: "var(--popover-foreground)" }} />
           <Line type="monotone" dataKey="{{seriesField}}" stroke="var(--primary)" strokeWidth={2} dot={false} />
         </LineChart>
 {{else}}        <BarChart data={ {{{dataExpr}}} }>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
           <XAxis dataKey="{{dataKey}}" stroke="var(--muted-foreground)" fontSize={12} />
-          <YAxis stroke="var(--muted-foreground)" fontSize={12} />
+          <YAxis stroke="var(--muted-foreground)" fontSize={12}{{#if hasIntegerAxis}} allowDecimals={!({{{integerAxisExpr}}})}{{/if}} />
           <Tooltip contentStyle=\{{ background: "var(--popover)", border: "1px solid var(--border)", borderRadius: "var(--radius)", color: "var(--popover-foreground)" }} />
           <Bar dataKey="{{seriesField}}" fill="var(--primary)" radius={[4, 4, 0, 0]} />
         </BarChart>

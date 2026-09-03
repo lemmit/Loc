@@ -63,7 +63,7 @@ function isActive(path: string, opts?: { exact?: boolean }): boolean {
 {{else}}          <router-link to="{{to}}" data-testid="{{testId}}" :class="['rounded-md px-3 py-2 text-sm font-medium transition-colors', isActive('{{to}}'{{#if exact}}, { exact: true }{{/if}}) ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground']">{{{labelText}}}</router-link>
 {{/if}}{{/if}}{{/each}}{{/each}}        </div>
       </nav>
-      <main id="main-content" class="flex-1 p-4 lg:p-6">
+      <main id="main-content" class="min-w-0 flex-1 p-4 lg:p-6">
         <div v-if="appError" data-testid="app-error" class="flex flex-col gap-4">
           <Alert variant="destructive">
             <AlertTitle>{{{errorTitleText}}}</AlertTitle>

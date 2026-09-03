@@ -17,14 +17,14 @@
 {{#if isLine}}        <LineChart data={ {{{dataExpr}}} }>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--chakra-colors-border)" />
           <XAxis dataKey="{{dataKey}}" stroke="var(--chakra-colors-fg-muted)" fontSize={12} />
-          <YAxis stroke="var(--chakra-colors-fg-muted)" fontSize={12} />
+          <YAxis stroke="var(--chakra-colors-fg-muted)" fontSize={12}{{#if hasIntegerAxis}} allowDecimals={!({{{integerAxisExpr}}})}{{/if}} />
           <Tooltip contentStyle=\{{ background: "var(--chakra-colors-bg-panel)", border: "1px solid var(--chakra-colors-border)", borderRadius: "6px", color: "var(--chakra-colors-fg)" }} />
           <Line type="monotone" dataKey="{{seriesField}}" stroke="var(--chakra-colors-brand-500)" strokeWidth={2} dot={false} />
         </LineChart>
 {{else}}        <BarChart data={ {{{dataExpr}}} }>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--chakra-colors-border)" />
           <XAxis dataKey="{{dataKey}}" stroke="var(--chakra-colors-fg-muted)" fontSize={12} />
-          <YAxis stroke="var(--chakra-colors-fg-muted)" fontSize={12} />
+          <YAxis stroke="var(--chakra-colors-fg-muted)" fontSize={12}{{#if hasIntegerAxis}} allowDecimals={!({{{integerAxisExpr}}})}{{/if}} />
           <Tooltip contentStyle=\{{ background: "var(--chakra-colors-bg-panel)", border: "1px solid var(--chakra-colors-border)", borderRadius: "6px", color: "var(--chakra-colors-fg)" }} />
           <Bar dataKey="{{seriesField}}" fill="var(--chakra-colors-brand-500)" radius={[4, 4, 0, 0]} />
         </BarChart>

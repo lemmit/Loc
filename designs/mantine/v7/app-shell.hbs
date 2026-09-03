@@ -1,6 +1,6 @@
 // Auto-generated.
 import { Routes, Route, Link as RouterLink, useLocation, {{#if anyLayoutUsesNavigate}}useNavigate, {{/if}}Outlet } from "{{routerPackage}}";
-import { AppShell, Burger, Divider, Group, Title, NavLink, Anchor, Alert, Button, Stack{{#if hasNamedLayouts}}, Text, Box, Card, Container, Grid, Image, Badge{{/if}} } from "@mantine/core";
+import { AppShell, Burger, Group, Title, NavLink, Anchor, Alert, Button, Stack{{#if hasNamedLayouts}}, Text, Box, Card, Container, Grid, Image, Badge{{/if}} } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import React from "react";
 {{#if navUsesSession}}import { useSession } from "./auth/AuthGate";
@@ -99,11 +99,11 @@ function AppShellLayout() {
       {/* Skip link (WCAG 2.4.1 Bypass Blocks) — first focusable element,
           visually hidden until focused, jumps to the <main> landmark. */}
       <a href="#main-content" className="loom-skip-link">{{{skipToContentText}}}</a>
-      <style>{`.loom-skip-link{position:absolute;left:-9999px;top:0;z-index:1000;padding:8px 16px;background:var(--mantine-color-body);color:var(--mantine-color-text);border:1px solid var(--mantine-color-default-border);border-radius:4px}.loom-skip-link:focus{left:8px;top:8px}`}</style>
+      <style>{`.loom-skip-link{position:absolute;left:-9999px;top:0;z-index:1000;padding:8px 16px;background:var(--mantine-color-body);color:var(--mantine-color-text);border:1px solid var(--mantine-color-default-border);border-radius:4px}.loom-skip-link:focus{left:8px;top:8px}.loom-nav-section{font-size:0.75rem;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--mantine-color-dimmed);margin:8px 0 4px}.loom-breadcrumbs>*:not(:last-child)::after{content:"/";margin-inline-start:8px;opacity:.5}`}</style>
     <AppShell
       header=\{{ height: 56 }}
       navbar=\{{ width: 240, breakpoint: "sm", collapsed: { mobile: !opened } }}
-      padding="md"
+      padding=\{{ base: "md", lg: "lg" }}
     >
       <AppShell.Header>
         <Group h="100%" px="md" justify="space-between">
@@ -126,11 +126,11 @@ function AppShellLayout() {
       </AppShell.Header>
       <AppShell.Navbar p="md" {{{primaryNavAria}}}>
         <Stack gap={4} data-testid="nav-sidebar">
-{{#each navSections}}          <Divider my="xs" {{{labelAttr "label"}}} labelPosition="left" />
+{{#each navSections}}          <div className="loom-nav-section">{{{labelText}}}</div>
 {{#each entries}}{{#if external}}          <Anchor href="{{href}}" target="_blank" rel="noreferrer" data-testid="{{testId}}">{{{labelText}}}</Anchor>{{else}}{{#if requiresJs}}          {({{{requiresJs}}}) ? <NavLink component={RouterLink} to="{{to}}" {{{labelAttr "label"}}} active={isActive({{{activeArgs}}})} data-testid="{{testId}}" /> : null}{{else}}          <NavLink component={RouterLink} to="{{to}}" {{{labelAttr "label"}}} active={isActive({{{activeArgs}}})} data-testid="{{testId}}" />{{/if}}{{/if}}
 {{/each}}{{/each}}        </Stack>
       </AppShell.Navbar>
-      <AppShell.Main id="main-content">
+      <AppShell.Main id="main-content" style=\{{ minWidth: 0 }}>
         <AppErrorBoundary>
           <Outlet />
         </AppErrorBoundary>

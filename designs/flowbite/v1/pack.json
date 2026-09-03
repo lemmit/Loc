@@ -84,13 +84,27 @@
     "arrayUnsupported": "(arrays not yet supported in forms)",
     "boolFalse": "No",
     "boolTrue": "Yes",
+    "breadcrumbsLandmark": "Breadcrumb",
     "noParameters": "This operation has no parameters.",
     "operationSucceeded": "{operation} succeeded",
     "removeItem": "Remove",
-    "selectEmptyOption": "Select…"
+    "selectEmptyOption": "Select\u2026"
   },
   "imports": {
-    "primitive-data-grid": [{ "from": "flowbite-svelte", "named": ["Button", "Table", "TableBody", "TableBodyCell", "TableBodyRow", "TableHead", "TableHeadCell"] }],
+    "primitive-data-grid": [
+      {
+        "from": "flowbite-svelte",
+        "named": [
+          "Button",
+          "Table",
+          "TableBody",
+          "TableBodyCell",
+          "TableBodyRow",
+          "TableHead",
+          "TableHeadCell"
+        ]
+      }
+    ],
     "primitive-button": [
       {
         "from": "flowbite-svelte",

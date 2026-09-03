@@ -16,23 +16,26 @@ body {
   --loom-primary: {{brandShades.[6]}};
   --loom-accent: {{accentShades.[6]}};
 }
+.p-card .p-card-body {
+  padding: 16px;
+}
 .loom-stack {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
 }
 .loom-group {
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
 }
 .loom-toolbar {
   display: flex;
   flex-direction: row;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 16px;
 }
 .loom-container {
   max-width: 960px;
@@ -106,12 +109,18 @@ body {
 }
 .loom-key-value-row {
   display: flex;
-  justify-content: space-between;
-  gap: 16px;
+  align-items: flex-start;
+  gap: 8px;
   padding: 4px 0;
 }
 .loom-kv-label {
   color: rgba(0, 0, 0, 0.6);
+  min-width: 140px;
+  flex-shrink: 0;
+}
+.loom-kv-value {
+  min-width: 0;
+  flex: 1;
 }
 .loom-empty {
   display: flex;
@@ -191,6 +200,11 @@ body {
 .loom-anchor:hover {
   text-decoration: underline;
 }
+.loom-breadcrumbs > *:not(:last-child)::after {
+  content: "/";
+  margin-inline-start: 8px;
+  opacity: 0.5;
+}
 .loom-breadcrumbs {
   display: flex;
   flex-direction: row;
@@ -214,6 +228,10 @@ body {
 }
 .loom-code-block pre {
   margin: 0;
+}
+.loom-table-scroll {
+  width: 100%;
+  overflow-x: auto;
 }
 .loom-table {
   width: 100%;

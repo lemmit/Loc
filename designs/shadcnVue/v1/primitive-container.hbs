@@ -1,3 +1,5 @@
-{{#if hasChildren}}<div class="container mx-auto px-4"{{{testidAttr}}}{{{styleAttr}}}>
+{{#if hasSize}}{{#if hasChildren}}<div class="mx-auto w-full px-4 {{#if (eq size "xs")}}max-w-[540px]{{else}}{{#if (eq size "sm")}}max-w-[720px]{{else}}{{#if (eq size "md")}}max-w-[960px]{{else}}{{#if (eq size "lg")}}max-w-[1140px]{{else}}max-w-[1320px]{{/if}}{{/if}}{{/if}}{{/if}}"{{{testidAttr}}}{{{styleAttr}}}>
 {{indent}}{{{childrenBlock}}}
-{{closeIndent}}</div>{{else}}<div class="container mx-auto px-4"{{{testidAttr}}}{{{styleAttr}}}></div>{{/if}}
+{{closeIndent}}</div>{{else}}<div class="mx-auto w-full px-4 {{#if (eq size "xs")}}max-w-[540px]{{else}}{{#if (eq size "sm")}}max-w-[720px]{{else}}{{#if (eq size "md")}}max-w-[960px]{{else}}{{#if (eq size "lg")}}max-w-[1140px]{{else}}max-w-[1320px]{{/if}}{{/if}}{{/if}}{{/if}}"{{{testidAttr}}}{{{styleAttr}}}></div>{{/if}}{{else}}{{#if hasChildren}}<div class="container mx-auto px-4"{{{testidAttr}}}{{{styleAttr}}}>
+{{indent}}{{{childrenBlock}}}
+{{closeIndent}}</div>{{else}}<div class="container mx-auto px-4"{{{testidAttr}}}{{{styleAttr}}}></div>{{/if}}{{/if}}

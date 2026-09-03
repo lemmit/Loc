@@ -21,7 +21,7 @@
           <div class="flex flex-col gap-4">
             {{#if hasParams}}{{#each fieldHtmls}}{{{this}}}
             {{/each}}{{else}}<p class="text-sm text-muted-foreground">{{{chrome "noParameters"}}}</p>
-            {{/if}}<div class="flex justify-end gap-2 pt-2">
+            {{/if}}<div class="mt-4 flex justify-end gap-2">
               <button type="button" class="loom-btn loom-btn-outline" onclick={() => { {{opCamel}}ModalOpen = false; }}>{{{cancelLabel}}}</button>
               <button type="submit" class="loom-btn loom-btn-primary" disabled={ {{opCamel}}.isPending } data-testid="{{slug}}-op-{{opName}}-submit">{{humanOp}}</button>
             </div>
