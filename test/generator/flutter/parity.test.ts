@@ -8,7 +8,7 @@ import {
   analyzeFlutterParity,
   flutterParitySummary,
 } from "../../../src/generator/flutter/parity.js";
-import { generateSystemFiles } from "../../_helpers/generate.js";
+import { generateSystemFiles, generateSystemFilesUnchecked } from "../../_helpers/generate.js";
 
 // A read-bearing component that ALSO carries its own `state {}` is still
 // deferred (the `ConsumerWidget` path covers stateless read components; a
@@ -61,7 +61,14 @@ system Par {
 
 describe("flutter parity lint", () => {
   it("finds a deferred (read-bearing) component invocation + attributes it to the page", async () => {
-    const files = await generateSystemFiles(WITH_FALLBACK);
+    // The deferral is now REPORTED too (`loom.user-component-deferred-target`,
+    // the flutter `isReadConsumer` arm), so the checked helper correctly refuses
+    // this model — and the parity LINT is precisely the "what did the emitter do
+    // with it anyway" view, so it has to emit from the rejected model.
+    const files = await generateSystemFilesUnchecked(
+      WITH_FALLBACK,
+      "the stateful+read `Live` component is rejected by loom.user-component-deferred-target on purpose; the parity lint under test scans the emitter's degradation markers, which only exist in output emitted from it",
+    );
     const findings = analyzeFlutterParity(files);
     const unknown = findings.find((f) => f.kind === "unknown-component");
     expect(unknown, "no unknown-component finding").toBeDefined();

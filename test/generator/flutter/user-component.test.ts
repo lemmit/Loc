@@ -7,7 +7,7 @@
 // is compiled here; generated-flutter-build.yml owns the SDK gate.
 
 import { describe, expect, it } from "vitest";
-import { generateSystemFiles } from "../../_helpers/generate.js";
+import { generateSystemFiles, generateSystemFilesUnchecked } from "../../_helpers/generate.js";
 
 const SRC = `
 system S {
@@ -111,7 +111,10 @@ system S {
 
 describe("flutter read-bearing user components", () => {
   it("emits a read component as a ConsumerWidget that watches its own provider", async () => {
-    const files = await generateSystemFiles(READS);
+    const files = await generateSystemFilesUnchecked(
+      READS,
+      "the READS ui deliberately pairs a SUPPORTED read component with the route-id-bearing `OneOrder`, which loom.user-component-deferred-target now reports; emitting from it is how these tests prove the deferral is PER COMPONENT, not per ui",
+    );
     const comp = [...files.entries()].find(([k]) => k.endsWith("lib/components.dart"));
     expect(comp, "no components.dart — the read component was dropped whole").toBeDefined();
     const src = comp![1];
@@ -126,14 +129,20 @@ describe("flutter read-bearing user components", () => {
   });
 
   it("the provider the component watches is emitted in reads.dart", async () => {
-    const files = await generateSystemFiles(READS);
+    const files = await generateSystemFilesUnchecked(
+      READS,
+      "the READS ui deliberately pairs a SUPPORTED read component with the route-id-bearing `OneOrder`, which loom.user-component-deferred-target now reports; emitting from it is how these tests prove the deferral is PER COMPONENT, not per ui",
+    );
     const reads = [...files.entries()].find(([k]) => k.endsWith("lib/reads.dart"));
     expect(reads, "no reads.dart for a component-only read").toBeDefined();
     expect(reads![1]).toContain("orderAllProvider");
   });
 
   it("the call site renders the widget instead of the give-up comment", async () => {
-    const files = await generateSystemFiles(READS);
+    const files = await generateSystemFilesUnchecked(
+      READS,
+      "the READS ui deliberately pairs a SUPPORTED read component with the route-id-bearing `OneOrder`, which loom.user-component-deferred-target now reports; emitting from it is how these tests prove the deferral is PER COMPONENT, not per ui",
+    );
     const page = [...files.entries()].find(([k]) => k.endsWith("home_page.dart"))![1];
     expect(page).toContain("import '../components.dart';");
     expect(page).toContain("RecentOrders(title: 'Recent')");
@@ -144,7 +153,10 @@ describe("flutter read-bearing user components", () => {
     // `byId(id)` renders the bare local `id`, which only a page shell binds from
     // its route arguments.  Deferral keeps that honest rather than emitting Dart
     // that names nothing.
-    const files = await generateSystemFiles(READS);
+    const files = await generateSystemFilesUnchecked(
+      READS,
+      "the READS ui deliberately pairs a SUPPORTED read component with the route-id-bearing `OneOrder`, which loom.user-component-deferred-target now reports; emitting from it is how these tests prove the deferral is PER COMPONENT, not per ui",
+    );
     const comp = [...files.entries()].find(([k]) => k.endsWith("lib/components.dart"))?.[1] ?? "";
     expect(comp).not.toContain("class OneOrder");
     const page = [...files.entries()].find(([k]) => k.endsWith("home_page.dart"))![1];
