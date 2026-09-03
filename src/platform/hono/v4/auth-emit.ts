@@ -512,12 +512,31 @@ async function getJwks(): Promise<ReturnType<typeof createRemoteJWKSet>> {
   return jwksPromise;
 }
 
-/** Extract a bearer token from the Authorization header. */
+/** The token from the \`Authorization: Bearer\` header, or the HttpOnly
+ *  \`session\` cookie /auth/callback issues (the browser flow).  Null when
+ *  neither is present.
+ *
+ *  The cookie arm is not a convenience: the browser NEVER sees the raw token
+ *  (it is HttpOnly), so a same-origin fetch and — crucially — the realtime SSE
+ *  stream can only present the cookie.  \`EventSource\` cannot set a header by
+ *  construction, so a header-only verifier 401s every generated SPA's realtime
+ *  connection.  The other four backends already read this cookie; the rule is
+ *  stated once in the shared realtime plan (RULE 2,
+ *  src/ir/util/realtime-rooms.ts). */
 function bearer(req: Request): string | null {
   const header = req.headers.get("authorization") ?? req.headers.get("Authorization");
-  if (!header) return null;
-  const match = /^Bearer\\s+(.+)$/i.exec(header);
-  return match ? match[1]! : null;
+  const match = header ? /^Bearer\\s+(.+)$/i.exec(header) : null;
+  if (match) return match[1]!;
+  const cookies = req.headers.get("cookie");
+  if (!cookies) return null;
+  for (const pair of cookies.split(";")) {
+    const eq = pair.indexOf("=");
+    if (eq < 0) continue;
+    if (pair.slice(0, eq).trim() !== "session") continue;
+    const value = decodeURIComponent(pair.slice(eq + 1).trim());
+    return value.length > 0 ? value : null;
+  }
+  return null;
 }
 
 /** Read a dotted claim path (e.g. \`realm_access.roles\`) off a payload. */

@@ -248,6 +248,40 @@ describe.skipIf(!RUN)("auth OIDC e2e: real Keycloak token flow (LOOM_AUTH_E2E=1)
       // Unauthenticated hitting the gated route → 401 (authn precedes authz; the
       // unscoped call is rejected before the gate is even reached).
       expect((await fetch(`${apiBase}/api/tickets/admin_scoped`)).status).toBe(401);
+
+      // --- Realtime stream authentication (M-T4.12), the two rules the shared
+      // realtime plan states (src/ir/util/realtime-rooms.ts), run against the
+      // live backend.  Before this landed, the emitted SPA opened a BARE
+      // `new EventSource(...)` and node's verifier read only the Authorization
+      // header — so the stream 401'd on every `auth: required` deployable and
+      // nothing in the suite noticed.
+      //
+      // RULE 1 — the SSE route inherits the deployable's auth mode: it is on no
+      // bypass list, so an uncredentialed stream is rejected like any read.
+      expect((await fetch(`${apiBase}/api/realtime/events`)).status).toBe(401);
+
+      // RULE 2 — it authenticates by the HttpOnly `session` cookie, the ONLY
+      // credential a browser `EventSource` can present (it cannot set a header
+      // by construction), and exactly what the emitted client's
+      // `withCredentials: true` attaches.
+      const cookie = { cookie: `session=${token}` };
+      const meByCookie = await fetch(`${apiBase}/api/auth/me`, { headers: cookie });
+      expect(meByCookie.status).toBe(200);
+      expect(((await meByCookie.json()) as { roles?: string[] }).roles).toContain("agent");
+
+      // …and the stream opens on that same cookie.  Abort once the headers
+      // land — an SSE response never completes on its own.
+      const streamAbort = new AbortController();
+      try {
+        const stream = await fetch(`${apiBase}/api/realtime/events`, {
+          headers: cookie,
+          signal: streamAbort.signal,
+        });
+        expect(stream.status).toBe(200);
+        expect(stream.headers.get("content-type") ?? "").toContain("text/event-stream");
+      } finally {
+        streamAbort.abort();
+      }
     } catch (err) {
       console.error(`\n===== backend log =====\n${backendLog}\n=======================\n`);
       throw err;

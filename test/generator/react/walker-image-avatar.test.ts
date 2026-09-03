@@ -105,7 +105,7 @@ describe("Image + Avatar in walker stdlib", () => {
     expect(content).toMatch(/<Image \/>/);
   });
 
-  it("Avatar accepts a route-param ref in src (template-literal interpolation)", async () => {
+  it("Avatar accepts a route-param ref in src (bound JSX attribute, M-T1.26)", async () => {
     const files = await buildAndGenerate(`
       system S {
         subdomain M { context C { } }
@@ -125,9 +125,12 @@ describe("Image + Avatar in walker stdlib", () => {
       }
     `);
     const content = files.get("web/src/pages/profile.tsx")!;
-    // Template-literal interpolation, same shape Button { to: } and
-    // Anchor { to: } use for param refs.
-    expect(content).toMatch(/<Avatar src=`\$\{slug\}` alt="User" \/>/);
+    // A bound `{expr}` attribute — the A12 shape (`Anchor`/`Button { to: }`
+    // already render this way). The PRE-A12 shape this replaces —
+    // `` src=`${slug}` `` — is not valid JSX at all (no braces): confirmed
+    // against `tsc`, which fails to even parse it.
+    expect(content).toMatch(/<Avatar src=\{slug\} alt="User" \/>/);
+    expect(content).not.toContain("src=`${slug}`");
     // Param consumed → destructured in shell.
     expect(content).toMatch(/const \{ slug \} = useParams/);
   });

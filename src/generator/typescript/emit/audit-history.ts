@@ -37,6 +37,7 @@ import {
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst } from "../../../util/naming.js";
 import { renderTsExpr } from "../render-expr.js";
+import { canonicalIsoExpr } from "../repository-wire-builder.js";
 
 /** Name of the per-aggregate row → wire-entry mapper emitted into the route
  *  file. */
@@ -181,7 +182,13 @@ export function renderHistoryEntryMapper(agg: EnrichedAggregateIR): string {
   body.push(
     `  return {`,
     `    auditId: row.auditId,`,
-    `    at: row.at.toISOString(),`,
+    // The audit trail's `at` is a `datetime` on the WIRE, so it takes the same
+    // canonical RS-4 form every other wire datetime does — a bare
+    // `toISOString()` always pads the fraction to `.000`, which put node alone
+    // against the other four on this endpoint (.NET regex-trims, java's
+    // `Instant.toString()` and python's `iso()` omit a zero fraction) long after
+    // F2-W-05 was closed on the aggregate `toWire` path.
+    `    at: ${canonicalIsoExpr("row.at")},`,
     `    action: row.action,`,
     `    operationId: row.operationId,`,
     `    actor: row.actor ?? null,`,

@@ -5501,7 +5501,56 @@ be waiting for: on a later PR (#2722) the same parked-gate symptom cleared only
 after the next sweep, and at the measured 4.7 h cadence that is the scale to
 budget for — not the 15 minutes the cron implies.
 
-## 94. A log line is a claim about the code, and nothing type-checks it (2026-09-01)
+## 94. The fast suite was slow at the file boundary, not in the tests — and sharing the module graph found a leak isolation had been hiding (2026-09-03)
+
+**Symptom.** `npm test` (the "fast" tier) did not finish in 10 minutes on a
+4-core box; CI ran it as ~20 minutes single-job, sharded ×4. The instinct is to
+look for slow tests. There were none worth naming: a typical generator file
+spent **1.6 s in tests and ~11 s importing** — vitest's default `isolate: true`
+re-evaluates the entire toolchain module graph (~336k LOC, including the 730 KB
+generated Langium grammar) for every one of the 1,880 files. The per-file fixed
+cost *was* the suite.
+
+**Fix.** `isolate: false` (one module graph per worker): `test/generator/react`
+163 s → 38 s; the full suite → 6m18s on the same cores. Files that `vi.mock` a
+src module keep isolation through their own vitest project (`mocked`); the four
+>30 s whole-corpus censuses are a `corpus` project with their own CI job.
+
+Three things worth keeping:
+
+1. **Under `extends: true`, vitest MERGES a project's arrays with the root
+   config** — `include` included. With `include` on both, `vitest list
+   --filesOnly --project mocked` counted all 1,889 files: every project
+   discovered every file, three copies of the suite. `include` lives only on
+   the projects now. Count the files per project before trusting a split.
+2. **Sharing the graph exposed a pre-existing correctness hole in
+   `test/_helpers/parse.ts`.** It evicted only the *previous* document from
+   the shared Langium workspace, and tests fan out concurrently
+   (`Promise.all` over the five backends). The evict-then-parse pairing
+   interleaved: every call evicted the same URI, each `parseHelper` added a
+   document, and only the last was recorded — four Validated documents then
+   lingered for the life of the process. Isolation had made that invisible
+   (the leak died with the file); shared, it crossed into the next file, whose
+   `aggregate Item with crudish` came back with **two** canonical `create`s
+   because the build now walked a stranger's leftover documents too. The
+   helper is serialised and evicts every pending URI. The general lesson is
+   §58's twin: a per-file sandbox is a cache with no invalidation story —
+   state that "resets between files" is state nobody proved gets reset.
+3. **Module-graph test selection (`vitest --changed`) did not pay as the
+   default.** Measured uncontended: ~90 s just to compute the import graph
+   (vitest has to transform every test file and its imports to know who
+   reaches what), and because the platform registry links every backend into
+   `src/system` — 1,069 test files go through `generateSystemFiles` —
+   touching one Feliz leaf still selects 1,260 of 1,889 files. For the common
+   edit that is slower than the 6-minute whole suite. It ships as the opt-in
+   `npm run test:changed`, which pays for test-only edits and the islands
+   (`src/cli`, `src/trace`, `src/verify`, `src/api`). Also: vitest
+   force-reruns everything while `vitest.config.ts` or `package.json` differ
+   from the base ref, so the selection only bites once the config change
+   itself has merged. A static reverse-import scanner (seconds, not 90 s)
+   would lift the first cost but not the registry-hub one.
+
+## 95. A log line is a claim about the code, and nothing type-checks it (2026-09-01)
 
 Every node repository logged `"event_type":"Object"` on every domain event it
 dispatched. The emitter read `(event as object).constructor.name`, under a

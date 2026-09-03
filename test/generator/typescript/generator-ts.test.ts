@@ -1434,7 +1434,7 @@ describe("typescript generator", () => {
       // `block` is guarded, `nudge` is not — exactly one 403 in the file.
       const src = `
         system Acme {
-          user { id: string, role: string }
+          user { id: string  role: string }
           subdomain Sales {
             context Orders {
               aggregate Order {

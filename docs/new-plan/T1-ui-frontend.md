@@ -312,7 +312,7 @@ Found 2026-08-23 by the numeric-types audit ([F4+F5+F6](../audits/numeric-types-
 
 Sources: [numeric-types-audit-2026-08-23](../audits/numeric-types-audit-2026-08-23.md) F4/F5/F6 + annex, plan.json N4. Conflicts with M-T1.23/M-T1.25 in shared trees.
 
-## M-T1.26 — `Image` / `Avatar` `src:` and `alt:` are still on the pre-A12 helper — a computed value is silently dropped, a param ref emits a template literal — `open` · **S** · P2
+## M-T1.26 — `Image` / `Avatar` `src:` and `alt:` are still on the pre-A12 helper — a computed value is silently dropped, a param ref emits a template literal — `done` (Wave 1, #2752: react/svelte/feliz/flutter via `_walker/primitives/text.ts`, vue/angular via the pack templates + two `_packs/loader.ts` helpers; pinned by `test/generator/_walker/image-avatar-attr-cross-target.test.ts`) · **S** · P2
 
 Found 2026-08-30 re-verifying the [08-24 generator review](../audits/generator-code-review-2026-08-24.md)'s follow-up register (row 17), on `main` @ `aa236ae`. Not claimed by #2668. The review's §A12 fixed exactly this class for `Anchor`/`Button` `to:` and left a note that the image slots share it; nobody picked the note up, and it is **four call sites, not the two the note recorded**.
 

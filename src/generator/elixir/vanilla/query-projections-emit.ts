@@ -559,7 +559,7 @@ ${body}
     usesMoneyRound
       ? `\n\n  defp __money_round(nil), do: nil\n\n  defp __money_round(%Decimal{} = dec), do: Decimal.round(dec, ${MONEY_WIRE_SCALE})`
       : ""
-  }
+  }${joinedHelper(body)}
 end
 `;
 }
@@ -692,6 +692,23 @@ function ectoKeyCoerce(k: GroupKeySelect, read: string, viaFragment = false): st
  *  Customer as c on <idRef>`) rewrites to `Map.get(<mapVar>, <idRow>).name` —
  *  the loaded-by-id aggregate for this row.  Source-candidate reads (`o.id`,
  *  bare `lineCount`) lower to `this`/row refs and render off `record`. */
+/** The `__joined/2` LEFT-JOIN reader, emitted only when the body actually calls
+ *  it — an unused private function is a warning, and `mix compile
+ *  --warnings-as-errors` turns that into a failed build.  Derived from the
+ *  rendered body for the same reason the `import Ecto.Query` line is: the call
+ *  sites are several `select` arms deep, and a flag threaded through them is
+ *  one more thing a new arm can forget to set. */
+function joinedHelper(body: string): string {
+  if (!body.includes("__joined(")) return "";
+  return `
+
+  # A \`join\` target absent from the batched id→row map (soft-deleted, or
+  # filtered out by a capability) LEFT-JOINs: the source row survives with a nil
+  # joined field.  Indexing the map directly raised on ordinary data.
+  defp __joined(nil, _field), do: nil
+  defp __joined(record, field), do: Map.get(record, field)`;
+}
+
 function renderSelectEcto(
   expr: ExprIR,
   aliasMap: Map<string, { mapVar: string; idRow: string }>,
@@ -699,7 +716,14 @@ function renderSelectEcto(
 ): string {
   if (expr.kind === "member" && expr.receiver.kind === "ref") {
     const alias = aliasMap.get(expr.receiver.name);
-    if (alias) return `Map.get(${alias.mapVar}, ${alias.idRow}).${snake(expr.member)}`;
+    // LEFT-JOIN semantics (G2667-D3).  The batched id→row map holds only the
+    // join targets the follow-up read RETURNED, so an id whose target is
+    // soft-deleted or filtered out by a capability is ABSENT — and
+    // `Map.get(map, id).field` on the resulting `nil` raises
+    // (`UndefinedFunctionError: nil.name/0`), turning ordinary data into a 500.
+    // `__joined/2` keeps the source row and nils the joined field, matching the
+    // .NET / node arms.
+    if (alias) return `__joined(Map.get(${alias.mapVar}, ${alias.idRow}), :${snake(expr.member)})`;
   }
   return renderExpr(expr, ctx);
 }

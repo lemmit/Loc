@@ -997,6 +997,28 @@ export function renderMikroConfig(): string {
  *  longer bound to a local.  The read half (the `findOne` behind the CAS
  *  version guard) is inside the same transaction on purpose: a read-then-write
  *  guard outside one is a race by construction. */
+/** The two lines that DRAIN the aggregate's pending events ahead of the save
+ *  transaction, so the durable ones can be recorded on that transaction's own
+ *  handle and only the rest are dispatched after it commits.  The drizzle
+ *  sibling (repository-save-builder.ts) has always emitted this pair; the mikro
+ *  save dispatched straight off `aggregate.pullEvents()` after the tx closed, so
+ *  the outbox insert (which the mikro dispatcher's `dispatch` arm performs on a
+ *  `keepTransactionContext` fork) committed SEPARATELY on any route that opens
+ *  no ambient transaction — i.e. every ordinary mutation route.  A crash in
+ *  that window lost a durable event with the aggregate already written. */
+const MIKRO_OUTBOX_DRAIN_LINES: readonly string[] = [
+  `    const pendingEvents = aggregate.pullEvents();`,
+  `    let dispatchAfterCommit = pendingEvents;`,
+];
+
+/** The capture call itself, emitted as the LAST statement inside the save
+ *  transaction: `tx` is the forked EntityManager `em.transactional` hands the
+ *  callback, so the outbox rows commit (or roll back) with the aggregate rows.
+ *  Optional-chained — a project with no durable channel wires a dispatcher
+ *  without the hook, and then every event stays on the after-commit path,
+ *  byte-identical in behaviour to before. */
+const MIKRO_OUTBOX_RECORD_LINE = `    dispatchAfterCommit = (await this.events.recordDurable?.(pendingEvents, em)) ?? pendingEvents;`;
+
 function mikroSaveTxLines(writeLines: readonly (string | null)[]): (string | null)[] {
   return [
     `    await this.em.fork({ keepTransactionContext: true }).transactional(async (em) => {`,
@@ -2398,14 +2420,16 @@ export function renderMikroRepository(
     versioned
       ? `  async save(aggregate: ${agg.name}, expectedVersion?: number): Promise<void> {`
       : `  async save(aggregate: ${agg.name}): Promise<void> {`,
+    ...MIKRO_OUTBOX_DRAIN_LINES,
     ...mikroSaveTxLines([
       ...(versioned ? versionedSaveLines : [upsertCall]),
       ...(hasAssocs ? assocSaveLines(agg, "em", "    ") : []),
       ...(hasContains ? containSaveLines(agg, ctx, "em", "    ") : []),
+      MIKRO_OUTBOX_RECORD_LINE,
     ]),
     `    requestLog().debug({ event: "repository_save", aggregate: "${agg.name}", id: aggregate.id as string });`,
     "",
-    `    for (const event of aggregate.pullEvents()) {`,
+    `    for (const event of dispatchAfterCommit) {`,
     `      requestLog().info({ event: "event_dispatched", event_type: (event as { type: string }).type, aggregate: "${agg.name}", id: aggregate.id as string });`,
     `      await this.events.dispatch(event);`,
     `    }`,

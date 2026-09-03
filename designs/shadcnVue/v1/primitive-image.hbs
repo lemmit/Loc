@@ -1,1 +1,1 @@
-<img class="rounded-md"{{#if hasSrc}} src={{{src}}}{{/if}}{{#if hasAlt}} alt={{{alt}}}{{else}} alt=""{{/if}}{{{testidAttr}}} />
+<img class="rounded-md"{{#if hasSrc}}{{{vueAttr "src" src}}}{{/if}}{{#if hasAlt}}{{{vueAttr "alt" alt}}}{{else}} alt=""{{/if}}{{{testidAttr}}} />
