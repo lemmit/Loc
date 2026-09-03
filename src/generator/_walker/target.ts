@@ -178,6 +178,28 @@ export interface FilteredRowsSpec {
 
 /** A member read off a paged query's `data:` binding (`rows.items`,
  *  `rows.totalPages`) — the input to `renderPagedEnvelopeMember`. */
+/** The one member READ the walker is about to emit, handed to
+ *  {@link WalkerTarget.renderMemberRead}.
+ *
+ *  `receiverExpr` + `ctx` are the ESCAPE HATCH for a receiver the IR failed to
+ *  type: an aggregate-rooted api read (`Project.byId(id)`) falls through
+ *  `memberType`'s default, so `receiverType` on the next member reads `string`
+ *  rather than the record.  A target that needs the truth (Angular and Svelte
+ *  null-guard an optional field's read) re-resolves the field off the walk
+ *  context; every other target ignores both and behaves exactly as before. */
+export interface MemberReadSpec {
+  /** The already-rendered receiver. */
+  receiver: string;
+  member: string;
+  receiverType: TypeIR | undefined;
+  memberType: TypeIR | undefined;
+  /** The un-rendered receiver node — lets a target resolve what the IR's
+   *  placeholder type hides. */
+  receiverExpr?: ExprIR;
+  /** The active walk context (aggregate / api-param / workflow registries). */
+  ctx?: WalkContext;
+}
+
 export interface PagedEnvelopeMemberSpec {
   /** The member being read (`"items"` / `"totalPages"`). */
   member: string;
@@ -1039,13 +1061,7 @@ export interface WalkerTarget {
    *
    *  Reads only.  Member CALLS (`xs.contains(y)`) already route through
    *  `emitMethodCall`, and Feliz maps those in `fs-expr.ts`. */
-  renderMemberRead?(spec: {
-    /** The already-rendered receiver. */
-    receiver: string;
-    member: string;
-    receiverType: TypeIR | undefined;
-    memberType: TypeIR | undefined;
-  }): string | undefined;
+  renderMemberRead?(spec: MemberReadSpec): string | undefined;
 
   /** OPTIONAL — the in-scope accessor for the magic route `id` identifier
    *  (`{ kind: "id" }`, e.g. `Order.byId(id)` on a `/orders/:id` page).  The

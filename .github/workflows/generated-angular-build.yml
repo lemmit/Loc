@@ -94,7 +94,7 @@ jobs:
             CASES='["showcase","store","grid"]'
             PACKS='["angularMaterial@v1", "primeng@v1"]'
           else
-            CASES='["minimal","scaffold","showcase","store","file","grid"]'
+            CASES='["minimal","scaffold","showcase","store","file","grid","optional"]'
             PACKS='["angularMaterial@v1", "primeng@v1", "spartanNg@v1"]'
           fi
           # `history` (an `audited` aggregate + a scaffolded ui → the
@@ -111,7 +111,13 @@ jobs:
           # catch — a double `?? []` guard, TS2869 — fails here.  The pack is
           # irrelevant to it (`Timeline` emits native `<ol>`/`<li>`/`<dl>`, no
           # pack components), hence one pack, the default.
-          echo "matrix={\"case\":$CASES,\"pack\":$PACKS,\"include\":[{\"case\":\"history\",\"pack\":\"angularMaterial@v1\"}]}" >> "$GITHUB_OUTPUT"
+          #
+          # `optional` rides in the same way, and for the same reason: an
+          # optional field's null dereference (`p.budget.amount` on a
+          # `Budget?`) and a `File?`'s unimported `FileRef` are pack-neutral —
+          # all three packs failed them identically — so one cell per PR proves
+          # the gate, and the post-merge sweep runs it against every pack.
+          echo "matrix={\"case\":$CASES,\"pack\":$PACKS,\"include\":[{\"case\":\"history\",\"pack\":\"angularMaterial@v1\"},{\"case\":\"optional\",\"pack\":\"angularMaterial@v1\"}]}" >> "$GITHUB_OUTPUT"
 
   matrix:
     needs: configure

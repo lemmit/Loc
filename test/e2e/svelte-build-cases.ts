@@ -23,6 +23,12 @@ export const svelteBuildExamples = [
   // that file, and an unimported name there is a runtime `ReferenceError` on
   // Svelte rather than a build failure, so svelte-check over it is the gate.
   "web/src/examples/svelte-data-grid.ddd",
+  // Optional fields (M-FT.22): a nullable scalar bound into a pack's typed
+  // input, an optional VALUE OBJECT read on the detail page and bound in an
+  // op-form group, and an optional `File`.  svelte-check is the only gate that
+  // sees any of it — a null dereference through an optional field compiles
+  // fine and fails at runtime everywhere else.
+  "test/e2e/fixtures/svelte-build/optional-fields.ddd",
 ] as const;
 
 export const sveltePacks = ["shadcnSvelte@v1", "flowbite@v1"] as const;
