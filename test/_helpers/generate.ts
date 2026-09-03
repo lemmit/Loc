@@ -232,6 +232,9 @@ export async function generateSystemFilesFromProject(
     );
   }
   const loom = enrichLoomModel(lowerProject(all.map((d) => d.parseResult.value as Model)));
+  // Phases ⑤/⑥ then ⑦ — the same order, and the same two calls, the
+  // single-source path makes in `assertGeneratable`.
+  assertLoomModelVerifies(loom, absEntryFile);
   const irErrors = validateLoomModel(loom).filter((d) => d.severity === "error");
   if (irErrors.length) {
     throw new Error(
