@@ -50,7 +50,7 @@ function pointerOf(path: ReadonlyArray<PropertyKey>): string {
  *  stays for a genuinely malformed/unparseable request. */
 export function defaultHook(result: { success: boolean; error?: { issues: ReadonlyArray<{ path: ReadonlyArray<PropertyKey>; message: string; params?: { loomCode?: string } }> } }, c: Context): Response | undefined {
   if (result.success) return undefined;
-  const trace_id = (c as unknown as { get(k: "requestId"): string | undefined }).get("requestId") ?? "";
+  const trace_id = c.get("requestId") ?? "";
   const errors = (result.error?.issues ?? []).map((issue) => ({
     pointer: pointerOf(issue.path),
     message: issue.message,
@@ -71,6 +71,41 @@ export function defaultHook(result: { success: boolean; error?: { issues: Readon
     422,
     { "content-type": "application/problem+json", "x-request-id": trace_id },
   );
+}
+
+/** The entity-tag for a versioned aggregate's current state (RFC 9110 §8.8.3).
+ *  A strong tag, quoted — an ETag is a QUOTED string, and the quotes are part
+ *  of the value on the wire. */
+export function versionETag(version: number): string {
+  return `"${version}"`;
+}
+
+/** The client's expected version from an `If-Match` request header (RFC 9110
+ *  §13.1.1), or `current` when the header is absent.
+ *
+ *  This used to be a bare `Number(ifMatch)`, which is wrong for the header's
+ *  actual grammar in both directions.  An entity-tag is a QUOTED string, so a
+ *  spec-correct client sending the ETag it was given — `If-Match: "3"` —
+ *  produced `Number('"3"') === NaN`, the guarded UPDATE matched no row, and
+ *  the caller got a spurious 409 for doing exactly the right thing.  And a
+ *  malformed value produced NaN just as silently, so garbage was answered with
+ *  a conflict instead of a 400.
+ *
+ *  Accepted: `*` (RFC: "any current representation" — no precondition, so the
+ *  just-loaded version stands), a strong tag `"3"`, a weak tag `W/"3"`, and
+ *  a bare `3` (what the previous implementation accepted; kept so clients
+ *  written against it keep working).  Anything else is a client error. */
+export function parseIfMatch(header: string | undefined, current: number): number {
+  if (header === undefined) return current;
+  const raw = header.trim();
+  if (raw === "*") return current;
+  const match = /^(?:W\/)?(?:"(\d+)"|(\d+))$/.exec(raw);
+  if (match === null) {
+    throw new HTTPException(400, {
+      message: `Malformed If-Match header: ${header}`,
+    });
+  }
+  return Number(match[1] ?? match[2]);
 }
 
 /** Factory: `new OpenAPIHono()` with the validation `defaultHook` pre-wired.

@@ -1,7 +1,7 @@
 // Auto-generated.  Do not edit by hand.
 import { z } from "zod";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "./client";
+import { api, seg } from "./client";
 
 
 export const CreateCustomerRequest = z.object({
@@ -62,7 +62,7 @@ export function useCustomerById(id: string | undefined) {
     queryKey: ["customers", id],
     enabled: !!id,
     queryFn: async () => {
-      const r = await api.get(`/customers/${id}`);
+      const r = await api.get(`/customers/${seg(id)}`);
       return CustomerResponse.parse(r);
     },
   });
@@ -83,7 +83,7 @@ export function useDeleteCustomer() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      await api.delete(`/customers/${id}`);
+      await api.delete(`/customers/${seg(id)}`);
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["customers"] }),
   });
@@ -93,7 +93,7 @@ export function useUpdateCustomer(id: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: UpdateCustomerRequest) => {
-      await api.post(`/customers/${id}/update`, input);
+      await api.post(`/customers/${seg(id)}/update`, input);
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["customers", id] });

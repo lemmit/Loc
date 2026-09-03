@@ -1098,6 +1098,23 @@ export function buildRoutesFile(
     `      if (!found) throw new AggregateNotFoundError(\`${agg.name} \${id} not found\`);`,
   );
   lines.push(...maskUserBind(agg, "      "));
+  // The ETag half of optimistic concurrency (`versioned`).  The update route
+  // has always READ `If-Match` — but nothing ever SENT an entity-tag, so the
+  // conditional-write path was undiscoverable: a client had no value to echo,
+  // and `expectedVersion` always fell back to the version the SERVER had just
+  // loaded, which defeats the whole point (the race being guarded against is
+  // one that happens across the user's think time, between this read and that
+  // write).  Publishing it here closes the loop: read → hold the tag → send it
+  // back on `If-Match` → get a real 409 if someone else won the race.
+  //
+  // A response header only, deliberately not declared in the `responses`
+  // block: the OpenAPI documents are compared BACKEND-TO-BACKEND by the
+  // conformance spec-diff, so declaring it on node alone would read as a
+  // contract divergence.  Declaring it belongs with emitting it on the other
+  // four backends, in one change.
+  if (aggregateIsVersioned(agg)) {
+    lines.push(`      c.header("etag", versionETag(found.version));`);
+  }
   if (emitTrace) {
     // toWire isn't trivial — bind once so it's not run twice between
     // Object.keys and c.json.
@@ -1323,9 +1340,7 @@ export function buildRoutesFile(
   // the cast bridges the untyped get to a strongly-typed read without
   // leaking `any` into the user's surface.  Same pattern bridges the
   // bound child logger at every log call site below — see render-hono.
-  lines.push(
-    `    const trace_id = (c as unknown as { get(k: "requestId"): string | undefined }).get("requestId") ?? "";`,
-  );
+  lines.push(`    const trace_id = c.get("requestId") ?? "";`);
   // Each error class lands a structured log line at the catalog-defined
   // level (warn for client/domain faults; error for system faults) on
   // the per-request child logger, so the line auto-carries request_id.
@@ -1450,8 +1465,11 @@ export function buildRoutesFile(
   // expects (`ProblemDetails` < `frameworkProblemBody` < `newApp` <
   // `requireJsonContentType`).
   const problemNamed = ["ProblemDetails", "frameworkProblemBody", "newApp"];
-  if (/\brequireJsonContentType\(/.test(lines.join("\n")))
+  const assembledSoFar = lines.join("\n");
+  if (/\bparseIfMatch\(/.test(assembledSoFar)) problemNamed.push("parseIfMatch");
+  if (/\brequireJsonContentType\(/.test(assembledSoFar))
     problemNamed.push("requireJsonContentType");
+  if (/\bversionETag\(/.test(assembledSoFar)) problemNamed.push("versionETag");
   const assembled = lines
     .join("\n")
     .replace(
@@ -1722,10 +1740,14 @@ function emitOperationRoute(
       // (docs/old/plans/optimistic-concurrency-versioned.md /
       // updatePreconditions); absent header falls back to the version just
       // loaded, so an unaware client still gets a coherent guarded write.
+      //
+      // Parsed through the shared `parseIfMatch` rather than a bare
+      // `Number(ifMatch)`: an entity-tag is a QUOTED string, so a client
+      // sending back the ETag this API gave it (`If-Match: "3"`) yielded
+      // `Number('"3"') === NaN`, the guarded UPDATE matched no row, and the
+      // caller got a spurious 409 for doing exactly the right thing.
       out.push(`    const ifMatch = c.req.header("if-match");`);
-      out.push(
-        `    const expectedVersion = ifMatch !== undefined ? Number(ifMatch) : aggregate.version;`,
-      );
+      out.push(`    const expectedVersion = parseIfMatch(ifMatch, aggregate.version);`);
     }
     out.push(...requiresGateLines(op, "    ", ctx));
     out.push(...whenGateLine(agg, op, "    "));
@@ -1758,9 +1780,7 @@ function emitOperationRoute(
     out.push(`      const aggregate = await repoTx.getById(Ids.${agg.name}Id(id));`);
     if (isVersionedUpdate) {
       out.push(`      const ifMatch = c.req.header("if-match");`);
-      out.push(
-        `      const expectedVersion = ifMatch !== undefined ? Number(ifMatch) : aggregate.version;`,
-      );
+      out.push(`      const expectedVersion = parseIfMatch(ifMatch, aggregate.version);`);
     }
     out.push(...requiresGateLines(op, "      ", ctx));
     out.push(...whenGateLine(agg, op, "      "));

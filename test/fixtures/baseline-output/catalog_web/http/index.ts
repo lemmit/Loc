@@ -69,7 +69,7 @@ export function createApp(
   // (debug) so probe traffic shows up under LOG_LEVEL=debug — useful
   // when diagnosing why a load balancer considers the pod down.
   app.get("/health", (c) => {
-    (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").debug({ event: "health_ok", checks: ["liveness"] });
+    c.get("log").debug({ event: "health_ok", checks: ["liveness"] });
     return c.json({ status: "ok" });
   });
   // Readiness probe — pings the DB.  K8s readinessProbe uses this to
@@ -80,12 +80,12 @@ export function createApp(
   app.get("/ready", async (c) => {
     try {
       await db.execute(sql`select 1`);
-      (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").debug({ event: "health_ok", checks: ["readiness", "db"] });
+      c.get("log").debug({ event: "health_ok", checks: ["readiness", "db"] });
       return c.json({ status: "ready" });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").error({ event: "db_error", error: message });
-      (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").debug({ event: "health_degraded", checks: ["db"] });
+      c.get("log").error({ event: "db_error", error: message });
+      c.get("log").debug({ event: "health_degraded", checks: ["db"] });
       return c.json({ status: "not_ready", error: message }, 503);
     }
   });
@@ -136,7 +136,7 @@ export function createApp(
     return frameworkProblem(c, 404, `no route for ${c.req.method} ${c.req.path}`);
   });
   app.onError((err, c) => {
-    const trace_id = (c as unknown as { get(k: "requestId"): string | undefined }).get("requestId") ?? "";
+    const trace_id = c.get("requestId") ?? "";
     const problem = (status: 403 | 404 | 409 | 422 | 500, title: string, detail: string) => c.body(JSON.stringify({ type: "about:blank", title, status, detail, instance: c.req.path }), status, { "content-type": "application/problem+json", "x-request-id": trace_id });
     if (err instanceof ForbiddenError) {
       baseLogger.warn({ event: "forbidden", message: err.message, status: 403 });

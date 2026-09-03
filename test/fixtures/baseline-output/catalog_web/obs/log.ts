@@ -46,3 +46,30 @@ export const baseLogger: Logger = pino({
  *  correlation id automatically; `scope_id` / `actor_id` ride via the
  *  base logger's `mixin` (read from the ambient frame per line). */
 export type RequestLogger = Logger;
+
+/** What the request-id middleware puts on the Hono context, declared ONCE
+ *  for the whole project.
+ *
+ *  A sub-router's `OpenAPIHono` cannot carry a custom `Variables` type
+ *  (zod-openapi's internal `Env` constraint rejects one), so every read used
+ *  to spell its own escape hatch inline:
+ *
+ *      (c as unknown as { get(k: "log"): RequestLogger }).get("log").info(…)
+ *
+ *  — the same 90-character double cast repeated at every log seam and every
+ *  `trace_id` read, hundreds of times per generated backend, each one an
+ *  independent chance to name the wrong type.  Hono's `ContextVariableMap` is
+ *  the supported way to say this globally: augment it once here, and a plain
+ *  `c.get("log")` / `c.get("requestId")` is typed everywhere, in generated
+ *  code and in anything the user adds beside it.
+ *
+ *  `workflow` is set by a workflow COMMAND route at entry so the router's
+ *  `onError` can name the workflow that failed (`workflow_failed`); it is
+ *  absent on every other route, hence optional. */
+declare module "hono" {
+  interface ContextVariableMap {
+    log: RequestLogger;
+    requestId?: string;
+    workflow?: string;
+  }
+}

@@ -401,6 +401,19 @@ function emitSystem(
   }
 }
 
+// This manifest has to satisfy the tsconfig emitted BESIDE it (below) — and
+// the two disagreed: `types: ["node", …]` demanded `@types/node` that nothing
+// installed, so `npx tsc --noEmit -p .` inside the emitted `e2e/` failed with
+// `TS2688: Cannot find type definition file for 'node'` on every generated
+// system.  The suite really does reach for node globals (`process.env` for the
+// base URL, `Buffer.from` for the auth claims), so the tsconfig half was the
+// honest one; the missing devDependency was the bug.  The sibling frontend
+// harness (`_frontend/e2e-harness.ts`) already carried it.
+//
+// `vitest` is pinned to the SAME major the default node backend package pins
+// (`platform/hono/v5/pins.ts`) rather than one two majors behind it: a single
+// generated tree shipping vitest 2 here and vitest 4 in the backend means the
+// runner a developer already has installed is the wrong one for half the tree.
 const E2E_PACKAGE_JSON =
   JSON.stringify(
     {
@@ -410,8 +423,9 @@ const E2E_PACKAGE_JSON =
       private: true,
       scripts: { test: "vitest run" },
       devDependencies: {
+        "@types/node": "^22.0.0",
         typescript: "^6.0.0",
-        vitest: "^2.1.0",
+        vitest: "^4.0.0",
       },
     },
     null,
@@ -428,7 +442,12 @@ const E2E_TSCONFIG_JSON =
         strict: true,
         esModuleInterop: true,
         skipLibCheck: true,
-        types: ["node", "vitest/globals"],
+        // The emitted suite imports `describe`/`it`/`expect` from "vitest"
+        // explicitly (`e2e-render.ts`), so it needs no globals shim — only the
+        // node globals it actually reaches for.  Declaring `vitest/globals`
+        // here while importing them named was the tsconfig asking for a type
+        // package the suite never uses.
+        types: ["node"],
       },
       include: ["**/*.ts"],
     },

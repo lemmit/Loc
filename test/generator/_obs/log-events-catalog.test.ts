@@ -63,16 +63,21 @@ describe("log-event catalog — integrity", () => {
 });
 
 describe("log-event catalog — Hono renderer", () => {
-  it("per-request renderer bridges to the bound child logger via an untyped cast", () => {
+  it("per-request renderer reads the bound child logger as plain typed code", () => {
     // The sub-router's OpenAPIHono can't carry custom Variables typing
-    // (zod-openapi's Env rejects it), so c.get("log") is reached via the
-    // same untyped-cast pattern the shipped trace_id read uses — typed
-    // through an inline `import("../obs/log").RequestLogger` so the
-    // emitted method call still resolves strict-tsc.
+    // (zod-openapi's Env rejects it), so the context's variables are declared
+    // ONCE per project instead — a `declare module "hono" { interface
+    // ContextVariableMap … }` in the emitted `obs/log.ts`.  Every seam is then
+    // a plain `c.get("log")`.  It used to be a 90-character double cast
+    // (`(c as unknown as { get(k: "log"): import("../obs/log").RequestLogger
+    // }).get("log")`) repeated at HUNDREDS of seams per generated backend —
+    // 218 of them in one field-test tree, each an independent chance to name
+    // the wrong type.
     const line = renderHonoLogCall("operationInvoked", 'aggregate: "Cart", op: "applyTotal", id');
     expect(line).toBe(
-      `(c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").info({ event: "operation_invoked", aggregate: "Cart", op: "applyTotal", id });`,
+      `c.get("log").info({ event: "operation_invoked", aggregate: "Cart", op: "applyTotal", id });`,
     );
+    expect(line).not.toContain("as unknown as");
   });
 
   it("base-logger renderer uses the process logger (no request scope)", () => {

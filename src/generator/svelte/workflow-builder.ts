@@ -50,7 +50,7 @@ export function buildWorkflowsApiModule(contexts: BoundedContextIR[]): string {
   lines.push(
     `import { ${anyInstances ? "createMutation, createQuery" : "createMutation"} } from "@tanstack/svelte-query";`,
   );
-  lines.push(`import { api } from "./client";`);
+  lines.push(`import { api, seg } from "./client";`);
   if (contexts.some(contextUsesMoney)) {
     lines.push(`import { moneySchema } from "../schemas";`);
   }
@@ -122,7 +122,7 @@ function emitInstanceHooks(wf: WorkflowIR): string[] {
   lines.push(`    queryKey: [...${key}, id()],`);
   lines.push(`    enabled: !!id(),`);
   lines.push(`    queryFn: async () => {`);
-  lines.push(`      const r = await api.get(\`/workflows/${slug}/instances/\${id()}\`);`);
+  lines.push(`      const r = await api.get(\`/workflows/${slug}/instances/\${seg(id())}\`);`);
   lines.push(`      return ${T}InstanceResponse.parse(r);`);
   lines.push(`    },`);
   lines.push(`  }));`);

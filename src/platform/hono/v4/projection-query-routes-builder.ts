@@ -320,9 +320,7 @@ export function buildQueryProjectionsFile(
   }
 
   lines.push(`  app.onError((err, c) => {`);
-  lines.push(
-    `    const trace_id = (c as unknown as { get(k: "requestId"): string | undefined }).get("requestId") ?? "";`,
-  );
+  lines.push(`    const trace_id = c.get("requestId") ?? "";`);
   // M-T5.20 — the projection router is hono's FOURTH `app.onError`, and it was
   // the one the first conversion pass missed: the aggregate, workflow and
   // extern-handler routers all resolved while this one still answered the

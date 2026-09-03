@@ -15,17 +15,20 @@
 //     level `baseLogger` from `obs/log.ts` directly, since startup /
 //     shutdown runs outside any request scope.
 //
-// Cast pattern: the sub-router's `OpenAPIHono` can't carry custom
-// `Variables` typing (zod-openapi's internal `Env` constraint rejects it),
-// so we bridge `c.get("log")` through the same untyped-cast pattern the
-// shipped `trace_id` read uses.  The cast keeps the call site
-// strict-tsc-clean and the typed `RequestLogger` import gives the IDE
-// proper method completion + signature help.
+// Typing: the sub-router's `OpenAPIHono` can't carry custom `Variables`
+// typing (zod-openapi's internal `Env` constraint rejects it), so the
+// context's variables are declared ONCE for the whole project — a
+// `declare module "hono" { interface ContextVariableMap … }` in the emitted
+// `obs/log.ts` (see `observability-builder.ts`).  `c.get("log")` is therefore
+// plain, typed code at every seam.  It used to be a per-site double cast,
+// `(c as unknown as { get(k: "log"): import("../obs/log").RequestLogger })
+// .get("log")` — 90 characters repeated at hundreds of seams in one backend,
+// each an independent chance to name the wrong type.
 // ---------------------------------------------------------------------------
 
 import { type LogEventKey, LogEvents } from "./log-events.js";
 
-const LOG_GET = `(c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log")`;
+const LOG_GET = `c.get("log")`;
 
 /** Per-request log call — every line auto-includes `request_id` via the
  *  child logger the request-id middleware bound to the Hono context.
@@ -35,7 +38,7 @@ const LOG_GET = `(c as unknown as { get(k: "log"): import("../obs/log").RequestL
  *
  *      renderHonoLogCall("operationInvoked",
  *        `aggregate: "Cart", op: "applyTotal", id`)
- *      // → `(c as unknown as { get(k: "log"): … }).get("log").info({ event: "operation_invoked", aggregate: "Cart", op: "applyTotal", id });`
+ *      // → `c.get("log").info({ event: "operation_invoked", aggregate: "Cart", op: "applyTotal", id });`
  */
 export function renderHonoLogCall(eventKey: LogEventKey, fieldsJs = ""): string {
   const e = LogEvents[eventKey];

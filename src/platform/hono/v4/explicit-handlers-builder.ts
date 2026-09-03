@@ -662,9 +662,7 @@ export function buildExplicitRoutesFile(
   }
   // RFC 7807 responder — identical to the workflow router's onError.
   body.push(`  app.onError((err, c) => {`);
-  body.push(
-    `    const trace_id = (c as unknown as { get(k: "requestId"): string | undefined }).get("requestId") ?? "";`,
-  );
+  body.push(`    const trace_id = c.get("requestId") ?? "";`);
   // M-T5.20 — the denial ladder resolves through the api's `httpStatus` map,
   // exactly like the aggregate + workflow routers. This file serves ROUTES from
   // possibly several contexts; every context carries the SAME app-wide fold, so
