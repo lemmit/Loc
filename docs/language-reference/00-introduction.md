@@ -32,7 +32,7 @@ picker** — choose the platform you care about; your choice follows you
 across the page and across the reference.
 
 Here is the convention itself, shown on a trivial aggregate. The same
-`.ddd` declaration, lowered to three backends:
+`.ddd` declaration, lowered on three of the five backends (pick any tab — the choice sticks):
 
 ```ddd
 context Catalog {
