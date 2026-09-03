@@ -29,6 +29,7 @@ import {
 import { collectJavaExprImports, renderJavaExpr } from "../render-expr.js";
 import {
   JPQL_INTRINSIC_SQL,
+  type JpqlCtx,
   principalBindExpr,
   principalParamName,
   renderJpqlWhere,
@@ -151,7 +152,16 @@ function aggregationScope(
   imports: Set<string>,
 ): AggregationScope {
   const principalAccessors = new Set<string>();
-  const jpqlCtx = { alias: "e", enumsPkg, principalAccessors };
+  // `EntityManager.createQuery` mode (§F2, Wave 2 packet 2.4): this read runs
+  // raw JPQL through the EntityManager, not a Spring Data `@Query` method, so
+  // a `currentUser.<claim>` member must bind as a plain `:name` parameter
+  // (`principalAccessors`) rather than Spring Data SpEL — see `JpqlCtx.mode`.
+  const jpqlCtx: JpqlCtx = {
+    alias: "e",
+    enumsPkg,
+    mode: "jpql-entity-manager",
+    principalAccessors,
+  };
   const filter = proj.query!.filter;
   const ownWhere = filter ? renderJpqlWhere(filter, jpqlCtx) : null;
   if (filter) collectJavaExprImports(filter, imports);

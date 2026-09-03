@@ -313,6 +313,13 @@ export function renderExpr(e: ExprIR, ctx: RenderCtx = DEFAULT): string {
   // predicates run in-memory though, so it takes the DOC target, whose
   // temporal arms are the in-memory `DateTime.*` forms rather than Ecto
   // `fragment(...)` SQL (A5).
+  // `ctx.filterArgs` IS this renderer's declared `QueryEmissionMode` (§F2,
+  // Wave 2 packet 2.4): `"ecto-fragment"` when set, `"app"` (unrestricted)
+  // otherwise.  Its vocabulary is `ALL_EXPR_KINDS` — Ecto `where:` fragments
+  // are themselves valid Elixir syntax, so `ELIXIR_FILTER_TARGET` (just below)
+  // renders the SAME kind set `ELIXIR_TARGET` does; what narrows a query
+  // position is `firstNonQueryableNode` at the IR-validate phase, not a
+  // renderer-level refusal (see `QUERY_EMISSION_VOCABULARY["ecto-fragment"]`).
   const target = ctx.filterArgs
     ? ELIXIR_FILTER_TARGET
     : ctx.docStruct

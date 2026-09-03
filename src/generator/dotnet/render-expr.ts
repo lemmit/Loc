@@ -356,6 +356,14 @@ export function renderCsExpr(e: ExprIR, ctx: CsRenderContext = DEFAULT): string 
   // kind (it is not a domain expression).  A discriminated node so a missing
   // arm is a `tsc` error here, not a silent authorization bypass.
   if (e.kind === "authz-filter") return renderCsAuthzFilter(e, ctx);
+  // `ctx.efQuery` IS this renderer's declared `QueryEmissionMode` (§F2, Wave
+  // 2 packet 2.4): `"linq-efcore"` when set, `"app"` (unrestricted) when not.
+  // Unlike JPQL/Drizzle/SQLAlchemy/raw-SQL, `linq-efcore`'s vocabulary is
+  // `ALL_EXPR_KINDS` — EF Core's LINQ translator covers nearly the whole
+  // domain-logic surface `CS_TARGET` already emits, so there is no narrower
+  // per-kind refusal here; `firstNonQueryableNode` at the IR-validate phase
+  // is what actually keeps a `.ddd` program off constructs EF can't
+  // translate (see `QUERY_EMISSION_VOCABULARY["linq-efcore"]`).
   return renderExprWith(e, ctx.efQuery ? CS_TARGET_EF : CS_TARGET, ctx);
 }
 
