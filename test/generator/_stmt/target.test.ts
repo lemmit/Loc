@@ -112,6 +112,12 @@ function recordingTarget(indexing: StmtTarget["indexing"]): {
     call: leaf("call"),
     expression: leaf("expression"),
     return: leaf("return"),
+    if: (_s, ix, thenSrc, elseSrc) => {
+      calls.push({ kind: "if", ix });
+      return elseSrc === undefined
+        ? `if#${ix.pre}/${ix.prov}[${thenSrc}]`
+        : `if#${ix.pre}/${ix.prov}[${thenSrc}][${elseSrc}]`;
+    },
   };
   return { target, calls };
 }
@@ -128,12 +134,14 @@ const ALL_KINDS: StmtIR["kind"][] = [
   "call",
   "expression",
   "return",
+  "if",
 ];
 
 describe("renderStmtsWith / renderStmtChunksWith — shared statement spine", () => {
   it("dispatches every kind to its own target method, in body order", () => {
     const { target, calls } = recordingTarget("positional");
-    const body = ALL_KINDS.map((k) => stmt(k));
+    // `if` needs a (here empty) then-body — the spine renders it before the arm.
+    const body = ALL_KINDS.map((k) => (k === "if" ? stmt(k, { thenBody: [] }) : stmt(k)));
 
     const out = renderStmtsWith(body, target);
 
@@ -206,5 +214,73 @@ describe("renderStmtsWith / renderStmtChunksWith — shared statement spine", ()
     expect(renderStmtChunksWith([], target)).toEqual([]);
     expect(renderStmtsWith([], target)).toBe("");
     expect(calls).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// `if` — the one backend-body kind that NESTS (M-FT.11).
+// ---------------------------------------------------------------------------
+
+describe("renderStmtsWith — `if` branch recursion", () => {
+  it("renders both branch bodies with the SAME target and hands them to the arm", () => {
+    const { target, calls } = recordingTarget("positional");
+    const body = [
+      stmt("if", { thenBody: [stmt("assign")], elseBody: [stmt("emit"), stmt("return")] }),
+    ];
+
+    const out = renderStmtsWith(body, target);
+
+    // The branches dispatch through the same leaf table, BEFORE the `if` arm
+    // itself (the spine renders the bodies to pass them in).
+    expect(calls.map((c) => c.kind)).toEqual(["assign", "emit", "return", "if"]);
+    expect(out).toBe("if#0/0[assign#1/1][emit#2/2\nreturn#3/3]");
+  });
+
+  it("passes `undefined` (not an empty string) for an absent else-branch", () => {
+    const { target } = recordingTarget("positional");
+    const out = renderStmtsWith([stmt("if", { thenBody: [stmt("assign")] })], target);
+    expect(out).toBe("if#0/0[assign#1/1]");
+  });
+
+  it("keeps the whole nested render inside the `if`'s own chunk", () => {
+    const { target } = recordingTarget("positional");
+    const chunks = renderStmtChunksWith(
+      [stmt("let"), stmt("if", { thenBody: [stmt("assign"), stmt("emit")] })],
+      target,
+    );
+    expect(chunks).toHaveLength(2);
+    expect(chunks[1]).toContain("assign");
+    expect(chunks[1]).toContain("emit");
+  });
+
+  // Why the counters are threaded rather than restarted per block: C# and Java
+  // reject a nested block that shadows an enclosing local (CS0136), so a traced
+  // body whose outer and inner statement both bound `__pre_0_ok` would not
+  // compile.  Positional numbering counts nested statements too.
+  it("numbers temps uniquely ACROSS nesting — no nested block restarts at 0", () => {
+    const { target, calls } = recordingTarget("positional");
+    renderStmtsWith(
+      [
+        stmt("precondition"),
+        stmt("if", { thenBody: [stmt("precondition"), stmt("precondition")] }),
+        stmt("precondition"),
+      ],
+      target,
+    );
+    const pres = calls.filter((c) => c.kind === "precondition").map((c) => c.ix.pre);
+    expect(new Set(pres).size, `duplicate temp indices: ${pres.join(",")}`).toBe(pres.length);
+  });
+
+  it("keeps per-kind (python) numbering unique across nesting too", () => {
+    const { target, calls } = recordingTarget("per-kind");
+    renderStmtsWith(
+      [
+        stmt("precondition"),
+        stmt("if", { thenBody: [stmt("precondition")], elseBody: [stmt("precondition")] }),
+      ],
+      target,
+    );
+    const pres = calls.filter((c) => c.kind === "precondition").map((c) => c.ix.pre);
+    expect(new Set(pres).size, `duplicate temp indices: ${pres.join(",")}`).toBe(pres.length);
   });
 });

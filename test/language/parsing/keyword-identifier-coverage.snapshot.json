@@ -431,7 +431,15 @@
   "json": [],
   "jwt": [],
   "kafka": [],
-  "key": [],
+  "key": [
+    "fieldName",
+    "fieldNameAfterField",
+    "lValue",
+    "memberAccess",
+    "nameRef",
+    "paramName",
+    "stateField"
+  ],
   "keyPrefix": [
     "fieldName",
     "fieldNameAfterField",
