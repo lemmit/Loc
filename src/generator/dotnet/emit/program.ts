@@ -1,4 +1,5 @@
 import type { BoundedContextIR } from "../../../ir/types/loom-ir.js";
+import { deriveContextOperations, staticSubpathRoutes } from "../../../ir/util/api-surface.js";
 import { readPortsForOperation } from "../../../ir/util/domain-service-read-ports.js";
 import { isTphBase } from "../../../ir/util/inheritance.js";
 import { AUTH_BASE_PATH } from "../../../util/api-base.js";
@@ -560,6 +561,50 @@ using (var scope = app.Services.CreateScope())
 }
 `
     : "";
+  // A STATIC one-segment sub-path (`GET /api/customers/by_email`) is captured by
+  // the sibling `{id}` route under any verb it does not itself serve: ASP.NET's
+  // endpoint selection sees `DELETE /api/customers/{id}` as a full candidate and
+  // never reaches the method-mismatch policy that would answer 405, so the
+  // `{id}` binder answers `422 Invalid UUID` for a path with no DELETE at all
+  // (schemathesis F18).  405 is the honest answer, and the only one that can
+  // carry an `Allow` the caller can act on (RFC 9110 15.5.6).
+  //
+  // Mounted just before `MapControllers`, and INSIDE `UseStatusCodePages` (which
+  // sits above it): the guard sets the status and the `Allow` header and writes
+  // NO body, so the existing status-code responder fills in the same RFC 7807
+  // envelope — with its own `method X is not supported for Y` detail — that a
+  // framework-originated 405 already gets.  One 405 shape, not two.
+  const staticSubpaths = staticSubpathRoutes(deriveContextOperations(ctx));
+  const staticSubpathEntries = Object.entries(staticSubpaths).sort(([a], [b]) =>
+    a.localeCompare(b),
+  );
+  const staticSubpathGuard =
+    staticSubpathEntries.length === 0
+      ? ""
+      : `// Static sub-paths that a sibling \`{id}\` route would otherwise swallow under a
+// verb they do not serve.  Answers 405 + Allow; the body is left to
+// UseStatusCodePages above, so this shares the framework 405's exact envelope.
+var staticSubpathMethods = new Dictionary<string, string[]>(StringComparer.Ordinal)
+{
+${staticSubpathEntries
+  .map(
+    ([path, methods]) =>
+      `    [${JSON.stringify(path)}] = new[] { ${methods.map((m) => JSON.stringify(m)).join(", ")} },`,
+  )
+  .join("\n")}
+};
+app.Use(async (HttpContext http, RequestDelegate next) =>
+{
+    if (staticSubpathMethods.TryGetValue(http.Request.Path.Value ?? string.Empty, out var allow)
+        && !allow.Contains(http.Request.Method, StringComparer.Ordinal))
+    {
+        http.Response.StatusCode = StatusCodes.Status405MethodNotAllowed;
+        http.Response.Headers["Allow"] = string.Join(", ", allow);
+        return;
+    }
+    await next(http);
+});
+`;
   const authMount = authRequired
     ? `app.UseMiddleware<UserMiddleware>();
 `
@@ -1096,7 +1141,7 @@ app.UseStatusCodePages(async (StatusCodeContext statusCodeContext) =>
 app.UseCors();
 // Serve the spec at /openapi.json (documentName "openapi" → "{documentName}.json").
 app.UseSwagger(c => c.RouteTemplate = "{documentName}.json");
-${authMount}app.MapControllers();
+${staticSubpathGuard}${authMount}app.MapControllers();
 ${fileRoutesEndpoint}${realtimeEndpoint}${authMe}${authHandshake}${
   hasEmbeddedSpa
     ? `
