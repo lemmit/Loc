@@ -42,14 +42,14 @@ function isActive(path: string, opts?: { exact?: boolean }): boolean {
     </v-app-bar>
     <v-navigation-drawer v-model="drawer" width="240" {{{primaryNavAria}}}>
       <v-list density="compact" nav role="none" data-testid="nav-sidebar">
-{{#each navSections}}        <v-list-subheader>{{{labelText}}}</v-list-subheader>
+{{#each navSections}}        <v-list-subheader class="loom-nav-section">{{{labelText}}}</v-list-subheader>
 {{#each entries}}{{#if external}}        <v-list-item :href="'{{href}}'" target="_blank" rel="noreferrer" {{{labelAttr "title"}}} data-testid="{{testId}}" />
 {{else}}{{#if requiresJs}}        <template v-if='({{{requiresJs}}})'><v-list-item to="{{to}}" {{{labelAttr "title"}}} :active="isActive('{{to}}'{{#if exact}}, { exact: true }{{/if}})" data-testid="{{testId}}" /></template>
 {{else}}        <v-list-item to="{{to}}" {{{labelAttr "title"}}} :active="isActive('{{to}}'{{#if exact}}, { exact: true }{{/if}})" data-testid="{{testId}}" />
 {{/if}}{{/if}}{{/each}}{{/each}}      </v-list>
     </v-navigation-drawer>
     <v-main id="main-content">
-      <v-container fluid>
+      <v-container fluid class="pa-4 pa-lg-6" style="min-width: 0">
         <div v-if="appError" data-testid="app-error">
           <v-alert type="error" {{{errorTitleAttr}}} :text="appError.message" />
           <v-btn class="mt-4" variant="outlined" @click="resetError">{{{backToHomeText}}}</v-btn>
@@ -75,4 +75,6 @@ function isActive(path: string, opts?: { exact?: boolean }): boolean {
    breadcrumbs) drops `<v-breadcrumbs>`'s `<ul>` for a valid list, so restore
    the visual `/` between crumbs here. */
 .loom-breadcrumbs>*:not(:last-child)::after{content:"/";margin-inline-start:8px;opacity:.5}
+/* Sidebar section label — the one cross-pack chrome style (design-packs.md). */
+.loom-nav-section{font-size:0.75rem !important;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;margin:8px 0 4px}
 </style>

@@ -1,7 +1,7 @@
 <form onSubmit={handleSubmit(async (vals) => {{{submitBody}}})}{{{testidAttr}}}>
 {{indent}}<Stack gap={2}>
 {{#each fieldHtmls}}{{../innerIndent}}{{{this}}}
-{{/each}}{{innerIndent}}<Stack direction="row" justifyContent="flex-end" sx=\{{ mt: 1 }}>
+{{/each}}{{innerIndent}}<Stack direction="row" justifyContent="flex-end" gap={1} sx=\{{ mt: 2 }}>
 {{deepIndent}}<Button type="submit" variant="contained" disabled={ {{submitPendingExpr}} } data-testid="{{submitTestid}}">{{submitLabel}}</Button>
 {{innerIndent}}</Stack>
 {{indent}}</Stack>

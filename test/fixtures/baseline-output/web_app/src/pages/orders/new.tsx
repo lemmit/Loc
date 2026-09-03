@@ -16,7 +16,7 @@ export default function OrderNew() {
     defaultValues: { customerId: "", status: "Draft", placedAt: "" },
   });
   return (
-    <Stack data-testid="orders-new-page">
+    <Stack gap="md" data-testid="orders-new-page">
       <Breadcrumbs>
         <Anchor component={RouterLink} to="/">{t("page.New.anchor.n0mxf2", "Home")}</Anchor>
         <Anchor component={RouterLink} to="/orders">{t("page.New.anchor.xf3i18", "Orders")}</Anchor>
@@ -51,7 +51,7 @@ export default function OrderNew() {
     
             <TextInput label="Placed At" {...register("placedAt")} data-testid="orders-new-input-placedAt" type="datetime-local" error={errors.placedAt?.message} />
     
-            <Group justify="flex-end" mt="sm">
+            <Group justify="flex-end" gap="xs" mt="md">
               <Button type="submit" loading={ create.isPending } data-testid="orders-new-submit">Create</Button>
             </Group>
           </Stack>

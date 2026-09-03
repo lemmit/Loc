@@ -49,7 +49,9 @@ describe("angular explicit menu block", () => {
     // authored menu label binds through the catalog key the extraction pass
     // recorded for it (A13b) — a RAW `>Main<` here would mean the
     // `menu.section.*` / `menu.link.*` entries are dead again.
-    expect(shell).toMatch(/<h3 matSubheader>\{\{ t\("menu\.section\.\w+", "Main"\) \}\}<\/h3>/);
+    expect(shell).toMatch(
+      /<h3 matSubheader class="loom-nav-section">\{\{ t\("menu\.section\.\w+", "Main"\) \}\}<\/h3>/,
+    );
     expect(shell).not.toContain("Shop</h3>");
     // Internal link: the menu's `label:` override + a routerLink to the route.
     expect(shell).toMatch(
@@ -65,7 +67,7 @@ describe("angular explicit menu block", () => {
     const shell = shellOf(await generateSystemFiles(SYS("")));
     // Default section is labelled with the (humanised) system name; every
     // routed page gets one internal link.
-    expect(shell).toContain("<h3 matSubheader>Shop</h3>");
+    expect(shell).toContain('<h3 matSubheader class="loom-nav-section">Shop</h3>');
     expect(shell).toContain('routerLink="/orders"');
     expect(shell).not.toContain('target="_blank"');
   });

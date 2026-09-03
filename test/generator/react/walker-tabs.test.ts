@@ -125,7 +125,7 @@ describe("Tabs in walker stdlib", () => {
       }
     `);
     const content = files.get("web/src/pages/x.tsx")!;
-    expect(content).toMatch(/<Stack>/);
+    expect(content).toMatch(/<Stack gap="md">/);
     expect(content).toMatch(/<Tabs defaultValue="a">/);
     // Each panel contains its own Stack subtree.
     expect(content).toMatch(/<Tabs\.Panel value="a">/);

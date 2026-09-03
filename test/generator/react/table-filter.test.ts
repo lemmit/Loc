@@ -54,7 +54,7 @@ describe("Table client-side filter (React)", () => {
     // slot, so the multi-root output is wrapped in a JSX fragment (illegal
     // adjacent JSX otherwise — TS2657).
     expect(content).toContain('<><input type="search"');
-    expect(content).toMatch(/<\/Table>\s*<\/>/);
+    expect(content).toMatch(/<\/Table><\/div>\s*<\/>/);
     // Rows wrapped in an inline case-insensitive substring filter.
     expect(content).toContain("((customerAll.data.items) ?? []).filter((r) =>");
     expect(content).toContain("Object.values(r as Record<string, unknown>)");

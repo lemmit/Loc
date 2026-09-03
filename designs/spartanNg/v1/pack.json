@@ -63,9 +63,17 @@
   },
   "chrome": {
     "boolFalse": "No",
-    "boolTrue": "Yes"
+    "boolTrue": "Yes",
+    "breadcrumbsLandmark": "Breadcrumb"
   },
   "imports": {
-    "realtime-toast": [{ "from": "./loom-toast.service", "named": ["LoomToastService"] }]
+    "realtime-toast": [
+      {
+        "from": "./loom-toast.service",
+        "named": [
+          "LoomToastService"
+        ]
+      }
+    ]
   }
 }

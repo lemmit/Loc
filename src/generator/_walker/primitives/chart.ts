@@ -155,6 +155,22 @@ export function emitChart(
     dataKey,
     seriesField,
     ariaLabel,
+    // Integer ticks for an integral series — the cross-pack chart rule in
+    // docs/design-packs.md.  A `count(…)` projection plotted 0.0 / 0.2 / 0.4
+    // …  on every pack, because a charting library picks its tick step from
+    // the DOMAIN, and a domain of 0..1 divides into fifths whether or not a
+    // fifth of a row means anything.  Nothing static can answer "is this
+    // series integral" — the walker sees the projection's NAME, not its field
+    // types — so the answer is computed from the rows the chart is about to
+    // draw, which is exactly right and costs one pass over an already-fetched
+    // array.  Only the JS shape can say it; a target with its own
+    // `renderChartData` (Feliz, Flutter) gets no expression and its pack
+    // renders without the prop.
+    hasIntegerAxis: ctx.target.renderChartData === undefined,
+    integerAxisExpr:
+      ctx.target.renderChartData === undefined
+        ? `(${queryExpr}.data ?? []).every((r) => Number.isInteger(Number(r.${seriesField})))`
+        : undefined,
     testidAttr: testidAttr(call, ctx),
   });
 }

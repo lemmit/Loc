@@ -58,7 +58,7 @@ function UpdateForm({ mut, onClose }: { mut: ReturnType<typeof useUpdateProduct>
           </Stack>
         </Fieldset>
 
-        <Group justify="flex-end" mt="sm">
+        <Group justify="flex-end" gap="xs" mt="md">
           <Button variant="default" onClick={onClose}>{t("chrome.cancel", "Cancel")}</Button>
           <Button type="submit" loading={mut.isPending} data-testid="products-op-update-submit">Update</Button>
         </Group>
@@ -72,7 +72,7 @@ export default function ProductDetail() {
   const productById = useProductById(id);
   const update = useUpdateProduct(id ?? "");
   return (
-    <Stack data-testid="products-detail">
+    <Stack gap="md" data-testid="products-detail">
       <Breadcrumbs>
         <Anchor component={RouterLink} to="/">{t("page.Detail.anchor.n0mxf2", "Home")}</Anchor>
         <Anchor component={RouterLink} to="/products">{t("page.Detail.anchor.kdfstp", "Products")}</Anchor>
@@ -94,16 +94,16 @@ export default function ProductDetail() {
           <Alert color="yellow" variant="light">{t("page.Detail.alert.1s47jw", "No product matches that id.")}</Alert>
         ) }
         { productById.data && (
-          <Stack>
+          <Stack gap="md">
             <Card withBorder padding="md">
-              <Stack>
+              <Stack gap="md">
                 <KeyValueRow label={t("page.Detail.keyValue.gkg0ca", "Sku")} data-testid="products-detail-sku"><Text>{productById.data.sku}</Text></KeyValueRow>
                 <KeyValueRow label={t("page.Detail.keyValue.6rtmhu", "Price Amount")}><Text>{productById.data.price.amount}</Text></KeyValueRow>
                 <KeyValueRow label={t("page.Detail.keyValue.vd0zdh", "Price Currency")}><Text>{productById.data.price.currency}</Text></KeyValueRow>
                 <KeyValueRow label={t("page.Detail.keyValue.q0zd4n", "Version")} data-testid="products-detail-version"><Text>{productById.data.version}</Text></KeyValueRow>
               </Stack>
             </Card>
-            <Group>
+            <Group gap="xs">
               <Button variant="filled" onClick={() => openUpdateModal(update)} data-testid="products-op-update">{t("page.Detail.button.uk4kus", "Update")}</Button>
     
             </Group>

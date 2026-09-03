@@ -298,7 +298,7 @@ describe("react generator", () => {
         /<a href="#main-content" className="loom-skip-link">\{t\("chrome\.skipToContent", "Skip to content"\)\}<\/a>/,
       );
       // The <main> region carries the matching id (AppShell.Main renders <main>).
-      expect(app).toMatch(/<AppShell\.Main id="main-content">/);
+      expect(app).toMatch(/<AppShell\.Main id="main-content" style=\{\{ minWidth: 0 \}\}>/);
       // Focus-reveal style for the otherwise-offscreen link.
       expect(app).toMatch(/\.loom-skip-link:focus/);
     });
@@ -307,9 +307,9 @@ describe("react generator", () => {
       const model = await buildModel("examples/acme.ddd");
       const { files } = generateSystems(model);
       const app = files.get("web_app/src/App.tsx")!;
-      // Section headers (Mantine Divider with label).
-      expect(app).toMatch(/<Divider my="xs" label="Aggregates" labelPosition="left" \/>/);
-      expect(app).toMatch(/<Divider my="xs" label="Workflows" labelPosition="left" \/>/);
+      // Section headers (the one cross-pack section-label style).
+      expect(app).toMatch(/<div className="loom-nav-section">Aggregates<\/div>/);
+      expect(app).toMatch(/<div className="loom-nav-section">Workflows<\/div>/);
       // Per-aggregate NavLink with active prop wired through useLocation.
       expect(app).toMatch(
         /<NavLink component=\{RouterLink\} to="\/orders" label="Orders" active=\{isActive\("\/orders"\)\}/,
@@ -349,7 +349,7 @@ describe("react generator", () => {
       );
       const { files } = generateSystems(doc.parseResult.value as Model);
       const app = files.get("web/src/App.tsx")!;
-      expect(app).toMatch(/<Divider my="xs" label="Aggregates"/);
+      expect(app).toMatch(/<div className="loom-nav-section">Aggregates</);
       // No workflows section emitted.
       expect(app).not.toMatch(/label="Workflows"/);
       expect(app).not.toMatch(/data-testid="nav-workflows"/);

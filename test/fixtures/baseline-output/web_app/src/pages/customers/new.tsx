@@ -16,7 +16,7 @@ export default function CustomerNew() {
     defaultValues: { username: "", email: "", age: 0 },
   });
   return (
-    <Stack data-testid="customers-new-page">
+    <Stack gap="md" data-testid="customers-new-page">
       <Breadcrumbs>
         <Anchor component={RouterLink} to="/">{t("page.New.anchor.n0mxf2", "Home")}</Anchor>
         <Anchor component={RouterLink} to="/customers">{t("page.New.anchor.vweyym", "Customers")}</Anchor>
@@ -51,7 +51,7 @@ export default function CustomerNew() {
               )}
             />
     
-            <Group justify="flex-end" mt="sm">
+            <Group justify="flex-end" gap="xs" mt="md">
               <Button type="submit" loading={ create.isPending } data-testid="customers-new-submit">Create</Button>
             </Group>
           </Stack>

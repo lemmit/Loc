@@ -18,7 +18,7 @@ export default function PlaceOrderWorkflow() {
     defaultValues: { customerId: "", productId: "", quantity: 0 },
   });
   return (
-    <Stack data-testid="workflow-place_order-page">
+    <Stack gap="md" data-testid="workflow-place_order-page">
       <Breadcrumbs>
         <Anchor component={RouterLink} to="/">{t("page.PlaceOrderWorkflow.anchor.n0mxf2", "Home")}</Anchor>
         <Anchor component={RouterLink} to="/workflows">{t("page.PlaceOrderWorkflow.anchor.qrue75", "Workflows")}</Anchor>
@@ -59,7 +59,7 @@ export default function PlaceOrderWorkflow() {
               )}
             />
     
-            <Group justify="flex-end" mt="sm">
+            <Group justify="flex-end" gap="xs" mt="md">
               <Button type="submit" loading={ run.isPending } data-testid="workflow-place_order-submit">Run</Button>
             </Group>
           </Stack>

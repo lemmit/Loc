@@ -72,7 +72,8 @@ import { RouterLink,{{#if hasNav}} RouterLinkActive,{{/if}} RouterOutlet } from 
     }
     .loom-nav-link:hover { background: hsl(var(--accent)); }
     .loom-active { background: hsl(var(--accent)); color: hsl(var(--accent-foreground)); }
-    .loom-main { flex: 1; padding: 1.5rem; min-width: 0; }
+    .loom-main { flex: 1; padding: 1rem; min-width: 0; }
+    @media (min-width: 1024px) { .loom-main { padding: 1.5rem; } }
     .loom-skip-link { position: absolute; left: -9999px; top: 0; z-index: 3000; padding: 8px 16px; background: Canvas; color: CanvasText; border: 1px solid; border-radius: 4px; }
     .loom-skip-link:focus { left: 8px; top: 8px; }
   `,

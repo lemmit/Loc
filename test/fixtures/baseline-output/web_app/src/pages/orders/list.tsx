@@ -15,16 +15,16 @@ export default function OrderList() {
   const orderByCustomer = useByCustomerOrder({ customerId: byCustomerCustomerId });
   const orderAll = useAllOrders({ page: pageNum, pageSize: 10, sort: sortKey, dir: sortDir });
   return (
-    <Stack data-testid="orders-list">
+    <Stack gap="md" data-testid="orders-list">
       <Breadcrumbs>
         <Anchor component={RouterLink} to="/">{t("page.List.anchor.n0mxf2", "Home")}</Anchor>
         <Text>{t("page.List.text.xf3i18", "Orders")}</Text>
       </Breadcrumbs>
-      <Group justify="space-between" role="toolbar" aria-label="Actions">
+      <Group justify="space-between" align="center" gap="md" role="toolbar" aria-label="Actions">
         <Title order={2}>{t("page.List.heading.xf3i18", "Orders")}</Title>
         <Button onClick={() => navigate("/orders/new")} data-testid="orders-list-create">{t("page.List.button.i38a1x", "New order")}</Button>
       </Group>
-      <Group>
+      <Group gap="xs">
         <TextInput label={t("page.List.inputLabel.0ysfxy", "Customer Id")} value={byCustomerCustomerId} onChange={(e) => setByCustomerCustomerId(e.currentTarget.value)} data-testid="orders-filter-by_customer_customer_id" />
       </Group>
       {((byCustomerCustomerId !== "")) ? (<>
@@ -43,7 +43,7 @@ export default function OrderList() {
           ) }
           { orderByCustomer.data && orderByCustomer.data.length > 0 && (
             <Paper p="md">
-              <><Table striped highlightOnHover stickyHeader>
+              <><div className="loom-table-scroll" style={{ width: "100%", overflowX: "auto" }}><Table striped highlightOnHover stickyHeader>
                 <Table.Thead>
                   <Table.Tr>
                     <Table.Th><button type="button" style={{ background: "none", border: "none", padding: 0, font: "inherit", cursor: "pointer", userSelect: "none" }} onClick={() => { if (sortKey === "id") { setSortDir(sortDir === "asc" ? "desc" : "asc"); } else { setSortKey("id"); setSortDir("asc"); } }}>{t("page.List.columnHeader.o4495s", "ID")}{sortKey === "id" ? (sortDir === "asc" ? " ↑" : " ↓") : ""}</button></Table.Th>
@@ -64,7 +64,7 @@ export default function OrderList() {
                     </Table.Tr>
                   )) }
                 </Table.Tbody>
-              </Table>
+              </Table></div>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "0.5rem", marginTop: "0.75rem" }} data-testid="pager"><button type="button" disabled={pageNum <= 1} onClick={() => setPageNum(pageNum - 1)}>{t("chrome.prev", "Prev")}</button><span>{t("chrome.pageOf", "Page {page} of {pages}", { page: pageNum, pages: Math.max(1, Math.ceil(([...(orderByCustomer.data)].sort((a, b) => { if (!sortKey) { return 0; } const sv = (v: unknown) => (v === null || typeof v !== "object" || Array.isArray(v)) ? v : (Number.isNaN(Number(v)) ? v : Number(v)); const av = sv((a as Record<string, unknown>)[sortKey]); const bv = sv((b as Record<string, unknown>)[sortKey]); const c = av === bv ? 0 : (av as number) < (bv as number) ? -1 : 1; return sortDir === "desc" ? -c : c; })).length / 10)) })}</span><button type="button" disabled={pageNum >= Math.max(1, Math.ceil(([...(orderByCustomer.data)].sort((a, b) => { if (!sortKey) { return 0; } const sv = (v: unknown) => (v === null || typeof v !== "object" || Array.isArray(v)) ? v : (Number.isNaN(Number(v)) ? v : Number(v)); const av = sv((a as Record<string, unknown>)[sortKey]); const bv = sv((b as Record<string, unknown>)[sortKey]); const c = av === bv ? 0 : (av as number) < (bv as number) ? -1 : 1; return sortDir === "desc" ? -c : c; })).length / 10))} onClick={() => setPageNum(pageNum + 1)}>{t("chrome.next", "Next")}</button></div></>
             </Paper>
           ) }
@@ -84,7 +84,7 @@ export default function OrderList() {
           ) }
           { orderAll.data && orderAll.data.items.length > 0 && (
             <Paper p="md">
-              <><Table striped highlightOnHover stickyHeader>
+              <><div className="loom-table-scroll" style={{ width: "100%", overflowX: "auto" }}><Table striped highlightOnHover stickyHeader>
                 <Table.Thead>
                   <Table.Tr>
                     <Table.Th><button type="button" style={{ background: "none", border: "none", padding: 0, font: "inherit", cursor: "pointer", userSelect: "none" }} onClick={() => { if (sortKey === "id") { setSortDir(sortDir === "asc" ? "desc" : "asc"); } else { setSortKey("id"); setSortDir("asc"); } }}>{t("page.List.columnHeader.o4495s", "ID")}{sortKey === "id" ? (sortDir === "asc" ? " ↑" : " ↓") : ""}</button></Table.Th>
@@ -105,7 +105,7 @@ export default function OrderList() {
                     </Table.Tr>
                   )) }
                 </Table.Tbody>
-              </Table>
+              </Table></div>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "0.5rem", marginTop: "0.75rem" }} data-testid="pager"><button type="button" disabled={pageNum <= 1} onClick={() => setPageNum(pageNum - 1)}>{t("chrome.prev", "Prev")}</button><span>{t("chrome.pageOf", "Page {page} of {pages}", { page: pageNum, pages: Math.max(1, orderAll.data.totalPages) })}</span><button type="button" disabled={pageNum >= Math.max(1, orderAll.data.totalPages)} onClick={() => setPageNum(pageNum + 1)}>{t("chrome.next", "Next")}</button></div></>
             </Paper>
           ) }

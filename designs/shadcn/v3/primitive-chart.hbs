@@ -20,14 +20,14 @@
 {{#if isLine}}        <LineChart data={ {{{dataExpr}}} }>
           <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
           <XAxis dataKey="{{dataKey}}" stroke="hsl(var(--muted-foreground))" fontSize={12} />
-          <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
+          <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12}{{#if hasIntegerAxis}} allowDecimals={!({{{integerAxisExpr}}})}{{/if}} />
           <Tooltip contentStyle=\{{ background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: "var(--radius)", color: "hsl(var(--popover-foreground))" }} />
           <Line type="monotone" dataKey="{{seriesField}}" stroke="hsl(var(--primary))" strokeWidth={2} dot={false} />
         </LineChart>
 {{else}}        <BarChart data={ {{{dataExpr}}} }>
           <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
           <XAxis dataKey="{{dataKey}}" stroke="hsl(var(--muted-foreground))" fontSize={12} />
-          <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
+          <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12}{{#if hasIntegerAxis}} allowDecimals={!({{{integerAxisExpr}}})}{{/if}} />
           <Tooltip contentStyle=\{{ background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: "var(--radius)", color: "hsl(var(--popover-foreground))" }} />
           <Bar dataKey="{{seriesField}}" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
         </BarChart>

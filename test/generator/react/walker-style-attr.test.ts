@@ -71,7 +71,7 @@ describe("walker style: escape hatch — React emission", () => {
       }
     `);
     const content = files.get("web/src/pages/home.tsx")!;
-    expect(content).toMatch(/<Stack style=\{\{ "gap": "16px" \}\}>/);
+    expect(content).toMatch(/<Stack gap="md" style=\{\{ "gap": "16px" \}\}>/);
   });
 
   it("primitive without style: emits no style attribute", async () => {

@@ -36,7 +36,7 @@ describe("Container + PasswordField primitives", () => {
     expect(content).toBeDefined();
     expect(content).toMatch(/import \{ Container, Stack, Text, Title \} from "@mantine\/core";/);
     expect(content).toMatch(/<Container>/);
-    expect(content).toMatch(/<Stack>/);
+    expect(content).toMatch(/<Stack gap="md">/);
     expect(content).toMatch(/<\/Container>/);
   });
 
