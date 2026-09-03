@@ -27,6 +27,7 @@ import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
 import { lowerModel } from "../../src/ir/lower/lower.js";
 import type { PageIR } from "../../src/ir/types/loom-ir.js";
 import { validateLoomModel } from "../../src/ir/validate/validate.js";
+import { RENDERABLE_FILTER_PRIMITIVES } from "../../src/util/filter-param-kinds.js";
 import { parseString } from "../_helpers/parse.js";
 
 const CODE = "loom.scaffold-filter-param-unsupported";
@@ -94,6 +95,50 @@ describe("loom.scaffold-filter-param-unsupported — the gate", () => {
     expect(codes).toHaveLength(1);
     expect(codes[0]).toContain("`r: decimal`");
     expect(stateFields).not.toContain("byRateR");
+  });
+
+  // The message is a REMEDY, so its type list has to be the set the gate
+  // actually refuses.  #2699 landed `bool` / `datetime` / `guid` in
+  // `RENDERABLE_FILTER_PRIMITIVES` and the catalog text kept naming all three as
+  // having "no input at all" — sending an author to change a param type that
+  // already works, and hiding the two kinds that ARE still refused.  This pins
+  // both directions against `RENDERABLE_FILTER_PRIMITIVES` itself rather than
+  // against a hand-copied list, so the next kind to land fails here instead of
+  // rotting the message (experience_gathered §91: a list in prose is a cache).
+  it("the message's type list matches the set the gate actually renders", async () => {
+    const { codes } = await probe(
+      `        find byStatus(s: Status): Order[] where this.status == s`,
+    );
+    const message = codes[0]!;
+    // Split at the hinge.  Naming a kind ANYWHERE is not enough — the stale
+    // text named `bool`/`datetime`/`guid` too, as things that "have no input at
+    // all", so a mere `toContain` passes on the exact wording under test.  What
+    // has to hold is WHICH SIDE of the sentence each kind lands on.
+    const hinge = message.indexOf("Two kinds are still held back");
+    expect(hinge, `message must keep the renders/refuses split:\n${message}`).toBeGreaterThan(0);
+    const renders = message.slice(0, hinge);
+    const refuses = message.slice(hinge);
+
+    // Forward ratchet: a kind the gate renders must be OFFERED.  Add one to
+    // `RENDERABLE_FILTER_PRIMITIVES` without touching the message and this
+    // fails — which is the whole point, since the message is the remedy.
+    for (const kind of RENDERABLE_FILTER_PRIMITIVES) {
+      expect(
+        renders,
+        `'${kind}' renders — it belongs in the offered list, not below the hinge`,
+      ).toContain(`\`${kind}\``);
+    }
+    // Reverse ratchet: the two still refused are named below the hinge with
+    // their reasons, and NOT offered above it.  (Only the offered side gets a
+    // blanket exclusion — the refusing side legitimately mentions `string`
+    // while explaining the enum case, so "appears below the hinge" cannot mean
+    // "is listed as refused".)
+    expect(refuses).toMatch(/`decimal`\/`money`/);
+    expect(refuses).toMatch(/`enum`/);
+    expect(renders).not.toMatch(/`decimal`|`money`|`enum`/);
+    // The stale enumeration verbatim, so it cannot return by copy-paste.
+    expect(message).not.toMatch(/no input at all/);
+    expect(message).not.toMatch(/`bool`\/`datetime`\/`guid`/);
   });
 
   it("stays quiet for the kinds M-T1.15 landed — string, int and `X id`", async () => {

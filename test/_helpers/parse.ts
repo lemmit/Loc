@@ -47,22 +47,47 @@ let _services: ReturnType<typeof createDddServices> | undefined;
 const sharedServices = (): ReturnType<typeof createDddServices> =>
   (_services ??= createDddServices(NodeFileSystem));
 
-/** URI of the last document `parseString` built, pending eviction. */
-let _previousUri: URI | undefined;
+/** URIs of every document `parseString` built and has not yet evicted. */
+const _pendingUris = new Set<URI>();
 
 async function evictPrevious(services: ReturnType<typeof createDddServices>): Promise<void> {
-  if (_previousUri === undefined) return;
-  const uri = _previousUri;
-  _previousUri = undefined;
-  await services.shared.workspace.DocumentBuilder.update([], [uri]);
+  if (_pendingUris.size === 0) return;
+  const uris = [..._pendingUris];
+  _pendingUris.clear();
+  await services.shared.workspace.DocumentBuilder.update([], uris);
 }
+
+// Calls are serialised through this chain.  Tests routinely fan out
+// (`Promise.all(BACKENDS.map(b => generateSystemFiles(src(b))))`), and with
+// concurrent calls the evict-then-parse pairing below interleaves: every call
+// evicts the same previous URI, each `parseHelper` adds a document, and only
+// the last one was recorded for eviction — the rest stayed in the shared
+// workspace for the life of the process.  Verified: after one such fan-out,
+// four Validated documents lingered through every later parse.  Under
+// per-file isolation that leak died with the file; with a shared module graph
+// (`isolate: false`, vitest.config.ts) it crossed into the next file's parse,
+// which then linked — and macro-expanded — against a stranger's aggregates.
+// Serialising costs nothing: the parser is CPU-bound and single-threaded, so
+// the fan-out never ran in parallel anyway.
+let _chain: Promise<unknown> = Promise.resolve();
 
 /**
  * Parse an in-memory `.ddd` source string and (by default) run validation.
  * Replaces the `parseHelper(services.Ddd)` + diagnostics-filter boilerplate
  * duplicated across the suite.
  */
-export async function parseString(
+export function parseString(
+  source: string,
+  opts: { validate?: boolean } = {},
+): Promise<ParseResult> {
+  const run = _chain.then(() => parseStringSerial(source, opts));
+  // Keep the chain alive past a rejection so one bad fixture doesn't wedge
+  // every later parse behind it.
+  _chain = run.catch(() => undefined);
+  return run;
+}
+
+async function parseStringSerial(
   source: string,
   { validate = true }: { validate?: boolean } = {},
 ): Promise<ParseResult> {
@@ -82,7 +107,7 @@ export async function parseString(
   await evictPrevious(services);
   const helper = parseHelper<Model>(services.Ddd);
   const doc = await helper(source, { validation: validate });
-  _previousUri = doc.uri;
+  _pendingUris.add(doc.uri);
   const diagnostics = doc.diagnostics ?? [];
   return {
     model: doc.parseResult.value,
