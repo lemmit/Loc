@@ -8,7 +8,7 @@
 // `Html.a`) via the `renderFileLink` WalkerTarget override; Phoenix/HEEx via
 // its parallel walker (`heex-primitives.ts::renderFileLink`).
 
-import type { ExprIR } from "../../../ir/types/loom-ir.js";
+import type { ExprIR, TypeIR } from "../../../ir/types/loom-ir.js";
 import { namedArgValue, positionalArgs } from "../shared/args.js";
 import type { WalkContext } from "../walker-core.js";
 import { emitExpr, testidAttr } from "../walker-core.js";
@@ -30,8 +30,24 @@ export function emitFileLink(
 
   const arg = namedArgValue(call, "value") ?? positionalArgs(call)[0];
   const recv = arg ? emitExpr(arg, ctx) : '""';
-  const href = ctx.target.renderAttrBinding("href", `${recv}.url`);
-  const label = ctx.target.renderInterpolation(`${recv}.key`);
+  // The two reads sit INSIDE the truthiness guard below, so they can never run
+  // on a null ref — but a type-checker has to be able to see that, and Angular
+  // cannot: the receiver of a scaffolded page's file field is rooted at a
+  // signal CALL (`byId.data()!.blob`), and Angular narrows no member chain
+  // across a call result (same limitation `renderQueryDataAccess` documents).
+  // So the reads are offered to the target as reads off an OPTIONAL `File`,
+  // which is exactly what the guard exists for; a target that spells those
+  // null-safe gets `blob?.url`, and one that doesn't keeps the plain access.
+  const fileRef: TypeIR = { kind: "optional", inner: { kind: "primitive", name: "File" } };
+  const read = (member: string): string =>
+    ctx.target.renderMemberRead?.({
+      receiver: recv,
+      member,
+      receiverType: fileRef,
+      memberType: undefined,
+    }) ?? `${recv}.${member}`;
+  const href = ctx.target.renderAttrBinding("href", read("url"));
+  const label = ctx.target.renderInterpolation(read("key"));
   const anchor = `<a${href} download${testidAttr(call, ctx)}>${label}</a>`;
   // The null placeholder rides a bare `<span>` — plain markup that is valid in
   // every target's conditional-child arm (a JS expression on React, a template

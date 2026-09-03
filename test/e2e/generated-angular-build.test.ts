@@ -527,7 +527,7 @@ const HISTORY: Case = {
 const OPTIONAL: Case = {
   name: "optional",
   angularDir: "web",
-  mustEmit: ["FormControl<FileRef | null>", "budget?.amount"],
+  mustEmit: ["FormControl<FileRef | null>", "budget?.amount", "attachment: FileRef | null"],
   source: `
     system AOptFields {
       subdomain Core {

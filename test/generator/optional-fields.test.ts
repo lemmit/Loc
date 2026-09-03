@@ -85,6 +85,21 @@ describe.each([
     expect(detail).not.toContain(".data()!?.name");
   });
 
+  it("types a File RESPONSE field as the client's FileRef, not `unknown`", async () => {
+    const api = (await files()).get("web/src/api/project.ts")!;
+    expect(api).toContain('import type { FileRef } from "./client";');
+    expect(api).toContain("attachment: FileRef | null;");
+    // Request-side stays `unknown`: the control is `FormControl<FileRef | null>`
+    // and `getRawValue()` has to stay assignable for a REQUIRED File too.
+    expect(api).toContain("attachment: unknown | null;");
+  });
+
+  it("null-chains FileLink's ref reads (Angular narrows no chain off a call)", async () => {
+    const detail = (await files()).get("web/src/app/pages/project-detail.component.ts")!;
+    expect(detail).toContain("attachment?.url");
+    expect(detail).toContain("attachment?.key");
+  });
+
   it("renders an optional File as a file input and imports what it needs", async () => {
     const create = (await files()).get("web/src/app/pages/project-new.component.ts")!;
     expect(create).toContain("attachment: new FormControl<FileRef | null>(null)");
