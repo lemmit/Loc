@@ -728,17 +728,25 @@ Split the problem by where the rule lives:
 
 ---
 
-## 9. Builtin component library — closed v0
+## 9. Builtin component library — closed
+
+The set is **closed**: 56 top-level primitives (`WALKER_LAYOUT_PRIMITIVES`) plus
+two sub-elements (`Tab`, `Column`), all declared in
+`src/util/walker-primitive-names.ts` and dispatched from
+`src/generator/_walker/registry.ts`.  Users compose them into their own
+`component`s; they cannot add primitives.  The per-primitive reference, with
+generated output for each, is
+[`language-reference/16-ui-walker-primitives.md`](language-reference/16-ui-walker-primitives.md);
+the table below is the map.
 
 | Component | Purpose |
 |---|---|
-| `scaffoldList { of: T }`, `scaffoldDetails { of: T }` | Canonical list / single-record page bodies (Breadcrumbs · Toolbar · QueryView · Table; field card · operation actions). Emitted by `scaffold(aggregates: […])`; also hand-writable to embed a list/detail in a custom page body. *(The earlier `List` / `Detail` / `MasterDetail` archetype names were inert, never-rendered duplicates of these and were **removed** — see [decisions.md → D-NO-PAGE-ARCHETYPES](decisions.md#d-no-page-archetypes).)* |
-| `Form { creates: T \| runs: workflow \| into: state, fields, onSubmit, then? }` | Input form bound to a typed request slice. |
-| `Dashboard(items: […])` | Composite read-only page; grid layout. |
-| `Review(of: T, onSubmit)` | Read-only summary view of a typed value, with a submit action. |
+| `CreateForm { of: T }`, `OperationForm { of: <record>.<op> }`, `WorkflowForm { runs: <wf> }`, `DestroyForm { of: T }` | The four named-leaf forms (the old polymorphic `Form { creates: \| runs: \| into: }` split into these). `DestroyForm`'s `of:` names the **aggregate**, not a loaded record — the emitter resolves it through the aggregate map, and anything else degrades to a comment on every target with no diagnostic (an honest gap to know about). |
 | `Stack`, `Group`, `Grid`, `Tabs` (+ `Tab`), `Card`, `Toolbar`, `Container`, `Paper`, `Breadcrumbs`, `Divider`, `Section`, `Sticky` | Layout primitives. `Section` is a semantic anchor target; `Sticky` a sticky-position wrapper; `Tab` is the sub-element of `Tabs` — `Tab { <label>, …children }`, a children container like `Card`: every positional after the label renders in the panel. |
 | `Heading`, `Text`, `Bold`, `Italic`, `InlineCode`, `Badge`, `Stat`, `Empty`, `Anchor`, `Image`, `Avatar`, `Loader`, `Skeleton`, `Alert`, `KeyValueRow`, `Icon` | Display primitives. `Bold`/`Italic`/`InlineCode` are inline-emphasis spans; `Icon` is a builtin-name or `svg:` literal, decorative-by-default (`aria-hidden`) unless `label:` gives it meaning — which makes it a named `role="img"` and makes that name a user-visible slot, translated through the message catalog. |
-| `Field`, `NumberField`, `PasswordField`, `MultilineField`, `Toggle`, `SelectField { label, bind, options }`, `Select`, `Fieldset` | Bindable inputs. `MultilineField` is the textarea twin of `Field`; `SelectField` is a controlled single-select over a string-array `options:` expression. All accept an optional `error:` expression rendered in the pack's inline error slot (§8.2). |
+| `Field`, `NumberField`, `PasswordField`, `MultilineField`, `Toggle`, `SelectField { label, bind, options }`, `FileUpload` | Bindable inputs, each `bind:`-bound to a `state` field. `MultilineField` is the textarea twin of `Field`; `SelectField` is a controlled single-select over a string-array `options:` expression; `FileUpload` binds a `File` state field (`loom.file-upload-not-file-field`). All accept an optional `error:` expression rendered in the pack's inline error slot (§8.2). |
+| `Chart { of:, kind:, x:, y: }` | Line / bar series over a **grouped** query-time `projection` — `kind:` is `"line"` or `"bar"` (`loom.chart-kind-invalid`), `of:` must be a grouped projection (`loom.chart-of-not-grouped`), and the accessors must be simple row fields (`loom.chart-accessor-not-field`). Ships on every frontend, LiveView included (inline SVG there — no JS charting library). |
+| `Timeline { of: <entries> }` | An `audited` aggregate's history (the `AuditEntry[]` served at `GET /<agg>/{id}/history`) as an ordered action / time / actor / field-change list. |
 | `Action(operation, then?)`, `Button { label, on? }` | Action primitives. |
 | `Modal { trigger, … }` | Disclosure surface — hosts an `OperationForm` (scaffold detail pages) or a state-controlled `open:` body. The state-controlled form ships on **all six frontends**. Flutter's dialogs are imperative (`showDialog` pushes a route), so there is no widget to conditionally render: it bridges through a generated `LoomModalHost` that drives `showDialog` on the flag's rising edge and reports dismissal back, keeping the page's state the single source of truth. `title:` is a user-visible slot on both shapes — it is the dialog's title, translated through the message catalog. The two shapes do not COMBINE on every target: `Modal { open: <stateBool>, OperationForm { … } }` renders on Angular, Feliz and HEEx (which drive the dialog from their own trigger) and collapses the whole modal to a comment on React/Vue/Svelte/Flutter, so it is a compile error there (`loom.modal-controlled-op-form-unsupported`) — use the trigger shape, which drives the dialog itself. |
 | `Money(value, currency?, decimals?)`, `DateDisplay`, `EnumBadge`, `IdLink`, `FileLink` | Formatter primitives. `Money` renders the wire value **verbatim** by default — its own digits, locale-neutral, with no `Number()` coercion, no grouping separators, no currency symbol and no re-scaling, so a `NUMERIC(19,4)` value's 4th decimal is visible (Loom `money` has no currency dimension, so nothing may be invented for it). `decimals: n` re-scales the digit string to exactly *n* fraction digits, half away from zero — the backends' own rounding family, never through a float. `currency: "EUR"` prefixes **the code you passed**, verbatim (`EUR 12.3456`). The contract is one shared implementation across all 15 design packs (`src/generator/_frontend/money-format.ts`; [design-packs.md](design-packs.md) § the money-display contract). Feliz already rendered the raw string and prefixes only a declared currency, so it matches by construction — it ignores `decimals:`; Flutter still formats through `NumberFormat.decimalPattern()` (M-T1.21). |

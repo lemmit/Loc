@@ -598,7 +598,7 @@ aggregate Organization { implements tenantRegistry }   // the registry tree (par
 
 Every persisted aggregate under a `tenancy by` system must take a stance (`loom.tenancy-stance-unmarked`, with an `#inherited` variant when an abstract base already declared one). The other gates: `loom.tenancy-duplicate`, `loom.tenancy-conflicting-stance`, `loom.tenancy-inherited-stance-conflict`, `loom.tenancy-claim-type-mismatch`, `loom.tenant-owned-claim-type`, `loom.tenant-owned-without-tenancy`, `loom.cross-tenant-without-tenancy` (warning), `loom.tenant-registry-without-tenancy`, `loom.tenancy-registry-duplicate`, `loom.tenancy-registry-not-target`, `loom.tenancy-registry-marked`, `loom.orgpath-without-tenancy`, and `loom.unique-missing-tenant-scope` (a `unique` on a tenant-owned aggregate that omits the discriminator is a *global* unique — usually a bug). A seed row on a tenant-owned aggregate must use `seed <dataset> raw { … }`, because the domain create path stamps from a principal a first-boot seeder does not have (`loom.seed-tenant-owned-needs-raw`).
 
-Declaration syntax also appears in [Systems & deployables](02-systems-modules-contexts.md#tenancy-by-userclaim-of-registry); the full design — registry bootstrap, per-backend filters, the hierarchy — is [`../tenancy.md`](../tenancy.md).
+Declaration syntax also appears in [Systems & deployables](02-systems-and-topology.md#tenancy-by-userclaim-of-registry); the full design — registry bootstrap, per-backend filters, the hierarchy — is [`../tenancy.md`](../tenancy.md).
 
 ## `sensitive(...)` — field tagging
 

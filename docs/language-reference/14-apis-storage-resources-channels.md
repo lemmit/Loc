@@ -52,6 +52,99 @@ createRoute({ method: "get",  path: "/",      operationId: "listOrders",  /* …
 ```
 ::: end
 
+### `route` — the explicit transport binding
+
+Derived CRUD covers the aggregate surface; a `route` binds **one explicit path** to a context-level `commandHandler` / `queryHandler` (chapter 3, [`commandHandler` / `queryHandler`](03-domain-modeling.md#commandhandler--queryhandler)). `HandlerRef` is `<Context>.<Handler>` — an unknown context or handler name is `loom.route-handler-unresolved`.
+
+```ddd
+context Orders {
+  command PlaceOrderCommand { code: string }
+  commandHandler PlaceOrder(cmd: PlaceOrderCommand): Order id {
+    let order = Order.create({ code: cmd.code, status: "Draft" })
+    return order.id
+  }
+  queryHandler GetOrder(orderId: Order id): Order { let order = Orders.getById(orderId)  return order }
+  extern queryHandler GetQuote(sku: string): string;
+}
+
+api OrdersApi from Sales {
+  route POST "/orders/place"          -> Orders.PlaceOrder
+  route GET  "/orders/{orderId}/view" -> Orders.GetOrder
+  route GET  "/quotes/{sku}"          -> Orders.GetQuote     // extern → scaffolded impl file
+}
+```
+
+Routes emit only on a deployable that **`serves:` that api** (the derived `/api/<plural>` CRUD mounts either way). A `{brace}` path segment binds a same-named handler parameter as a path param; every other parameter is bound from a JSON request body — **including on `GET`** (`route GET "/orders/by-code" -> C.FindByCode` with a `code: string` parameter emits a GET whose request schema is a JSON body on node and `[FromBody]` on .NET). Model a filtered read as `POST`, or take the value in the path, if a GET body is unacceptable to your clients.
+
+::: tabs backend
+== node
+```ts
+// http/ordersApi-routes.ts — mounted at app.route("/api", ordersApiRoutes(db, events))
+createRoute({
+  method: "post", path: "/orders/place", tags: ["OrdersApi"], operationId: "ordersPlaceOrder",
+  request: { body: { content: { "application/json": { schema: z.object({ code: z.string() }) } } } },
+  // …
+});
+async (httpCtx) => {
+  const body = httpCtx.req.valid("json");
+  const cmd = { code: body.code };
+  const orders = new OrderRepository(db, events);
+  const order = Order.create({ code: cmd.code, status: "Draft" });
+  await orders.save(order);
+  return httpCtx.json(order.id as unknown, 200);
+}
+// the extern handler dispatches to a scaffold-once, user-owned module
+const result = await getQuoteImpl(sku);
+```
+== dotnet
+```csharp
+// Api/OrdersApiRoutesController.cs — one action per route, each a Mediator send
+public sealed record PlaceOrderBody(string Code);
+
+[HttpPost("/orders/place")]
+public async Task<IActionResult> PlaceOrder([FromBody] PlaceOrderBody body)
+    => Ok(await _mediator.Send(new PlaceOrderCommand(body.Code)));
+
+[HttpGet("/orders/{orderId}/view")]
+public async Task<IActionResult> GetOrder(Guid orderId)
+{
+    var result = await _mediator.Send(new GetOrderQuery(new OrderId(orderId)));
+    return Ok(new OrderResponse(result.Id.Value, result.Code, result.Status, result.Version));
+}
+```
+== python
+```python
+# app/http/orders_api_routes.py
+@router.post("/orders/place", operation_id="placeOrder")
+async def place_order_route(body: PlaceOrderBody, session: SessionDep) -> dict[str, object]: ...
+
+@router.get("/orders/{order_id}/view", operation_id="getOrder")
+async def get_order_route(order_id: UuidStr, session: SessionDep) -> dict[str, object]: ...
+```
+== java
+```java
+// api/OrdersApiRoutesController.java
+@PostMapping("/orders/place")
+public ResponseEntity<?> placeOrder(@RequestBody PlaceOrderBody body) { … }
+
+@GetMapping("/orders/{orderId}/view")
+public ResponseEntity<?> getOrder(@PathVariable UUID orderId) { … }
+```
+== elixir
+```elixir
+# lib/d_elixir_web/router.ex
+post "/orders/place", DElixirWeb.OrdersApiRoutesController, :place_order
+get "/orders/:order_id/view", DElixirWeb.OrdersApiRoutesController, :get_order
+get "/quotes/:sku", DElixirWeb.OrdersApiRoutesController, :get_quote
+```
+::: end
+
+Handler gates (all `src/ir/validate/checks/api-checks.ts` unless noted): a `queryHandler` may not mutate (`loom.query-handler-saves`); a `commandHandler` touches one aggregate (`loom.command-handler-multi-aggregate`); a handler parameter may not be named `id` (`loom.handler-param-reserved-id`); a nullable load has no null-handling vocabulary in a handler body (`loom.handler-load-nullable-unsupported` — use `getById`); a non-`extern` handler needs a body and an `extern` one must be bodyless (`loom.handler-missing-body` / `loom.extern-handler-has-body`); and a handler name may not collide with another handler *or a workflow `handle`* in the same context (`loom.duplicate-handler`, `src/language/validators/duplicates.ts`) — the route reference `<Context>.<Name>` would be ambiguous. A route that names a **workflow `handle`** resolves in the validator but emits nothing today ([Workflows](13-workflows.md#create--handle--starters--continuations)).
+
+### `serves:` and the OpenAPI document
+
+`serves: OrdersApi` on a backend deployable mounts that api's explicit routes and pins its contract identity. It does **not** gate the spec document: every backend publishes its own OpenAPI 3.1 spec at `GET /openapi.json` whether or not a `serves:` clause exists (Hono `app.doc`, Swashbuckle with the document name pinned to `/openapi.json`, FastAPI, springdoc's `api-docs.path`, and a Phoenix `OpenapiController`). Python additionally serves Swagger UI at `/docs` unless `LOOM_OPENAPI_UI=false`.
+
 `urlStyle` only changes the **route segment of custom operations** — `op.routeSlug` is `op.name` under `literal` and `plural(op.name)` under `resource` (`src/platform/hono/v4/routes-builder.ts`, enriched per-subdomain in `enrichments.ts`). The base CRUD paths above are identical either way; the operationId, request DTO names, and extern-handler keys always stay keyed on the op name.
 
 `httpStatus <Error> -> <Code>` overrides the HTTP status the RFC-7807 ProblemDetails translator emits for an exception-less operation returning that `error` variant. It only surfaces on an operation that actually returns the named error (`operation cancel(): Order or NotFound`); with no such operation it emits nothing, and the validator (`structural-checks.ts`) warns when a returned custom error has neither a stdlib default nor an `httpStatus` mapping (it would default to 500). The per-error → status map carries into every backend's error translator (`errorStatuses` in the IR; consumed by the .NET `[ProducesResponseType]`, Python `errors.py`, Java/Hono ProblemDetails emitters).
