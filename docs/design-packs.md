@@ -310,6 +310,39 @@ already covered by its stack (`react`, `react-dom`, `react-router*`,
 the package.json the bundler emits and the stack's intent.  The
 validation step ([§ 8](#8-validating-your-pack)) flags overlap.
 
+### The partial-newline rule (or `package.json` comes out mangled)
+
+Handlebars strips the newline after a partial call that is **standalone**
+— alone on its line.  So whether a fragment ends with a trailing newline
+is not cosmetic; it has to match how its callers spell the call, and
+7 of 13 packs shipped
+
+```json
+    "typescript": "^6.0.0",
+    "vite": "^8.0.0"  }
+}
+```
+
+because the two disagreed.  The rule, which
+`test/generator/_packs/package-json-shape.test.ts` enforces by
+re-serializing every pack's emitted `package.json` and diffing:
+
+- `stack-package-deps.hbs` ends **without** a trailing newline — every
+  pack appends its own dependencies right after it (`{{> stack-package-deps}},`),
+  so the call is never standalone.
+- `stack-package-devdeps.hbs` ends **with** one — most packs call it
+  standalone, and a pack with extra devDependencies puts them BEFORE the
+  partial and lets the partial close the block:
+
+```hbs
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+{{> stack-package-devdeps}}  }
+```
+
+A new stack copies both conventions; the gate tells you within a second
+if it did not.
+
 ## 3. Required emits
 
 The generator dispatches the following 80+ logical names.  Every pack
