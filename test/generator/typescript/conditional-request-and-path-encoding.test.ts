@@ -16,24 +16,14 @@
 //    find argument, where a `/` silently re-routes the request and a `?`
 //    truncates the path into a query string.
 
-import { NodeFileSystem } from "langium/node";
-import { parseHelper } from "langium/test";
 import { describe, expect, it } from "vitest";
-import { createDddServices } from "../../../src/language/ddd-module.js";
-import type { Model } from "../../../src/language/generated/ast.js";
-import { generateSystems } from "../../../src/system/index.js";
+import { generateSystemFiles } from "../../_helpers/index.js";
 
-async function emit(src: string): Promise<Map<string, string>> {
-  const services = createDddServices(NodeFileSystem);
-  const helper = parseHelper(services.Ddd);
-  const doc = await helper(src, { validation: true });
-  // Assert the fixture actually parsed + validated.  A swallowed parse error
-  // here would leave the emitted set half-formed and every assertion below
-  // would be testing nothing (experience_gathered.md §59).
-  expect(doc.parseResult.parserErrors.map((e) => e.message)).toEqual([]);
-  expect((doc.diagnostics ?? []).filter((d) => d.severity === 1).map((d) => d.message)).toEqual([]);
-  return generateSystems(doc.parseResult.value as Model).files;
-}
+// `generateSystemFiles` asserts the fixture actually parses and validates
+// before emitting — a swallowed parse error would leave the emitted set
+// half-formed and every assertion below would be testing nothing
+// (experience_gathered.md §59).
+const emit = generateSystemFiles;
 
 const SRC = (caps: string) => `
 system Acme {

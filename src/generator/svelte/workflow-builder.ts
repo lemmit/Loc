@@ -84,7 +84,7 @@ export function buildWorkflowsApiModule(contexts: BoundedContextIR[]): string {
     }
   }
 
-  return lines.join("\n");
+  return narrowSegImport(lines.join("\n"));
 }
 
 /** Read-only instance query hooks for an observable workflow
@@ -222,4 +222,16 @@ function walkType(t: TypeIR, visit: (t: TypeIR) => void): void {
   visit(t);
   if (t.kind === "array") walkType(t.element, visit);
   else if (t.kind === "optional") walkType(t.inner, visit);
+}
+
+/** Drop the `seg` specifier when the module emitted no path interpolation —
+ *  a workflow module with no instance-by-id read, say.  Same deferred-import
+ *  shape the Hono route builder uses for `./problem-details`: emit the wide
+ *  import, then narrow it once the body is known.  Without this the generated
+ *  file carries an unused import, which `test:biome-gen` flags (and which the
+ *  generated projects' own Biome config would too). */
+function narrowSegImport(src: string): string {
+  return /\$\{seg\(/.test(src)
+    ? src
+    : src.replace('import { api, seg } from "./client";', 'import { api } from "./client";');
 }

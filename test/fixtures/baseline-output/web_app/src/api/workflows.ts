@@ -1,7 +1,7 @@
 // Auto-generated.  Do not edit by hand.
 import { z } from "zod";
 import { useMutation } from "@tanstack/react-query";
-import { api, seg } from "./client";
+import { api } from "./client";
 
 export const PlaceOrderRequest = z.object({
   customerId: z.string(),
