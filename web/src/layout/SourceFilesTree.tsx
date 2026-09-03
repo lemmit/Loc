@@ -365,9 +365,24 @@ export function SourceFilesTree(props: SourceFilesTreeProps): JSX.Element {
   // right-click.  This is the primary affordance on touch (long-press →
   // contextmenu is unreliable there, especially iOS Safari), and gives
   // folders an explicit action surface they otherwise lacked.
+  //
+  // CONTROLLED, for the same reason the header "+" menu is (see `addMenu`
+  // below): `Menu.Target` injects its toggle as the child's `onClick`, but the
+  // child is a `Tooltip`, which re-spreads the grandchild's own props AFTER
+  // the injected ones — so the `ActionIcon`'s stop-propagation `onClick`
+  // silently REPLACED the toggle and the kebab never opened (found by the
+  // M-T8.17 destructive-actions spec, which drives the delete through it).
+  const [openRowMenu, setOpenRowMenu] = useState<string | null>(null);
   const rowActions = useCallback(
     (relPath: string, kind: "file" | "folder") => (
-      <Menu position="bottom-end" shadow="md" width={190} withinPortal>
+      <Menu
+        position="bottom-end"
+        shadow="md"
+        width={190}
+        withinPortal
+        opened={openRowMenu === relPath}
+        onChange={(o) => setOpenRowMenu(o ? relPath : null)}
+      >
         <Menu.Target>
           <Tooltip label="File actions" withArrow openDelay={400}>
             <ActionIcon
@@ -375,10 +390,21 @@ export function SourceFilesTree(props: SourceFilesTreeProps): JSX.Element {
               size="sm"
               variant="subtle"
               color="gray"
+              role="button"
+              tabIndex={0}
               aria-label={`Actions for ${relPath}`}
+              data-testid={`source-files-actions-${relPath}`}
               onClick={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
+                setOpenRowMenu((cur) => (cur === relPath ? null : relPath));
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setOpenRowMenu((cur) => (cur === relPath ? null : relPath));
+                }
               }}
             >
               ⋮
@@ -395,7 +421,7 @@ export function SourceFilesTree(props: SourceFilesTreeProps): JSX.Element {
         </Menu.Dropdown>
       </Menu>
     ),
-    [actionItems],
+    [actionItems, openRowMenu],
   );
 
   // Opening the "+" menu is DRIVEN BY US, not by Mantine's uncontrolled
