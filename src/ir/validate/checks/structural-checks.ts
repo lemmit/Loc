@@ -961,19 +961,26 @@ const SCAFFOLD_PRIMITIVE_NAMES: ReadonlySet<string> = new Set([
   "ViewsIndex",
 ]);
 
-/** Collection ops that have NO valid JS/HEEx array-member spelling — a
- *  `.sortBy`/`.distinct`/`.take`/`.skip` in a UI page-body expression would
- *  emit `arr.sortBy(...)`, which is not a real Array method (unlike `.map` /
- *  `.join`, which render as native member calls on the frontends).  Rejected
- *  in UI position by `loom.collection-op-in-ui`. */
-const UI_UNSUPPORTED_COLLECTION_OPS: ReadonlySet<string> = new Set([
-  "sortBy",
-  "distinct",
-  "take",
-  "skip",
-  "min",
-  "max",
-]);
+/** Collection ops refused in UI position by `loom.collection-op-in-ui`.
+ *
+ *  This is the AST-era half of a rule the IR-tier
+ *  `loom.frontend-collection-op-unsupported` (`ui-checks.ts`) now owns in full,
+ *  and the two must not drift: what this set holds is a SUBSET of what that
+ *  gate refuses, kept because the diagnostics differ in wording and a body can
+ *  legitimately carry both codes.
+ *
+ *  It shrank when the frontend walkers gained a real `renderCollectionOp` seam.
+ *  The original premise — "no valid JS/HEEx array-member spelling, so
+ *  `arr.sortBy(…)` would emit verbatim" — stopped being true for `sortBy` /
+ *  `take` / `skip` the moment those stopped being emitted verbatim
+ *  (`[...arr].sort(…)` / `.slice(0, n)` / `.slice(n)` on the JS frontends, and
+ *  a real arm on each of the other three emitters).
+ *
+ *  The three that stay are refused for a reason the seam does not remove:
+ *  `distinct` needs VALUE EQUALITY, which Flutter's generated wire models do
+ *  not define, and `min`/`max` fold over a `money` that is a `Decimal` object
+ *  on JS/HEEx but a native scalar on F#/Dart. */
+const UI_UNSUPPORTED_COLLECTION_OPS: ReadonlySet<string> = new Set(["distinct", "min", "max"]);
 
 /** Primitive types that have a well-defined total order — the projections
  *  `.min`/`.max` can reduce over. */

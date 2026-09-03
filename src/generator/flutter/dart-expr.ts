@@ -12,6 +12,7 @@
 // so the shape mirrors `FS_LEAVES` exactly; only the syntax is Dart, not F#.
 
 import type { ExprIR, LiteralKind, PrimitiveName, TypeIR } from "../../ir/types/loom-ir.js";
+import { isDescendingSort } from "../../ir/util/collection-op-site.js";
 import { intrinsicFor, intrinsicKey } from "../../util/intrinsics.js";
 import { DURATION_UNIT_MS } from "../../util/temporal.js";
 
@@ -98,6 +99,93 @@ export const DART_LEAVES = {
     return `Duration(milliseconds: ((${amount}) * ${DURATION_UNIT_MS[unit]}))`;
   },
 };
+
+// ---------------------------------------------------------------------------
+// Collection ops on the Dart `List` — the Flutter sibling of
+// `_expr/js-collection-ops.ts` (the JS frontends + Hono backend) and
+// `feliz/fs-expr.ts`'s `FS_COLLECTION_RENDERERS`.
+//
+// Loom's collection vocabulary is spelled Loom's way, so the walker's verbatim
+// `<recv>.<member>` fall-through emits `customerAll.count` — not Dart, and the
+// exact failure `loom.frontend-collection-op-unsupported` refuses.
+//
+// The recurring Dart hazard here is LAZINESS, not spelling: `.where` and `.map`
+// return an `Iterable`, not a `List`, so a chained `.length` reads fine but a
+// result handed to a widget that wants a `List<T>` (`Table(rows: …)`,
+// `ListView`) is a type error.  Every arm that produces a sequence therefore
+// materialises with `.toList()`.
+// ---------------------------------------------------------------------------
+
+/** The ops with a Dart arm.  The catalogue's other eight (`sum`/`min`/`max`/
+ *  `avg`, `first`/`firstOrNull`/`distinct`/`contains`) are deliberately absent
+ *  and stay gated — see `ir/util/collection-op-site.ts`'s
+ *  `FRONTEND_RENDERED_COLLECTION_OPS`, the ONE definition this table is pinned
+ *  against by `test/generator/_walker/collection-op-coverage.test.ts`.
+ *  For this target the sharpest of those reasons is EQUALITY: the generated
+ *  wire models (`dart-model-emit.ts`) declare no `operator ==`, so `.toSet()`
+ *  and `.contains` compare by IDENTITY and would silently return duplicates
+ *  and `false` for a value-object element. */
+export const DART_COLLECTION_RENDERERS: Record<
+  string,
+  (recv: string, args: readonly string[], desc: boolean) => string | undefined
+> = {
+  count: (recv) => `${recv}.length`,
+  where: (recv, args) => (args[0] ? `${recv}.where(${args[0]}).toList()` : recv),
+  // The no-λ spellings mirror the JS arms' `?? "() => true"` defaults: `any`
+  // with no predicate is non-emptiness, `all` with none is vacuously true.
+  any: (recv, args) => (args[0] ? `${recv}.any(${args[0]})` : `${recv}.isNotEmpty`),
+  all: (recv, args) => (args[0] ? `${recv}.every(${args[0]})` : "true"),
+  map: (recv, args) => (args[0] ? `${recv}.map(${args[0]}).toList()` : recv),
+  // `List.sort` mutates IN PLACE and returns `void`, so a bare `xs.sort(…)` is
+  // both a mutation of page state and `void` in an expression slot.  The
+  // CASCADE (`..sort`) evaluates to its receiver, and the receiver is a fresh
+  // copy — the same "sort a copy" shape as the JS arm's `[...xs].sort(…)`.
+  //
+  // The comparator goes through `Comparable.compare`, NOT through a
+  // `.compareTo` on the projected key, and the difference is Dart's INFERENCE
+  // rule.  A function literal takes its parameter types from its CONTEXT type,
+  // and a function-expression invocation (`((s) => s)(a)` — which is what the
+  // pre-rendered key λ becomes here) supplies none: `s` infers `dynamic`, so
+  // the projected key is `dynamic` and `key.compareTo(…)` is a DYNAMIC
+  // invocation returning `dynamic`, handed to a `sort` that wants
+  // `int Function(E, E)`.  That survives on an implicit downcast rather than on
+  // a type.  `Comparable.compare` is statically `int`, and the two `as
+  // Comparable` casts turn the inference gap into one explicit, checked cast —
+  // satisfied by every Dart type a sortable Loom field maps to (`num`,
+  // `String`, `DateTime` all implement `Comparable`).
+  //
+  // (The JS family needs none of this: TypeScript DOES contextually type an
+  // immediately-invoked arrow's parameter from its argument — measured with
+  // `tsc --strict` on the emitted text, since the JS arm predates this work.)
+  sortBy: (recv, args, desc) => {
+    const key = args[0];
+    if (!key) return `([...${recv}]..sort())`;
+    const [lo, hi] = desc ? ["b", "a"] : ["a", "b"];
+    const at = (p: string) => `(${key})(${p}) as Comparable`;
+    return `([...${recv}]..sort((a, b) => Comparable.compare(${at(lo)}, ${at(hi)})))`;
+  },
+  // Dart's `take`/`skip` already CLAMP on a short list (they are lazy views,
+  // not range checks) — matching Loom's contract without a guard, unlike F#'s
+  // raising `List.take`/`List.skip`.
+  take: (recv, args) => (args[0] ? `${recv}.take(${args[0]}).toList()` : recv),
+  skip: (recv, args) => (args[0] ? `${recv}.skip(${args[0]}).toList()` : recv),
+  join: (recv, args) => (args[0] ? `${recv}.join(${args[0]})` : `${recv}.join()`),
+};
+
+/** Render a collection op to Dart, or undefined when there is no arm (the op
+ *  stays gated).  `call` supplies `sortBy`'s descending flag.  The receiver is
+ *  parenthesised because it can be any expression and every arm here appends a
+ *  postfix `.` access. */
+export function renderDartCollectionOp(spec: {
+  op: string;
+  recv: string;
+  args: readonly string[];
+  call?: Extract<ExprIR, { kind: "method-call" }>;
+}): string | undefined {
+  const render = DART_COLLECTION_RENDERERS[spec.op];
+  if (!render) return undefined;
+  return render(`(${spec.recv})`, spec.args, spec.call ? isDescendingSort(spec.call) : false);
+}
 
 /** The datetime-involving `+`/`-` arms, or `null` to fall through to the plain
  *  operator leaf.  Dart's `DateTime` defines NO arithmetic operators, so every

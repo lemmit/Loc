@@ -55,6 +55,7 @@ import type {
   UiIR,
   ValueObjectIR,
 } from "../../ir/types/loom-ir.js";
+import { isDescendingSort } from "../../ir/util/collection-op-site.js";
 import {
   listShapedProjectionNames,
   readableProjectionNames,
@@ -1370,6 +1371,36 @@ function renderCollectionOp(
         return `Enum.member?(${recv}, ${renderExpr(arg0, ctx)})`;
       }
       return `false`;
+    // ---- the four arms that used to fall through --------------------------
+    //
+    // HEEx runs a PARALLEL walker, so nothing the shared `_walker` seam gains
+    // reaches it.  These four were reaching the `default:` below, which
+    // snake-cases the Loom spelling into a call Elixir has no function for —
+    // `@names.join(", ")`, `@nums.take(2)` — and, worse for the λ-taking one,
+    // rendered the λ through `renderExpr`, whose `lambda` arm HOISTS it to a
+    // `handle_event` clause: `@names.sort_by(event_1)`, sorting by the name of
+    // a phx event.  All four are ungated now
+    // (`loom.frontend-collection-op-unsupported` narrowed), so the
+    // fall-through is no longer unreachable-in-practice; it is the defect.
+    case "sortBy": {
+      // `Enum.sort_by/3`'s third argument is the ORDER (`:asc` / `:desc`), not
+      // a `.reverse()` — the descending flag rides `sortBy(λ, true)`.
+      if (arg0?.kind === "lambda" && arg0.body) {
+        const key = `fn ${snake(arg0.param)} -> ${renderExpr(arg0.body, ctx)} end`;
+        return isDescendingSort(expr)
+          ? `Enum.sort_by(${recv}, ${key}, :desc)`
+          : `Enum.sort_by(${recv}, ${key})`;
+      }
+      return `Enum.sort(${recv})`;
+    }
+    // `Enum.take`/`Enum.drop` CLAMP on a short list, matching Loom's contract
+    // (and JS `.slice`, and Dart's lazy `take`/`skip`) without a guard.
+    case "take":
+      return arg0 ? `Enum.take(${recv}, ${renderExpr(arg0, ctx)})` : recv;
+    case "skip":
+      return arg0 ? `Enum.drop(${recv}, ${renderExpr(arg0, ctx)})` : recv;
+    case "join":
+      return arg0 ? `Enum.join(${recv}, ${renderExpr(arg0, ctx)})` : `Enum.join(${recv})`;
     default:
       return `${recv}.${snake(expr.member)}(${expr.args.map((a) => renderExpr(a, ctx)).join(", ")})`;
   }

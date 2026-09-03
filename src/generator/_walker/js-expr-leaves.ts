@@ -11,13 +11,15 @@
 // language, mirroring the backend `_expr/target.ts` design.  The strings below
 // are byte-for-byte what `emitExpr` produced inline before the extraction.
 
-import type { BinOp, LiteralKind, PrimitiveName } from "../../ir/types/loom-ir.js";
+import type { BinOp, ExprIR, LiteralKind, PrimitiveName } from "../../ir/types/loom-ir.js";
+import { FRONTEND_RENDERED_COLLECTION_OPS } from "../../ir/util/collection-op-site.js";
+import { JS_COLLECTION_RENDERERS } from "../_expr/js-collection-ops.js";
 import { renderJsIntrinsic } from "../_expr/js-intrinsics.js";
 import type { WalkerTarget } from "./target.js";
 
 /** The seven expression-leaf methods every `WalkerTarget` supplies, plus the
- *  optional scalar-intrinsic seam (`renderIntrinsic`) — the JS family shares
- *  the TypeScript backend's snippet table, since it emits the same language. */
+ *  optional scalar-intrinsic and collection-op seams — the JS family shares
+ *  the TypeScript backend's snippet tables, since it emits the same language. */
 type ExprLeaves = Pick<
   WalkerTarget,
   | "exprLiteral"
@@ -28,6 +30,7 @@ type ExprLeaves = Pick<
   | "exprList"
   | "exprObject"
   | "renderIntrinsic"
+  | "renderCollectionOp"
 >;
 
 /** The JS leaf formatters — pure string→string, sub-expressions pre-rendered. */
@@ -93,7 +96,29 @@ export const jsExprLeaves: ExprLeaves = {
   // `s.replace(a, b)` mean replace-ALL in a page body exactly as it does in an
   // aggregate `derived`.  See `_expr/js-intrinsics.ts`.
   renderIntrinsic: renderJsIntrinsic,
+  // …and ONE collection-op table, for the same reason: `orders.where(o =>
+  // o.open).count` means what it means in an aggregate `derived`, money and
+  // value-object equality special-cases included.  See
+  // `_expr/js-collection-ops.ts`.
+  renderCollectionOp: renderJsCollectionOp,
 };
+
+/** Render a collection op to JavaScript, or `undefined` when the frontends
+ *  don't render this op (`FRONTEND_RENDERED_COLLECTION_OPS` — the ONE
+ *  definition, shared with the gate that refuses the rest).  The receiver is
+ *  parenthesised exactly as the TypeScript backend parenthesises it before
+ *  calling the same table, so a page body and a `derived` produce the same
+ *  string for the same node. */
+export function renderJsCollectionOp(spec: {
+  op: string;
+  recv: string;
+  args: readonly string[];
+  call?: Extract<ExprIR, { kind: "method-call" }>;
+}): string | undefined {
+  if (!FRONTEND_RENDERED_COLLECTION_OPS.has(spec.op)) return undefined;
+  const render = JS_COLLECTION_RENDERERS[spec.op];
+  return render?.(`(${spec.recv})`, [...spec.args], spec.call);
+}
 
 /** Fail-loud expression leaves for a target that FORKS `emitExpr` (HEEx runs a
  *  parallel walker and never reaches the shared dispatcher).  Satisfies the
@@ -105,9 +130,10 @@ const unreachedExprLeaf = (name: string) => (): never => {
   );
 };
 export const unreachableExprLeaves: ExprLeaves = {
-  // HEEx forks the dispatcher entirely; it renders intrinsics in its own
-  // engine, so it never consults this seam.
+  // HEEx forks the dispatcher entirely; it renders intrinsics and collection
+  // ops in its own engine, so it never consults either seam.
   renderIntrinsic: undefined,
+  renderCollectionOp: undefined,
   exprLiteral: unreachedExprLeaf("exprLiteral"),
   exprBinary: unreachedExprLeaf("exprBinary"),
   exprUnary: unreachedExprLeaf("exprUnary"),

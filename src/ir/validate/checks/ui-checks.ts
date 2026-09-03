@@ -29,7 +29,6 @@
 // -------------------------------------------------------------------------
 
 import { diagMessage } from "../../../diagnostics/messages.js";
-import { isCollectionOp } from "../../../util/collection-ops.js";
 import { RENDERABLE_FILTER_PRIMITIVES } from "../../../util/filter-param-kinds.js";
 import {
   WALKER_PRIMITIVE_NAMED_ARGS,
@@ -58,6 +57,13 @@ import type {
   UiIR,
 } from "../../types/loom-ir.js";
 import { allAggregates, allContexts } from "../../types/loom-ir.js";
+import {
+  collectionOpOnBinding,
+  collectionOpSite,
+  FRONTEND_RENDERED_COLLECTION_OPS,
+  pagedEnvelopeLambdaParam,
+  rowSetLambdaParam,
+} from "../../util/collection-op-site.js";
 import { classifyPage, pageSlotKey } from "../../util/page-kind.js";
 import { groupedProjectionNames, readableProjectionNames } from "../../util/projection-read.js";
 import { typeLabel } from "../../util/type-label.js";
@@ -163,20 +169,12 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
         renderingHosts.set(uiName, byFw);
       }
     }
-    // Which uis this system renders through Feliz — the one frontend whose
-    // walker cannot render `.map(λ)` (see `MAP_UNRENDERED_FRAMEWORK`).  A ui
-    // declares its own `framework:`, but the LEGACY binding leaves it unset and
-    // derives the framework from the hosting deployable, so both are consulted
-    // (`platform: feliz` hosts only `framework: feliz` — the same detector
-    // `loom.feliz-async-effect-unsupported` uses in store-checks.ts).
-    const felizUis = new Set<string>();
-    for (const d of sys.deployables) {
-      if (d.platform !== MAP_UNRENDERED_FRAMEWORK && d.uiFramework !== MAP_UNRENDERED_FRAMEWORK)
-        continue;
-      for (const n of [d.uiName, ...(d.hostedUiNames ?? [])]) if (n) felizUis.add(n);
-    }
+    // (There used to be a per-ui Feliz carve-out here: `map` was ungated
+    // everywhere but Feliz, because the walker had no lambda seam and emitted a
+    // JS arrow into the `.fs` file.  `WalkerTarget.exprLambda` closed that, so
+    // the op set below is once again uniform across every frontend — which is
+    // what makes this check target-agnostic in fact and not just in intent.)
     for (const ui of sys.uis) {
-      const mapRendered = ui.framework !== MAP_UNRENDERED_FRAMEWORK && !felizUis.has(ui.name);
       const handles = new Set<string>([
         ...ui.apiParams.map((p) => p.name),
         ...(ui.channelParams ?? []).map((p) => p.name),
@@ -232,7 +230,7 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
         checkActionBodies(page.actions, ctx, diags);
         checkInstanceEffectRouteId(page, aggNames, apiParamNames, diags);
         checkOpFormRouteId(page, diags);
-        checkFrontendCollectionOps(page, pageWhere(page), mapRendered, diags);
+        checkFrontendCollectionOps(page, pageWhere(page), diags);
         checkUnknownPageElements(page, pageWhere(page), callableNames, diags);
         checkSlotOutsideComponent(page, pageWhere(page), diags);
         checkUnresolvedPageRefs(page, pageWhere(page), callableNames, diags);
@@ -291,7 +289,7 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
         };
         checkBody(comp.body, ctx, diags);
         checkActionBodies(comp.actions, ctx, diags);
-        checkFrontendCollectionOps(comp, `component '${comp.name}'`, mapRendered, diags);
+        checkFrontendCollectionOps(comp, `component '${comp.name}'`, diags);
         checkUnknownPageElements(comp, `component '${comp.name}'`, callableNames, diags);
         checkUnresolvedPageRefs(comp, `component '${comp.name}'`, callableNames, diags);
         checkFixedSlotArity(comp, `component '${comp.name}'`, diags);
@@ -325,7 +323,7 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
       // (`state.tags.distinct()`) on Flutter — from a `.ddd` that validated
       // clean.  Same vocabulary gap, same gate.
       for (const store of ui.stores) {
-        checkFrontendCollectionOps(store, `store '${store.name}'`, mapRendered, diags);
+        checkFrontendCollectionOps(store, `store '${store.name}'`, diags);
       }
       // A `toast(<expr>)` outside the v1 message subset CRASHES every realtime
       // renderer (target-agnostic — the three switches are arm-for-arm equal).
@@ -381,135 +379,103 @@ function pageRouteHasParam(route: string | undefined): boolean {
 //
 // The stdlib collection ops (`src/util/collection-ops.ts`: count / sum / where
 // / any / all / first / sortBy / distinct / take / skip / min / max / avg /
-// join / contains / firstOrNull) are a BACKEND vocabulary.  Every backend has a
-// real renderer for them (`src/generator/_expr/target.ts`'s `isCollectionOp`
-// arm, one leaf table per backend); the frontend walker has NONE.  The shared
-// `walker-core.ts` `member` arm emits `<recv>.<member>` and its `method-call`
-// arm emits `<recv>.<member>(<args>)` — verbatim, in whatever language the
-// target embeds.  Measured on `QueryView { of: X.all, data: rows => Stat(…) }`:
+// join / contains / firstOrNull / map) started as a BACKEND vocabulary.  Every
+// backend had a real renderer (`_expr/target.ts`'s `isCollectionOp` arm, one
+// leaf table per backend); the frontend walkers had NONE, so the shared
+// `walker-core.ts` `member` arm emitted `<recv>.<member>` and its
+// `method-call` arm `<recv>.<member>(<args>)` — VERBATIM, in whatever language
+// the target embeds.  Measured on
+// `QueryView { of: X.all, data: rows => Stat(…) }`:
 //
 //   react/vue/svelte/angular  `rows.count` → `items.count`               TS2339
 //   feliz                     `rows.count` → `allCustomers.count`        not F#
-//   flutter                   `rows.count` → `customerAll.count`         not Dart
+//   flutter                   `rows.count` → `customerAll.count`        not Dart
 //   phoenixLiveView           `rows.count` → `Enum.count(@items)`        ✓
 //
-// So the failure lands at `tsc` / `ng build` / `dotnet fable` / `flutter
-// analyze` — a generated project that doesn't compile, from a `.ddd` that
-// validated clean.  Phoenix is the lone exception because HEEx runs a PARALLEL
-// walker (`elixir/heex-walker-core.ts`'s `renderCollectionOp`) — and even there
-// `join` (`Enum.map(…).join(", ")`) and `first` (`@items.first`) are invalid
-// Elixir, so it is not a portable escape hatch either.
+// — a generated project that doesn't compile, from a `.ddd` that validated
+// clean.  Hence this gate.
 //
-// The fix is the GATE, not renderers: mapping 17 ops × 6 frontends would add a
-// second expression dialect to the frontend walkers, and the server-side read
-// path (a repository `find`, or a `projection` read model) already computes
-// these correctly, once, in the database.  So this check is TARGET-AGNOSTIC —
-// same reasoning as `loom.instance-effect-needs-route-id` above: a `.ddd`
-// generates working code on every target, or fails validation on every target.
+// The gate is now a REMAINDER, not the whole answer.  Nine of the seventeen ops
+// have a real per-target renderer, reached through the walker's
+// `renderCollectionOp` seam, so `rows.count` and `rows.where(λ).count` are
+// ordinary page-body expressions on all six frontends AND on the HEEx parallel
+// walker.  WHICH ops those are is not decided here: it is
+// `FRONTEND_RENDERED_COLLECTION_OPS` in `ir/util/collection-op-site.ts`, one
+// definition shared with the emitters, because "what the gate lets through"
+// and "what every target's table must answer for" are the same list and must
+// not be two lists.  What is still refused is the eight the frontends
+// genuinely disagree about, and the disagreement is about REPRESENTATION, not
+// effort:
 //
-// TWO exemptions, both grounded in a real renderer:
+//   • `sum` / `min` / `max` / `avg` fold ARITHMETIC over the projected values,
+//     and `money` is a decimal.js `Decimal` on the JS frontends and an Elixir
+//     `Decimal` on HEEx, but a native `decimal` on Feliz and a `double` on
+//     Flutter.  A naive `+` / `<` is silently WRONG on the first two (a
+//     `Decimal`'s `<` coerces through `valueOf()` and orders lexicographically),
+//     so one table cannot be right everywhere without per-target money work.
+//     (`avg` desugars at lowering into `count`/`sum`, so it is refused via its
+//     `sum`.)
+//   • `first` / `firstOrNull` diverge on PARTIALITY: `first` yields `undefined`
+//     on the JS frontends but RAISES on F# `List.head` and Dart's `.first`; and
+//     `firstOrNull` is `T | null` on JS against `'T option` on F#, which are not
+//     the same value.
+//   • `distinct` / `contains` diverge on EQUALITY: Flutter's generated wire
+//     models (`dart-model-emit.ts`) declare no `operator ==`, so `.toSet()` and
+//     `.contains` there compare by IDENTITY and would silently return
+//     duplicates and `false` for a value-object element — the exact defect the
+//     JS table's `receiverElementEqMethod` exists to prevent on its own side.
 //
-//   • `map` — the ONE op with a genuine frontend renderer on both engines:
-//     native `Array.prototype.map` on the JS frontends and `Enum.map/2` on HEEx
-//     (DEBT-31, `test/generator/elixir/heex-collection-ops.test.ts`).  Shipped
-//     behaviour; not gated.
-//   • `page { requires … }` — a gate expression is NOT walked by walker-core.
-//     It goes through the closed `src/generator/_frontend/gate-expr.ts`
-//     renderer, whose one admitted method IS a collection op
-//     (`currentUser.permissions.contains(x)` → `.includes(x)`).  Gate
-//     expressions are therefore excluded from this walk entirely.
+// For all eight the server-side read path (a repository `find`, or a
+// `projection` read model) computes the value correctly, once, in the database.
+//
+// The check stays TARGET-AGNOSTIC — same reasoning as
+// `loom.instance-effect-needs-route-id` above: a `.ddd` generates working code
+// on every target, or fails validation on every target.  It is agnostic in FACT
+// as well as in intent since `WalkerTarget.exprLambda` retired the one
+// per-framework carve-out this check used to carry (`map` was ungated
+// everywhere but Feliz, whose walker had no lambda seam and emitted a JS arrow
+// into the `.fs` file).
+//
+// ONE surface is excluded outright: `page { requires … }`.  A gate expression is
+// NOT walked by walker-core — it goes through the closed
+// `src/generator/_frontend/gate-expr.ts` renderer, whose one admitted method IS
+// a collection op (`currentUser.permissions.contains(x)` → `.includes(x)`), so
+// gate expressions are left out of this walk entirely.
 //
 // Detection needs a COLLECTION receiver, not just a catalogue NAME — lowering
 // sets `isCollectionOp` from the member name alone (`lower-expr.ts`), so a
 // scaffolded repository read `Sales.Customer.all` carries the catalogue name
-// too (158 such reads across the repo's `.ddd` corpus, every one of them
-// legitimate).  A collection receiver is recognised two ways, because page
-// bodies mix TYPED and UNTYPED bindings:
-//
-//   • a `TypeIR` that IS a collection — `array`, or `optional<array>`.  Covers
-//     `state { xs: string[] }`, a typed `derived`, a list literal, an
-//     aggregate's `Line[]` field, and any chained result lowering types as an
-//     array (`rows.map(…).count`).
-//   • a bare ref to a lambda param the page DSL binds to a query's ROW SET —
-//     `QueryView { of: X.all, data: rows => … }`.  The `data:` lambda param
-//     carries no `TypeIR` (lowering leaves UI primitive lambda params at the
-//     `string` placeholder), yet it is a collection by construction, and it is
-//     the shape the defect was reported against.  `single: true` binds ONE
-//     record instead, so that form binds nothing.
-//
-// Everything else stays out: a `Table(Column("Count", o => o.count))` accessor
-// param is an ELEMENT, so a domain field genuinely named `count` / `first` /
-// `min` never trips the gate.
+// too, and every one of those is legitimate.  That recognition now lives in
+// `ir/util/collection-op-site.ts` (`collectionOpSite`) BECAUSE the walkers need
+// exactly the same answer: this check and the renderers are two halves of one
+// contract, and a node this check allowed but a walker failed to recognise
+// would fall straight back to the verbatim emit above.  Everything else stays
+// out — a `Table(Column("Count", o => o.count))` accessor param is an ELEMENT,
+// so a domain field genuinely named `count` / `first` / `min` never trips the
+// gate.
 // -------------------------------------------------------------------------
 
-/** Collection ops the frontend walkers DO render, so the gate lets them through.
- *  `map` only: native `Array.prototype.map` (JS frontends) / `Enum.map/2`
- *  (HEEx) / `Iterable.map` (Dart).  Every other catalogue op emits verbatim on
- *  at least the four JS frontends.  Grow this set only alongside a real
- *  renderer on every frontend. */
-const FRONTEND_RENDERED_COLLECTION_OPS: ReadonlySet<string> = new Set(["map"]);
-
-/** …with ONE framework carved out.  The walker has no `exprLambda` seam: a
- *  `.map(λ)` falls through to `<recv>.map(<args>)` with a hardcoded JS arrow
- *  (`(x) => …`).  That is real code on React/Vue/Svelte/Angular, valid Dart on
- *  Flutter, and HEEx routes it through its own engine — but on FELIZ it emits
- *  verbatim JS into an F# file, which `dotnet fable` rejects.  So `map` keeps
- *  its exemption everywhere except Feliz, where it joins the gated ops rather
- *  than shipping unbuildable output.  Delete this carve-out when the walker
- *  grows a lambda seam and `feliz-target.ts` renders `List.map`. */
-const MAP_UNRENDERED_FRAMEWORK = "feliz";
-
-/** True when a receiver type is a real collection — an `array`, or an
- *  `optional` wrapping one (`rows?.count`). */
-function isCollectionType(t: TypeIR): boolean {
-  const unwrapped = t.kind === "optional" ? t.inner : t;
-  return unwrapped.kind === "array";
-}
-
-/** True when this receiver is known to hold a collection: either its `TypeIR`
- *  says so, or it is a bare ref to a row-set lambda binding (see the block
- *  above for why both are needed). */
-function isCollectionReceiver(
-  receiver: ExprIR,
-  receiverType: TypeIR,
-  rowSetBindings: ReadonlySet<string>,
-): boolean {
-  if (isCollectionType(receiverType)) return true;
-  return receiver.kind === "ref" && rowSetBindings.has(receiver.name);
-}
-
 /** The unsupported collection-op name this node uses, or undefined.
- *  Covers BOTH spellings lowering produces: the call form
- *  (`rows.where(λ)` → `method-call` with `isCollectionOp`) and the
- *  property form (`rows.count` / `rows.first` → a plain `member`, since
- *  `lower-expr.ts` only rewrites a no-paren op into a call for the
- *  `NO_PAREN_CALL_COLLECTION_OPS` names on a TYPED collection). */
+ *
+ *  Site recognition — both spellings lowering produces, and what counts as a
+ *  collection RECEIVER — is `ir/util/collection-op-site.ts`'s
+ *  `collectionOpSite`, the SAME function the frontend walkers route on.  That
+ *  is deliberate and load-bearing: this check and the walkers are two halves
+ *  of one contract, and the failure mode of two hand-kept-in-sync predicates
+ *  is the worst one available — a node this check ALLOWS but the walker does
+ *  not recognise falls through to the verbatim `<recv>.<member>` emit that
+ *  `loom.frontend-collection-op-unsupported` exists to prevent.  One function
+ *  makes that unrepresentable.
+ *
+ *  What stays local is the POLICY: which recognised ops are refused. */
 function unsupportedCollectionOp(
   e: ExprIR,
   rowSetBindings: ReadonlySet<string>,
-  mapRendered: boolean,
 ): string | undefined {
-  const named =
-    e.kind === "method-call" && e.isCollectionOp
-      ? e
-      : e.kind === "member" && isCollectionOp(e.member)
-        ? e
-        : undefined;
-  if (!named) return undefined;
-  if (mapRendered && FRONTEND_RENDERED_COLLECTION_OPS.has(named.member)) return undefined;
-  if (!isCollectionReceiver(named.receiver, named.receiverType, rowSetBindings)) return undefined;
-  return named.member;
-}
-
-/** The `data:` lambda param a `QueryView` binds to a query's ROW SET, or
- *  undefined.  `single: true` binds one record, not a collection. */
-function rowSetLambdaParam(e: ExprIR): string | undefined {
-  if (e.kind !== "call" || e.name !== "QueryView") return undefined;
-  const single = namedArg(e, "single");
-  if (single?.kind === "literal" && single.lit === "bool" && single.value === "true")
-    return undefined;
-  const data = namedArg(e, "data");
-  return data?.kind === "lambda" ? data.param : undefined;
+  const site = collectionOpSite(e, rowSetBindings);
+  if (site === undefined) return undefined;
+  if (FRONTEND_RENDERED_COLLECTION_OPS.has(site.op)) return undefined;
+  return site.op;
 }
 
 /** Every expression surface of a page / component that the frontend WALKER
@@ -1350,7 +1316,6 @@ function checkUnresolvedPageRefs(
 function checkFrontendCollectionOps(
   host: PageIR | ComponentIR | StoreIR,
   where: string,
-  mapRendered: boolean,
   diags: LoomDiagnostic[],
 ): void {
   const flagged = new Set<string>();
@@ -1364,33 +1329,67 @@ function checkFrontendCollectionOps(
       source: where,
     });
   };
-  // Scope-tracking walk: `rowSetBindings` grows as we descend into a
-  // `QueryView`'s `data:` lambda, so `rows` is recognised as a collection
-  // inside that lambda and nowhere else.  (`walkExprDeep` can't thread scope,
-  // hence the explicit recursion over `walkExprChildren`.)
-  const visitStmt = (s: StmtIR, scope: ReadonlySet<string>): void =>
+  // Scope-tracking walk over TWO binding kinds, both grown as we descend into a
+  // `QueryView`'s `data:` lambda and both scoped to that lambda alone.
+  // (`walkExprDeep` can't thread scope, hence the explicit recursion over
+  // `walkExprChildren`.)
+  //
+  //   rows      — a genuine ROW SET.  `rowSetLambdaParam`, shared with the
+  //               walkers, so gate and renderer agree on the sites.
+  //   envelope  — an explicitly-`paged:` binding, which is the `Paged<T>`
+  //               CARRIER (`{items, page, pageSize, total, totalPages}`), not
+  //               the rows.  No frontend can render ANY collection op off it,
+  //               so every catalogue op there is refused, whatever the op —
+  //               and refusing is the point: dropping it from the walk instead
+  //               would let `rows.count` fall through to the walker's verbatim
+  //               `.count` emit, which is the failure this whole check exists
+  //               to prevent.  (`rows.items.count` is the spelling that works.)
+  interface Scope {
+    rows: ReadonlySet<string>;
+    envelope: ReadonlySet<string>;
+  }
+  const visitStmt = (s: StmtIR, scope: Scope): void =>
     walkStmtChildren(
       s,
       (c) => visit(c, scope),
       (n) => visitStmt(n, scope),
     );
-  const visit = (e: ExprIR, rowSetBindings: ReadonlySet<string>): void => {
-    const op = unsupportedCollectionOp(e, rowSetBindings, mapRendered);
+  const visit = (e: ExprIR, scope: Scope): void => {
+    const op = unsupportedCollectionOp(e, scope.rows) ?? collectionOpOnBinding(e, scope.envelope);
     if (op !== undefined) report(op);
     const rowParam = rowSetLambdaParam(e);
-    const inner: ReadonlySet<string> = rowParam
-      ? new Set<string>([...rowSetBindings, rowParam])
-      : rowSetBindings;
+    const envParam = pagedEnvelopeLambdaParam(e);
+    // Rebind, don't merely add: a nested `QueryView` reusing the name (`rows`)
+    // must SHADOW the outer binding in the OTHER set too, or an inner envelope
+    // binding would still read as an outer row set.
+    const inner: Scope = {
+      rows: rebindScope(scope.rows, rowParam, envParam),
+      envelope: rebindScope(scope.envelope, envParam, rowParam),
+    };
     walkExprChildren(e, {
       expr: (c) => visit(c, inner),
       stmt: (s) => visitStmt(s, inner),
     });
   };
-  const empty: ReadonlySet<string> = new Set<string>();
+  const empty: Scope = { rows: new Set<string>(), envelope: new Set<string>() };
   // `lifetime` is StoreIR's discriminator — a page/component never carries one.
   const roots = "lifetime" in host ? storeRenderedExprs(host) : walkerRenderedExprs(host);
   for (const e of roots) visit(e, empty);
   for (const action of host.actions) for (const s of action.body) visitStmt(s, empty);
+}
+
+/** Add `add` to a binding set and remove `remove` from it — the shadowing rule
+ *  a nested `QueryView` needs when it rebinds a name into the OTHER kind. */
+function rebindScope(
+  set: ReadonlySet<string>,
+  add: string | undefined,
+  remove: string | undefined,
+): ReadonlySet<string> {
+  if (add === undefined && (remove === undefined || !set.has(remove))) return set;
+  const next = new Set(set);
+  if (add !== undefined) next.add(add);
+  if (remove !== undefined) next.delete(remove);
+  return next;
 }
 
 /** The aggregate + op a `variant-match` subject awaits, when it is an aggregate

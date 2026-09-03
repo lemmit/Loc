@@ -4,6 +4,7 @@
 // lookups, so they pull the core walk/expr/stmt helpers.
 
 import type { ExprIR, TypeIR } from "../../../ir/types/loom-ir.js";
+import { rowSetLambdaParam } from "../../../ir/util/collection-op-site.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import { tryRenderGate } from "../../_frontend/gate-expr.js";
 import { tryDetectApiHook } from "../api-hook-detector.js";
@@ -483,6 +484,17 @@ export function emitQueryView(
     // entry, not inherit it — otherwise an inner binding resolves its members
     // against the outer query's handle.  Rebind unconditionally: set when this
     // QueryView owns an entry for the param, delete when it doesn't.
+    /** Drop `name` from an inherited SET, or keep the set untouched when it
+     *  never held it — the set-shaped twin of `rebind` below. */
+    const shadow = (
+      inherited: ReadonlySet<string> | undefined,
+      name: string,
+    ): ReadonlySet<string> | undefined => {
+      if (inherited === undefined || !inherited.has(name)) return inherited;
+      const next = new Set(inherited);
+      next.delete(name);
+      return next;
+    };
     const rebind = (
       inherited: ReadonlyMap<string, string> | undefined,
       own: string | undefined,
@@ -532,6 +544,21 @@ export function emitQueryView(
         ? new Map([...(ctx.listRowAggregates ?? []), [data.param, listAgg]])
         : ctx.listRowAggregates,
       pagedEnvelopeBindings: childPagedEnvelopeBindings,
+      // A non-`single` `data:` param IS a collection, however the target
+      // spells the access — but it carries no array `TypeIR` (lowering leaves
+      // UI-primitive lambda params at the `string` placeholder), so a
+      // collection op read off it (`rows.count`) is recognisable only through
+      // this set.  Grown by the SAME function the IR-validate gate uses
+      // (`rowSetLambdaParam`), so gate and walker cannot disagree about which
+      // nodes are collection-op sites — a disagreement in the "gate allows,
+      // walker doesn't recognise" direction would re-open the verbatim
+      // emission `loom.frontend-collection-op-unsupported` exists to prevent.
+      rowSetBindings: rowSetLambdaParam(call)
+        ? new Set([...(ctx.rowSetBindings ?? []), data.param])
+        : // `single: true` binds ONE record — SHADOW an outer binding of the
+          // same name rather than inheriting it (the same rebind discipline
+          // the two paged maps above follow).
+          shadow(ctx.rowSetBindings, data.param),
     };
     dataJsx = data.body ? walk(data.body, childCtx, depth + 2) : nothing;
     propagateChildFlags(ctx, childCtx);

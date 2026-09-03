@@ -16,6 +16,7 @@
 // the seam extraction converts it.
 
 import type { BinOp, ExprIR, LiteralKind, PrimitiveName, TypeIR } from "../../ir/types/loom-ir.js";
+import { isCollectionType, isDescendingSort } from "../../ir/util/collection-op-site.js";
 import { intrinsicFor, intrinsicKey } from "../../util/intrinsics.js";
 import { upperFirst } from "../../util/naming.js";
 import { DURATION_UNIT_MS } from "../../util/temporal.js";
@@ -120,6 +121,83 @@ export const FS_LEAVES = {
     return `(System.TimeSpan.FromMilliseconds(float (${amount}) * ${DURATION_UNIT_MS[unit]}.0))`;
   },
 };
+
+// ---------------------------------------------------------------------------
+// Collection ops on the F# `list` — the Feliz sibling of
+// `_expr/js-collection-ops.ts` (the JS frontends + Hono backend) and the
+// per-backend `*_COLLECTION_RENDERERS` tables.
+//
+// Loom's collection vocabulary is spelled Loom's way, so the walker's verbatim
+// `<recv>.<member>` fall-through emits `allCustomers.count` — not F#, and the
+// exact failure `loom.frontend-collection-op-unsupported` refuses.  These arms
+// are what let the gate stop refusing them.
+//
+// F# representation (`type-fs.ts`): a Loom `T[]` is an F# `list`, `money` and
+// `decimal` are both `decimal`, so the ordering and length ops need no
+// special-casing.  Every `List.*` function takes its function argument FIRST
+// and the list LAST, hence the pipes.
+//
+// ONE table, TWO consumers: the view path reaches it through
+// `felizTarget.renderCollectionOp` and the MVU update/action path through
+// `renderFsMethodCall` — so a body cannot mean one thing in a page view and
+// another in the `update` arm that a named `action` lowers to.  That split is
+// the same one `FS_INTRINSIC_RENDERERS` already spans, and for the same reason.
+// ---------------------------------------------------------------------------
+
+/** The ops with an F# arm.  The catalogue's other eight (`sum`/`min`/`max`/
+ *  `avg`, `first`/`firstOrNull`/`distinct`/`contains`) are deliberately absent
+ *  and stay gated — see `ir/util/collection-op-site.ts`'s
+ *  `FRONTEND_RENDERED_COLLECTION_OPS` for why each one is, in every case a
+ *  REPRESENTATION divergence across the frontends rather than a missing
+ *  spelling here.  (That constant is the ONE definition; this table is pinned
+ *  against it by `test/generator/_walker/collection-op-coverage.test.ts`.)  (`contains` does have an
+ *  arm on the update path below, from before the gate existed; it is not
+ *  reachable from a gated body.) */
+export const FS_COLLECTION_RENDERERS: Record<
+  string,
+  (recv: string, args: readonly string[], desc: boolean) => string | undefined
+> = {
+  count: (recv) => `(List.length ${recv})`,
+  where: (recv, args) => (args[0] ? `(${recv} |> List.filter ${args[0]})` : recv),
+  // The no-λ spellings mirror the JS arms' `?? "() => true"` defaults: `any`
+  // with no predicate is non-emptiness, `all` with none is vacuously true.
+  any: (recv, args) =>
+    args[0] ? `(${recv} |> List.exists ${args[0]})` : `(not (List.isEmpty ${recv}))`,
+  all: (recv, args) => (args[0] ? `(${recv} |> List.forall ${args[0]})` : "true"),
+  map: (recv, args) => (args[0] ? `(${recv} |> List.map ${args[0]})` : recv),
+  sortBy: (recv, args, desc) =>
+    args[0]
+      ? `(${recv} |> List.${desc ? "sortByDescending" : "sortBy"} ${args[0]})`
+      : `(List.sort ${recv})`,
+  // `List.truncate` and NOT `List.take`: `List.take` RAISES when the list is
+  // shorter than `n`, while Loom's `take` (and JS `.slice(0, n)`, and Dart
+  // `.take`) clamps.  A short list is the ordinary case for a page reading a
+  // freshly-loaded query, so the raising form would crash the Elmish view.
+  take: (recv, args) => (args[0] ? `(${recv} |> List.truncate ${args[0]})` : recv),
+  // `List.skip` raises for the same reason, and F# has no clamping sibling —
+  // so clamp the count.  The receiver is evaluated twice; Loom expressions are
+  // pure, so that is a cost, not a semantic change (the same trade
+  // `FS_INTRINSIC_RENDERERS`' `string.substring` arm already makes to get
+  // .NET's raising `Substring` to clamp).
+  skip: (recv, args) =>
+    args[0] ? `(${recv} |> List.skip (min (${args[0]}) (List.length ${recv})))` : recv,
+  // `String.concat <sep> <strings>` — the separator is the FIRST argument, so
+  // the piped list lands as the second.
+  join: (recv, args) => (args[0] ? `(${recv} |> String.concat ${args[0]})` : recv),
+};
+
+/** Render a collection op to F#, or undefined when there is no arm (the op
+ *  stays gated).  `call` supplies `sortBy`'s descending flag. */
+export function renderFsCollectionOp(spec: {
+  op: string;
+  recv: string;
+  args: readonly string[];
+  call?: Extract<ExprIR, { kind: "method-call" }>;
+}): string | undefined {
+  const render = FS_COLLECTION_RENDERERS[spec.op];
+  if (!render) return undefined;
+  return render(spec.recv, spec.args, spec.call ? isDescendingSort(spec.call) : false);
+}
 
 /** The datetime-involving `+`/`-` arms, or `null` to fall through to the plain
  *  operator leaf.  Dispatch is type-driven off the lowering's
@@ -371,13 +449,14 @@ function renderFsMethodCall(
 ): string {
   const a0 = args[0] ?? "";
   if (e.isCollectionOp || e.receiverType.kind === "array") {
+    // The shared table first — one spelling for the view path and this one.
+    const shared = renderFsCollectionOp({ op: e.member, recv, args, call: e });
+    if (shared !== undefined) return shared;
     switch (e.member) {
       case "contains":
         return `(List.contains ${a0} ${recv})`;
       case "isEmpty":
         return `(List.isEmpty ${recv})`;
-      case "count":
-        return `(List.length ${recv})`;
     }
   }
   const intrinsic = renderFsIntrinsic(e.receiverType, e.member, recv, args);
@@ -460,7 +539,26 @@ export function renderFsExpr(e: ExprIR, ctx: FsExprCtx): string {
       // record the VIEW path emits for it (walker-core's `new` arm → the
       // `exprObject` seam → this same leaf).
       return `(${FS_LEAVES.object(e.fields.map((f) => ({ name: f.name, value: r(f.value) })))})`;
-    case "member":
+    case "member": {
+      // A COLLECTION OP in its property spelling (`tags.count`, `xs.distinct`).
+      // Checked first, because the verbatim fall-through below is not F#:
+      // measured on a store action `n := tags.where(t => t != "").count`, the
+      // update path emitted
+      //     (model.CartTags |> List.filter (fun t -> (t <> ""))).count
+      // — the `where` translated (it is a `method-call`, which
+      // `renderFsMethodCall` has always routed) and the chained `.count` did
+      // not, because a no-paren op lowers to a `member` and this arm had no
+      // idea.  The VIEW path has always been fine: it goes through the shared
+      // walker, whose `member` arm routes collection ops.  So the two Feliz
+      // paths disagreed on the same expression — the exact divergence this
+      // file's shared-leaf design exists to prevent.
+      //
+      // Receiver-typed, like everything else here: a wire record with a field
+      // genuinely named `count` still reads as a field.
+      if (isCollectionType(e.receiverType)) {
+        const op = renderFsCollectionOp({ op: e.member, recv: r(e.receiver), args: [] });
+        if (op !== undefined) return op;
+      }
       // Record-field access — the receiver is a wire record (an async-effect
       // success binding `p`, a read row) whose F# fields keep the EXACT lowercase
       // wire-shape names (`type Project = { name: string }`).  Render the field
@@ -469,6 +567,7 @@ export function renderFsExpr(e: ExprIR, ctx: FsExprCtx): string {
       // casing seam.  (`upperFirst` here was a latent bug — no member access
       // reached this arm until the async-effect renderer landed.)
       return `${r(e.receiver)}.${e.member}`;
+    }
     case "call":
       return `${e.name}(${e.args.map(r).join(", ")})`;
     case "method-call":

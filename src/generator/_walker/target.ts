@@ -1047,6 +1047,52 @@ export interface WalkerTarget {
     memberType: TypeIR | undefined;
   }): string | undefined;
 
+  /** OPTIONAL — render a stdlib COLLECTION OP applied to a collection
+   *  (`rows.count`, `rows.where(λ)`, `names.sortBy(λ)`).
+   *
+   *  Loom's collection vocabulary (`src/util/collection-ops.ts`) is spelled
+   *  Loom's way, not the host language's, so the shared `member` /
+   *  `method-call` arms cannot emit it verbatim: `rows.count` on the four JS
+   *  frontends is `TS2339 — Property 'count' does not exist on type 'T[]'`, on
+   *  Feliz it is not F#, on Flutter it is not Dart.  That verbatim emission is
+   *  precisely what `loom.frontend-collection-op-unsupported` was created to
+   *  refuse, so a target WITHOUT this seam keeps being refused — the gate and
+   *  this seam are two halves of one contract (see
+   *  `ir/util/collection-op-site.ts`, the one recognizer both consult).
+   *
+   *  Returning `undefined` for a particular op declines it, and the gate keeps
+   *  refusing that op.  Never fall through to verbatim.
+   *
+   *  Sub-expressions arrive PRE-RENDERED (`recv`, `args`) in this target's own
+   *  language — lambda args included, via `exprLambda`. */
+  renderCollectionOp?(spec: {
+    /** Catalogue op name — `count`, `where`, `sortBy`, … */
+    op: string;
+    /** The already-rendered receiver, in this target's language. */
+    recv: string;
+    /** The already-rendered arguments, in this target's language. */
+    args: readonly string[];
+    receiverType: TypeIR;
+    /** The `method-call` node when the op was spelled with parens — carries
+     *  `sortBy`'s descending flag and the element type for money /
+     *  value-object special-cases.  Absent for the property form
+     *  (`rows.count`). */
+    call?: Extract<ExprIR, { kind: "method-call" }>;
+  }): string | undefined;
+
+  /** OPTIONAL — spell a LAMBDA in expression position (the callback of a
+   *  higher-order collection op: `rows.where(o => o.open)`).
+   *
+   *  The shared default is a JavaScript arrow, `(p) => body`, which is right
+   *  for the four JSX frontends and for Dart — and wrong for F#, where the
+   *  same node must be `(fun p -> body)`.  Emitting the arrow into an `.fs`
+   *  file is what forced `map`'s Feliz carve-out
+   *  (`MAP_UNRENDERED_FRAMEWORK`); with this seam Feliz renders the lambda and
+   *  the carve-out is gone.
+   *
+   *  The BODY is pre-rendered with the param already bound in scope. */
+  exprLambda?(param: string, body: string): string;
+
   /** OPTIONAL — the in-scope accessor for the magic route `id` identifier
    *  (`{ kind: "id" }`, e.g. `Order.byId(id)` on a `/orders/:id` page).  The
    *  shared `emitExpr` sets `ctx.usesRouteId` and returns this; the page-shell

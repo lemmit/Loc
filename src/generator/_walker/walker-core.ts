@@ -64,6 +64,7 @@ import type {
   UiApiParamIR,
   WorkflowIR,
 } from "../../ir/types/loom-ir.js";
+import { collectionOpSite } from "../../ir/util/collection-op-site.js";
 import {
   listShapedProjectionNames,
   readableProjectionNames,
@@ -634,6 +635,19 @@ export interface WalkEnv {
    *  explicit `paged: true` (the binding IS the envelope) and on any target
    *  owning the resolution through `renderPagedEnvelopeMember`. */
   pagedEnvelopeBindings?: ReadonlyMap<string, string>;
+  /** Lambda params bound to a query's ROW SET — the `data:` param of a
+   *  non-`single` `QueryView`.  Such a param carries no array `TypeIR`
+   *  (lowering leaves UI-primitive lambda params at the `string` placeholder)
+   *  yet is a collection by construction, so a collection op read off it
+   *  (`rows.count`) is only recognisable through this set.
+   *
+   *  Grown by exactly `ir/util/collection-op-site.ts`'s `rowSetLambdaParam` —
+   *  the same function the IR-validate gate uses to grow its own scope — so
+   *  the walker and `loom.frontend-collection-op-unsupported` cannot disagree
+   *  about which nodes are collection-op sites.  A disagreement in the
+   *  direction "gate allows, walker doesn't recognise" would re-open the
+   *  verbatim emission the gate exists to prevent. */
+  rowSetBindings?: ReadonlySet<string>;
   /** Identifiers emitted by the page shell that user-
    *  written sub-expressions can reference (e.g. inside a
    *  `CreateForm(of:, onSubmit:)` lambda, `create` is the mutation hook
@@ -1573,6 +1587,32 @@ function isProvenancedCarrierRead(
   return provenancedFieldNames(ctx.aggregatesByName).has(expr.member);
 }
 
+/** Route a node that is a stdlib COLLECTION OP applied to a collection to the
+ *  target's `renderCollectionOp` table, or return undefined.
+ *
+ *  Undefined means one of three things, and all three are the same outcome:
+ *  the node is not a collection-op site, the target has no table, or the table
+ *  declines this op.  In every case the op is one
+ *  `loom.frontend-collection-op-unsupported` still REFUSES at IR-validate, so
+ *  no valid `.ddd` reaches the verbatim fall-through below.  The recognizer is
+ *  the one the gate itself uses (`ir/util/collection-op-site.ts`), which is
+ *  what makes that guarantee structural rather than a matter of the two
+ *  predicates being kept in sync by hand. */
+function tryCollectionOp(expr: ExprIR, ctx: WalkContext): string | undefined {
+  if (ctx.target.renderCollectionOp === undefined) return undefined;
+  const site = collectionOpSite(expr, ctx.rowSetBindings ?? EMPTY_ROW_SET);
+  if (site === undefined) return undefined;
+  return ctx.target.renderCollectionOp({
+    op: site.op,
+    recv: emitExpr(site.receiver, ctx),
+    args: site.args.map((a) => emitExpr(a, ctx)),
+    receiverType: site.receiverType,
+    call: site.call,
+  });
+}
+
+const EMPTY_ROW_SET: ReadonlySet<string> = new Set<string>();
+
 /** Render an `ExprIR` as a JS-expression string (NOT JSX).  Used
  *  for the right-hand side of state assignments (`count := count +
  *  1` → `count + 1`) and lambda expression bodies.  State + param
@@ -1811,6 +1851,18 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
       return `${expr.name}(${args})`;
     }
     case "member": {
+      // A stdlib COLLECTION OP in its property spelling (`rows.count`,
+      // `xs.distinct`).  Routed before every other member arm because the
+      // fall-through at the bottom emits `<recv>.<member>` VERBATIM — which for
+      // a Loom-spelled op is `TS2339` on the JSX targets, not-F# on Feliz and
+      // not-Dart on Flutter, i.e. exactly the failure
+      // `loom.frontend-collection-op-unsupported` exists to refuse.  A target
+      // with no table (or one declining this op) falls through to the gate,
+      // which still refuses it — never to the verbatim emit.
+      {
+        const rendered = tryCollectionOp(expr, ctx);
+        if (rendered !== undefined) return rendered;
+      }
       // --- `Provenanced<T>` carrier hop (M-T6.12) ------------------------
       //
       // A `provenanced` field ships as `{ value, lineage }` on the wire
@@ -1856,7 +1908,13 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
         ? emitExpr(expr.body, childCtx)
         : `{ ${(expr.block ?? []).map((s) => emitStmt(s, childCtx)).join(" ")} }`;
       propagateChildFlags(ctx, childCtx);
-      return `(${expr.param}) => ${rendered}`;
+      // The JS arrow is the DEFAULT, not the only spelling.  Feliz's embedded
+      // language is F# (`fun p -> body`); emitting the arrow into an `.fs`
+      // file is what forced `map`'s Feliz carve-out in the gate
+      // (`MAP_UNRENDERED_FRAMEWORK`) — a valid `.map(λ)` shipped unbuildable
+      // output on that one target.  Dart's arrow is spelled like JS's, so
+      // Flutter keeps the default.
+      return ctx.target.exprLambda?.(expr.param, rendered) ?? `(${expr.param}) => ${rendered}`;
     }
     case "object":
       // Object literal: `{ name: name, age: 30 }` — the leaf owns the
@@ -1866,6 +1924,13 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
         expr.fields.map((f) => ({ name: f.name, value: emitExpr(f.value, ctx) })),
       );
     case "method-call": {
+      // A stdlib COLLECTION OP in its call spelling (`rows.where(λ)`).  Same
+      // reasoning as the `member` arm above — routed before the api-hook
+      // detector because a collection op's receiver is a value, never a hook.
+      {
+        const rendered = tryCollectionOp(expr, ctx);
+        if (rendered !== undefined) return rendered;
+      }
       // When the method-call's receiver is a hook
       // (detected by tryDetectApiHook on the receiver), emit
       // `<hookVar>.<method>(<args>)` (e.g.
