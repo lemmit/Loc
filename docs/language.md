@@ -66,7 +66,7 @@ reserved only where its own rule begins, and admitted as an ordinary
 identifier elsewhere.  The grammar factors the shared set into one rule,
 `CommonSoftKeywords` (`state`, `kind`, `payload`, `command`, `query`,
 `response`, `error`, `paged`, `envelope`, `option`, `or`, `money`,
-`parent`, `title`, `body`, `sort`, `select`, `join`, `group`, `filter`,
+`parent`, `title`, `body`, `sort`, `select`, `join`, `key`, `group`, `filter`,
 `stamp`, `store`, `schema`, `ttl`, `use`, `write`, `migration`, `tenancy`,
 `immutable` / `managed` / `token` / `internal` / `secret`, …), composed
 into every *value* position: a field name (`Property.name`), a parameter /
@@ -91,6 +91,7 @@ context Orders {
     payload: string      // context-level `payload` head — soft as a field
     parent: Order id?    // requirement-hierarchy keyword — soft as a field
     money: int           // even the primitive-type name is soft as a name
+    key: string          // `channel`'s partition-field clause — soft as a field
     write: int           // the policy verb — soft as a field
   }
 }
@@ -895,6 +896,7 @@ Pragmatic core, similar to a subset of TypeScript / C# expressions.
 | `a + b`, `a - b`, `a * b`, `a / b`, `a % b` | Arithmetic. |
 | `a < b`, `a <= b`, `a > b`, `a >= b`, `a == b`, `a != b` | Comparison. |
 | `a && b`, `a \|\| b` | Logical. |
+| `a ?? b` | Nullish coalescing — `a` unless it is null, else `b`.  Binds LOOSER than `\|\|` and TIGHTER than `? :`, and is RIGHT-associative (`a ?? b ?? c` is `a ?? (b ?? c)`).  Pure sugar: it lowers to `a == null ? b : a`, so it works on every backend and every frontend the ternary does.  NOTE the left operand is evaluated TWICE (once in the test, once as the value) — bind an effectful one with `let` first. |
 | `cond ? a : b` | Ternary (`loom.ternary-condition` / `loom.ternary-branches`). A direct null test on `cond` narrows the proven branch — see [Null narrowing](#null-narrowing). |
 | `match { cond => value, …, else => value }` | Predicate-arms expression — the first true arm wins; `else` is the fallthrough. |
 | `match subject { Variant [b] => value, …, else => value }` | Variant match over an `A or B` / `T option` union scrutinee, optionally binding the narrowed variant.  The subject must be a simple ref / member read, not a call — except `match await <call> { … }` in a page `action`, which awaits a remote command and matches its Result ([`actions.md`](actions.md)). |
@@ -1085,6 +1087,37 @@ decimal`.
 | `match subject { Variant [b] => { … }, else => { … } }` | Statement-form variant match — arms run statements (state writes, `navigate(...)`) rather than yield a value.  In a page `action`, `match await Agg.op(...) { Ok r => …, Err e => … }` is how a remote command is awaited and its Result handled — a remote mutating call *without* the marker is `loom.missing-effect-marker`; `loom.match-await*` gates the awaited call's shape ([`actions.md`](actions.md)). |
 | `for x in Repo.run(R(args)) { … }` | **Workflow / handler bodies only** — iterate an aggregate array, saving each element's mutations per iteration ([`workflow.md`](workflow.md)). |
 | `if let x = Repo.find(C(args)) { … } else { … }` | **Workflow / handler bodies only** — bind an optional repository result and branch on presence. |
+| `if Expression { … } else { … }` | Boolean branch; `else` is optional and `else if` chains.  The condition is a full boolean expression EXCEPT that a `{`-opening form (a part / value-object construction, an object literal, a `match`) must be parenthesised — otherwise it would claim the `if`'s own body block.  **Rendered on node / dotnet / java / python.**  Refused with `loom.elixir-if-stmt-unsupported` when an elixir deployable hosts the context (a Phoenix body threads its result through a rebound `record`, and an Elixir `if` block's bindings do not escape it), and with `loom.if-stmt-page-body-unsupported` in a `ui` body — a page expresses a condition as a VALUE (`cond ? a : b` or `match`). |
+
+```ddd
+operation finish(fallback: string) {
+    if status == Open {
+        status := Done
+    } else if attempts > 3 {
+        status := Failed
+    } else {
+        attempts := attempts + 1
+    }
+    note := lastNote ?? fallback
+}
+```
+
+```ts
+// generated (Hono / TypeScript)
+public finish(fallback: string): void {
+  if (this._status === Status.Open) {
+    this._status = Status.Done;
+  } else {
+    if (this._attempts > 3) {
+      this._status = Status.Failed;
+    } else {
+      this._attempts = this._attempts + 1;
+    }
+  }
+  this._note = this._lastNote === null ? fallback : this._lastNote;
+  this._assertInvariants();
+}
+```
 
 ---
 

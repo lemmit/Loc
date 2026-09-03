@@ -195,29 +195,44 @@ describe("F2 — `if … { } else { }` in an operation body", () => {
     expect(s.thenBody.map((b) => b.kind)).toEqual(["let", "if", "precondition"]);
   });
 
-  // The reason `IfStmt.cond` is `CondExpr` and not `Expression`: a full
-  // expression lets `BuilderCall` (`Name { … }`) claim the `if`'s own body
-  // block.  A bare-name condition is the shape that trips it.
+  // The reason `IfStmt.cond` is `CondExpr` and not the full `Expression`: with
+  // `Expression`, a BARE-NAME condition lets `BuilderCall` (`Name { … }`) claim
+  // the `if`'s own body block.
+  //
+  // The DISCRIMINATING shape is a bare CALL statement as the first body
+  // statement — `if active { helper() }`.  `helper()` is also a legal
+  // positional `BuilderEntry`, so `active { helper() }` parses as a complete
+  // builder and the parser then demands the `if`'s missing `{`.  (An
+  // assignment body is NOT discriminating: `count := 1` diverges from a
+  // builder entry at the `:=`, inside Langium's lookahead window, so it parses
+  // either way — which is exactly why this test pins the call shape.  Swapping
+  // `CondExpr` back to `Expression` fails this case and only this case.)
   it("a BARE NAME condition does not have its body swallowed as a BuilderCall", async () => {
-    const op = await opOf(
+    const src = (body: string): string =>
       SYS(`    aggregate Task {
       count: int
       active: bool
+      function helper(): int = 1
       operation run() {
         if active {
-          count := 1
+${body}
         }
       }
-    }`),
-      "Task",
-      "run",
-    );
-    const s = op.statements[0]!;
+    }`);
+
+    const called = await opOf(src("          helper()"), "Task", "run");
+    const s = called.statements[0]!;
     expect(s.kind).toBe("if");
     if (s.kind !== "if") return;
     // The body is the `if`'s, not a builder's entry list.
     expect(s.cond.kind).toBe("ref");
-    expect(s.thenBody.map((b) => b.kind)).toEqual(["assign"]);
+    expect(s.thenBody.map((b) => b.kind)).toEqual(["call"]);
+
+    // ...and the assignment body still parses too.
+    const assigned = await opOf(src("          count := 1"), "Task", "run");
+    const a = assigned.statements[0]!;
+    if (a.kind !== "if") throw new Error("expected an if");
+    expect(a.thenBody.map((b) => b.kind)).toEqual(["assign"]);
   });
 
   it("does not shadow `if let`, whose second token is the hard `let` keyword", async () => {
