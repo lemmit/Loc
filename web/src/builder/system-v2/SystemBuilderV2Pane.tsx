@@ -104,6 +104,7 @@ import { ExprSlotEditor, type ExprMode } from "../system/ExpressionEditor";
 import { AstUtils, type AstNode } from "langium";
 import { isEventDecl } from "../../../../src/language/generated/ast.js";
 import { RefusalLine } from "../refusal";
+import { UndoRedo, paneUndoKeyHandler } from "../undo-redo";
 import { IDENTIFIER, renameMember } from "../system/rename";
 import AddPalette from "./AddPalette";
 import ConstructNode, { type ConstructNodeData } from "./ConstructNode";
@@ -573,11 +574,13 @@ function toRfEdges(g: ViewGraph): Edge[] {
   });
 }
 
-function Breadcrumb({ path, onJump, onOverview }: {
+function Breadcrumb({ path, onJump, onOverview, trailing }: {
   path: ViewPath;
   onJump: (depth: number) => void;
   /** Only offered at the root — Overview IS the root, seen flat. */
   onOverview?: () => void;
+  /** Right-aligned chrome (the Undo / Redo pair). */
+  trailing?: ReactNode;
 }): JSX.Element {
   return (
     <Group
@@ -589,6 +592,7 @@ function Breadcrumb({ path, onJump, onOverview }: {
       style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}
       data-testid="c4system-v2-breadcrumb"
     >
+      {trailing && <Box style={{ order: 1, marginLeft: "auto" }}>{trailing}</Box>}
       <Button
         size="compact-xs"
         variant="subtle"
@@ -1678,8 +1682,19 @@ function Inner({ ctx, path, setPath, onOverview }: {
   }
 
   return (
-    <Box style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
-      <Breadcrumb path={path} onJump={jumpTo} onOverview={path.length === 0 ? onOverview : undefined} />
+    // `tabIndex={-1}` + the key handler: clicking the canvas focuses the pane
+    // so ⌘Z / ⌘⇧Z reach the editor's undo stack from here.
+    <Box
+      style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, outline: "none" }}
+      tabIndex={-1}
+      onKeyDown={paneUndoKeyHandler(ctx.editorHandleRef)}
+    >
+      <Breadcrumb
+        path={path}
+        onJump={jumpTo}
+        onOverview={path.length === 0 ? onOverview : undefined}
+        trailing={<UndoRedo handleRef={ctx.editorHandleRef} testidPrefix="c4system-v2" />}
+      />
       {bodyMembers.length > 0 && (
         <BodyPicker
           members={bodyMembers}

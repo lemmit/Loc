@@ -10,6 +10,7 @@ import { spliceNodeIfParses } from "./edit-engine";
 import { RefusalLine } from "./refusal";
 import { usePaneHarness } from "./pane-harness";
 import { ConfirmAction, confirmSites, type ConfirmSpec } from "../util/confirm";
+import { UndoRedo, paneUndoKeyHandler } from "./undo-redo";
 import { collectBodies } from "./page/bodies";
 import { seedFromBody, emitBody, enumStateFields, type BuilderNode } from "./page/model";
 import { toCraft, fromCraft } from "./page/serialize";
@@ -305,29 +306,40 @@ export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   };
 
   return (
-    <Box style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      {ctx.isDesktop && current.page && (
-        <Group px="xs" py={4} bg="dark.7" gap="xs" style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}>
-          <StatePanel page={current.page} getSource={() => ctx.getSource()} types={stateTypes} enumCases={enumCases} onApply={applyState} />
-          {pagePropsInfo && (
-            <PagePropsPanel
-              pageName={current.name}
-              info={pagePropsInfo}
-              layouts={layouts}
-              getSource={() => ctx.getSource()}
-              onApply={applyState}
-            />
-          )}
-          {uiName !== undefined && uiStructure && (
-            <UiStructurePanel
-              uiName={uiName}
-              structure={uiStructure}
-              getSource={() => ctx.getSource()}
-              onApply={applyState}
-            />
-          )}
-        </Group>
-      )}
+    // `tabIndex={-1}` + the key handler: a click anywhere on the canvas
+    // focuses the pane, so ⌘Z / ⌘⇧Z route to the editor's undo stack from
+    // here (text controls keep their own — see `undo-keys.ts`).
+    <Box
+      style={{ display: "flex", flexDirection: "column", height: "100%", outline: "none" }}
+      tabIndex={-1}
+      onKeyDown={paneUndoKeyHandler(ctx.editorHandleRef)}
+      data-testid="c4builder-pane"
+    >
+      <Group px="xs" py={4} bg="dark.7" gap="xs" style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}>
+        <UndoRedo handleRef={ctx.editorHandleRef} testidPrefix="c4builder" />
+        {ctx.isDesktop && current.page && (
+          <>
+            <StatePanel page={current.page} getSource={() => ctx.getSource()} types={stateTypes} enumCases={enumCases} onApply={applyState} />
+            {pagePropsInfo && (
+              <PagePropsPanel
+                pageName={current.name}
+                info={pagePropsInfo}
+                layouts={layouts}
+                getSource={() => ctx.getSource()}
+                onApply={applyState}
+              />
+            )}
+            {uiName !== undefined && uiStructure && (
+              <UiStructurePanel
+                uiName={uiName}
+                structure={uiStructure}
+                getSource={() => ctx.getSource()}
+                onApply={applyState}
+              />
+            )}
+          </>
+        )}
+      </Group>
       <RefusalLine refused={refusal.refused} />
       <Box style={{ flex: 1, minHeight: 0 }}>
         <PageBuilder

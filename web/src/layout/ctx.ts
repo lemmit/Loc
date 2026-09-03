@@ -12,7 +12,7 @@
 import type { MutableRefObject, ReactNode } from "react";
 import type { AgentMessage } from "../agent/demo";
 import type { AgentSettings } from "../agent/provider";
-import type { EditorHandle } from "../editor/LoomEditor";
+import type { EditorHandle } from "../editor/editor-handle";
 import type { LoomLspClient } from "../lsp/client";
 import type { LoomBuildClient } from "../build/client";
 import type { RuntimeDispatcher, RuntimeEngine } from "../engine";

@@ -36,6 +36,7 @@ import type { LayoutCtx } from "../../layout/ctx";
 import { spliceNodeIfParses } from "../edit-engine";
 import { RefusalLine } from "../refusal";
 import { usePaneHarness } from "../pane-harness";
+import { UndoRedo, paneUndoKeyHandler } from "../undo-redo";
 import {
   printRequirementText,
   printSolutionText,
@@ -335,7 +336,17 @@ export default function RequirementsPane({ ctx }: { ctx: LayoutCtx }): JSX.Eleme
   const showDetail = isDesktop || selected !== null;
 
   return (
-    <Box style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, minWidth: 0 }}>
+    // `tabIndex={-1}` + the key handler: a click in the list focuses the pane
+    // so ⌘Z / ⌘⇧Z reach the editor's undo stack; the form's inputs keep
+    // their own native undo (`undo-keys.ts`).
+    <Box
+      style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, minWidth: 0, outline: "none" }}
+      tabIndex={-1}
+      onKeyDown={paneUndoKeyHandler(ctx.editorHandleRef)}
+    >
+    <Group px="xs" py={2} bg="dark.7" gap="xs" style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}>
+      <UndoRedo handleRef={ctx.editorHandleRef} testidPrefix="requirements" />
+    </Group>
     <RefusalLine refused={refusal.refused} />
     <Box
       style={{
