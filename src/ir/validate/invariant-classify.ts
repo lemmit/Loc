@@ -179,6 +179,12 @@ function constructionEvaluable(
       // an invariant body (it lives only in an aggregate's context/write-scope
       // filters).
       return false;
+    default: {
+      // Wave 2 packet 2.3 — every `ExprIR` kind is already listed above;
+      // this turns that into a compile-time guarantee.
+      const _exhaustive: never = e;
+      return _exhaustive;
+    }
   }
 }
 
@@ -323,6 +329,12 @@ function exprIsTranslatable(
       // Authorization/tenancy query-filter sentinel (M-T9.9) — never appears in
       // an invariant body, so never wire-translatable.
       return false;
+    default: {
+      // Wave 2 packet 2.3 — every `ExprIR` kind is already listed above;
+      // this turns that into a compile-time guarantee.
+      const _exhaustive: never = e;
+      return _exhaustive;
+    }
   }
 }
 
@@ -645,5 +657,11 @@ function firstFieldRef(e: ExprIR): string | null {
       // Authorization/tenancy query-filter sentinel (M-T9.9) — never appears in
       // an invariant body, so carries no wire-field reference.
       return null;
+    default: {
+      // Wave 2 packet 2.3 — every `ExprIR` kind is already listed above;
+      // this turns that into a compile-time guarantee.
+      const _exhaustive: never = e;
+      return _exhaustive;
+    }
   }
 }

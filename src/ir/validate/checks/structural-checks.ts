@@ -29,7 +29,11 @@ import type {
 import { allContexts } from "../../types/loom-ir.js";
 import { isTphBase, isTphConcrete } from "../../util/inheritance.js";
 import { aggregateIsEventSourced, resolveDataSourceConfig } from "../../util/resolve-datasource.js";
-import { walkExprDeep, walkStmtExprsDeep as walkExprsInStmt } from "../../util/walk.js";
+import {
+  walkExprDeep,
+  walkStmtExprsDeep as walkExprsInStmt,
+  walkWorkflowStmtExprsDeep,
+} from "../../util/walk.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
 import { walkExpr } from "./shared.js";
 
@@ -1605,23 +1609,29 @@ export function validateCurrentUserScope(ctx: BoundedContextIR, diags: LoomDiagn
 const UNKNOWN_PERMISSION_SENTINEL = "__unknown_permission__:";
 
 export function validatePermissionRefs(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
+  // Checks exactly ONE node (no recursion of its own) — the leaf `flag`
+  // below deep-walks a root expr with this; the workflow scan further down
+  // already deep-walks via `walkWorkflowStmtExprsDeep`, so it calls this
+  // directly per visited node instead (avoids re-walking, and re-flagging,
+  // the same sentinel literal from every ancestor node `flag` would visit).
+  const flagOne = (location: string, e: ExprIR): void => {
+    if (
+      e.kind === "literal" &&
+      e.lit === "string" &&
+      e.value.startsWith(UNKNOWN_PERMISSION_SENTINEL)
+    ) {
+      const name = e.value.slice(UNKNOWN_PERMISSION_SENTINEL.length);
+      diags.push({
+        severity: "error",
+        code: "loom.unknown-permission",
+        message: diagMessage("loom.unknown-permission", { name }),
+        source: `${ctx.name}/${location}`,
+      });
+    }
+  };
   const flag = (location: string, expr: ExprIR | undefined): void => {
     if (!expr) return;
-    walkExpr(expr, (e) => {
-      if (
-        e.kind === "literal" &&
-        e.lit === "string" &&
-        e.value.startsWith(UNKNOWN_PERMISSION_SENTINEL)
-      ) {
-        const name = e.value.slice(UNKNOWN_PERMISSION_SENTINEL.length);
-        diags.push({
-          severity: "error",
-          code: "loom.unknown-permission",
-          message: diagMessage("loom.unknown-permission", { name }),
-          source: `${ctx.name}/${location}`,
-        });
-      }
-    });
+    walkExpr(expr, (e) => flagOne(location, e));
   };
   for (const agg of ctx.aggregates) {
     for (const inv of agg.invariants) {
@@ -1664,31 +1674,13 @@ export function validatePermissionRefs(ctx: BoundedContextIR, diags: LoomDiagnos
     }
   }
   for (const wf of ctx.workflows) {
+    // Rides `walkWorkflowStmtExprsDeep` (M-T6.50 class, wave-2 packet 2.3):
+    // the switch this replaced had no arm for `assign` / `domain-service-
+    // call` / `resource-call`, and never descended into `for-each` / `if-
+    // let` bodies at all — an unknown-permission reference nested in any of
+    // those silently skipped `loom.unknown-permission`.
     for (const s of wf.statements) {
-      switch (s.kind) {
-        case "precondition":
-        case "requires":
-          flag(`workflow[${wf.name}]`, s.expr);
-          break;
-        case "emit":
-          for (const f of s.fields) flag(`workflow[${wf.name}]`, f.value);
-          break;
-        case "factory-let":
-          for (const f of s.fields) flag(`workflow[${wf.name}]`, f.value);
-          break;
-        case "repo-let":
-          for (const a of s.args) flag(`workflow[${wf.name}]`, a);
-          break;
-        case "expr-let":
-          flag(`workflow[${wf.name}]`, s.expr);
-          break;
-        case "op-call":
-          for (const a of s.args) flag(`workflow[${wf.name}]`, a);
-          break;
-        case "repo-delete":
-          flag(`workflow[${wf.name}]`, s.entity);
-          break;
-      }
+      walkWorkflowStmtExprsDeep(s, (e) => flagOne(`workflow[${wf.name}]`, e));
     }
   }
 }

@@ -17,6 +17,7 @@ import type {
 import { exprUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { operationBody, operationBodyUsesCurrentUser } from "../../../ir/util/op-gates.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
+import { walkExprDeep, walkStmtExprsDeep } from "../../../ir/util/walk.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake } from "../../../util/naming.js";
 import {
@@ -62,58 +63,35 @@ function isRefCollection(t: TypeIR): boolean {
 
 /** True when an expression tree contains a domain-service member call
  *  (`Pricing.quote(...)` → a `call` with `callKind: "domain-service"`).
- *  Drives the `domain.services.*` import on the calling entity. */
+ *  Drives the `domain.services.*` import on the calling entity.
+ *
+ *  Rides `walkExprDeep` (M-T6.50 class, wave-2 packet 2.3): the hand-rolled
+ *  switch this replaced had no arm for `list` / `convert` / `match` /
+ *  `duration` / `i18nFormat` / `authz-filter`, and a block-body lambda's
+ *  statements were never reached (`exprCallsDomainService(e.body)` on an
+ *  `undefined` body) — so a domain-service call nested in any of those never
+ *  triggered the `domain.services.*` import, and the generated entity fails
+ *  to compile (unresolved symbol) the moment such a call is written. */
 function exprCallsDomainService(e: ExprIR | undefined): boolean {
   if (!e) return false;
-  if (e.kind === "call") {
-    if (e.callKind === "domain-service") return true;
-    return e.args.some(exprCallsDomainService);
-  }
-  switch (e.kind) {
-    case "method-call":
-      return exprCallsDomainService(e.receiver) || e.args.some(exprCallsDomainService);
-    case "member":
-      return exprCallsDomainService(e.receiver);
-    case "binary":
-      return exprCallsDomainService(e.left) || exprCallsDomainService(e.right);
-    case "ternary":
-      return (
-        exprCallsDomainService(e.cond) ||
-        exprCallsDomainService(e.then) ||
-        exprCallsDomainService(e.otherwise)
-      );
-    case "unary":
-      return exprCallsDomainService(e.operand);
-    case "paren":
-      return exprCallsDomainService(e.inner);
-    case "lambda":
-      return exprCallsDomainService(e.body);
-    case "new":
-    case "object":
-      return e.fields.some((f) => exprCallsDomainService(f.value));
-  }
-  return false;
+  let found = false;
+  walkExprDeep(e, (x) => {
+    if (x.kind === "call" && x.callKind === "domain-service") found = true;
+  });
+  return found;
 }
 
-/** True when any statement in a body invokes a domain service. */
+/** True when any statement in a body invokes a domain service.
+ *
+ *  Rides `walkStmtExprsDeep` (M-T6.50 class, wave-2 packet 2.3): the switch
+ *  this replaced had no `variant-match` arm, so a domain-service call nested
+ *  in an arm/else body was silently invisible to the import collector. */
 function stmtCallsDomainService(s: StmtIR): boolean {
-  switch (s.kind) {
-    case "precondition":
-    case "requires":
-    case "let":
-    case "expression":
-      return exprCallsDomainService(s.expr);
-    case "assign":
-    case "add":
-    case "remove":
-    case "return":
-      return exprCallsDomainService(s.value);
-    case "emit":
-      return s.fields.some((f) => exprCallsDomainService(f.value));
-    case "call":
-      return s.args.some(exprCallsDomainService);
-  }
-  return false;
+  let found = false;
+  walkStmtExprsDeep(s, (e) => {
+    if (e.kind === "call" && e.callKind === "domain-service") found = true;
+  });
+  return found;
 }
 
 // ---------------------------------------------------------------------------

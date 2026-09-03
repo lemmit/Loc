@@ -1,8 +1,10 @@
 import type { BoundedContextIR, EnumIR, StmtIR, ValueObjectIR } from "../../../ir/types/loom-ir.js";
+import { walkStmtExprsDeep } from "../../../ir/util/walk.js";
 import { lines } from "../../../util/code-builder.js";
 import { snake } from "../../../util/naming.js";
 import { emptyPyTypeImports, visitPyTypeImports } from "../py-type-imports.js";
 import {
+  addPyExprImport,
   collectPyExprImports,
   renderPyExpr,
   renderPyNegatedGuard,
@@ -12,23 +14,13 @@ import { renderPyStatements } from "../render-stmt.js";
 
 /** Import collection over a pure block-body function statement's expressions
  *  (a block `function` only ever carries let / precondition / requires /
- *  return / expression — the impure kinds are rejected by the IR purity
- *  gate, so this need not cover assign / emit / add / remove). */
+ *  return / expression / call — the impure kinds are rejected by the IR
+ *  purity gate).  Rides `walkStmtExprsDeep` (wave-2 packet 2.3 / M-T6.50
+ *  class) rather than a hand-enumerated switch, so a `variant-match` nested
+ *  in a pure body — the exact shape wave 1 found missing in the sibling
+ *  collectors — is not a silent gap here either. */
 function collectBlockStmtExprImports(st: StmtIR, into: Set<string>): void {
-  switch (st.kind) {
-    case "precondition":
-    case "requires":
-    case "let":
-    case "expression":
-      collectPyExprImports(st.expr, into);
-      return;
-    case "return":
-      collectPyExprImports(st.value, into);
-      return;
-    case "call":
-      for (const a of st.args) collectPyExprImports(a, into);
-      return;
-  }
+  walkStmtExprsDeep(st, (e) => addPyExprImport(e, into));
 }
 
 // ---------------------------------------------------------------------------

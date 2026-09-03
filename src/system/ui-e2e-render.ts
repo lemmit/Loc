@@ -462,6 +462,12 @@ function renderUIExpr(e: ExprIR, ctx: RenderCtx): string {
       // filter node, never reached by the UI e2e (page-object) renderer; keep
       // the switch total.
       return `/* authz-filter:${e.filter.kind} */`;
+    default: {
+      // Wave 2 packet 2.3 — every `ExprIR` kind is already listed above;
+      // this turns that into a compile-time guarantee.
+      const _exhaustive: never = e;
+      return _exhaustive;
+    }
   }
 }
 

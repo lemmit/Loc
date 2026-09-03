@@ -32,7 +32,12 @@ import {
 } from "../../ir/util/openapi-ids.js";
 import { collectReachableTypes } from "../../ir/util/reachable-types.js";
 import { resolveWorkflowIsolation } from "../../ir/util/resolve-datasource.js";
-import { walkWorkflowStmtExprsDeep } from "../../ir/util/walk.js";
+import {
+  walkExprDeep,
+  walkWorkflowStmtChildren,
+  walkWorkflowStmtExprsDeep,
+  walkWorkflowStmtsDeep,
+} from "../../ir/util/walk.js";
 import { workflowCorrIdValueType } from "../../ir/util/workflow-instances.js";
 import { resolveErrorStatus } from "../../util/error-defaults.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
@@ -421,25 +426,29 @@ function analyseStmts(
   const externs = new Map<string, { aggName: string; opName: string }>();
   let hasEmit = false;
   for (const save of saves) repos.set(save.repoName, save.aggName);
-  const walk = (stmts: WorkflowStmtIR[]): void => {
-    for (const st of stmts) {
-      if (st.kind === "repo-let" || st.kind === "repo-run") {
-        repos.set(st.repoName, st.aggName);
-      } else if (st.kind === "emit") {
-        hasEmit = true;
-      } else if (st.kind === "for-each") {
-        for (const sv of st.savesPerIteration) repos.set(sv.repoName, sv.aggName);
-        walk(st.body);
-      } else if (st.kind === "if-let") {
-        repos.set(st.repoName, st.aggName);
-        for (const sv of st.savesInThen) repos.set(sv.repoName, sv.aggName);
-        for (const sv of st.savesInElse) repos.set(sv.repoName, sv.aggName);
-        walk(st.thenBody);
-        walk(st.elseBody ?? []);
-      }
+  // INSERTION ORDER on `repos` is load-bearing downstream, so this rides
+  // `walkWorkflowStmtChildren` (wave-2 packet 2.3) for the RECURSION step
+  // only — the exhaustive, `never`-checked "which kinds nest further bodies"
+  // fact `walk.ts` owns — while keeping the original per-kind ordering.
+  const walk = (st: WorkflowStmtIR): void => {
+    if (st.kind === "repo-let" || st.kind === "repo-run") {
+      repos.set(st.repoName, st.aggName);
+      return;
     }
+    if (st.kind === "emit") {
+      hasEmit = true;
+      return;
+    }
+    if (st.kind === "for-each") {
+      for (const sv of st.savesPerIteration) repos.set(sv.repoName, sv.aggName);
+    } else if (st.kind === "if-let") {
+      repos.set(st.repoName, st.aggName);
+      for (const sv of st.savesInThen) repos.set(sv.repoName, sv.aggName);
+      for (const sv of st.savesInElse) repos.set(sv.repoName, sv.aggName);
+    }
+    walkWorkflowStmtChildren(st, { workflowStmt: walk });
   };
-  walk(statements);
+  for (const st of statements) walk(st);
   return { repos, hasEmit, externs };
 }
 
@@ -1091,29 +1100,32 @@ function analyseWorkflow(wf: WorkflowIR): WorkflowUsage {
   for (const save of wf.savesAtExit) {
     repos.set(save.repoName, save.aggName);
   }
-  const walk = (stmts: WorkflowStmtIR[]): void => {
-    for (const st of stmts) {
-      if (st.kind === "repo-let" || st.kind === "repo-run") {
-        repos.set(st.repoName, st.aggName);
-      } else if (st.kind === "emit") {
-        hasEmit = true;
-      } else if (st.kind === "for-each") {
-        for (const sv of st.savesPerIteration) repos.set(sv.repoName, sv.aggName);
-        walk(st.body);
-      } else if (st.kind === "if-let") {
-        // The if-let single-row lookup dereferences its repo (`Run…Async`) and
-        // saves per branch — register the repo + its branch saves and recurse
-        // both branches, else the handler references `_<repo>` without
-        // injecting it (CS0103). Mirrors `collectReadingServices`.
-        repos.set(st.repoName, st.aggName);
-        for (const sv of st.savesInThen) repos.set(sv.repoName, sv.aggName);
-        for (const sv of st.savesInElse) repos.set(sv.repoName, sv.aggName);
-        walk(st.thenBody);
-        walk(st.elseBody ?? []);
-      }
+  // INSERTION ORDER on `repos` is load-bearing downstream, so this rides
+  // `walkWorkflowStmtChildren` (wave-2 packet 2.3) for the RECURSION step
+  // only — see `analyseStmts` above (same shape).
+  const walk = (st: WorkflowStmtIR): void => {
+    if (st.kind === "repo-let" || st.kind === "repo-run") {
+      repos.set(st.repoName, st.aggName);
+      return;
     }
+    if (st.kind === "emit") {
+      hasEmit = true;
+      return;
+    }
+    if (st.kind === "for-each") {
+      for (const sv of st.savesPerIteration) repos.set(sv.repoName, sv.aggName);
+    } else if (st.kind === "if-let") {
+      // The if-let single-row lookup dereferences its repo (`Run…Async`) and
+      // saves per branch — register the repo + its branch saves and recurse
+      // both branches, else the handler references `_<repo>` without
+      // injecting it (CS0103). Mirrors `collectReadingServices`.
+      repos.set(st.repoName, st.aggName);
+      for (const sv of st.savesInThen) repos.set(sv.repoName, sv.aggName);
+      for (const sv of st.savesInElse) repos.set(sv.repoName, sv.aggName);
+    }
+    walkWorkflowStmtChildren(st, { workflowStmt: walk });
   };
-  walk(wf.statements);
+  for (const st of wf.statements) walk(st);
   return { repos, hasEmit, externs };
 }
 
@@ -1535,29 +1547,34 @@ function renderCsOmission(
  */
 function collectDereferencedLoads(stmts: readonly WorkflowStmtIR[]): Set<string> {
   const names = new Set<string>();
-  for (const st of stmts) {
-    if (st.kind === "op-call") names.add(st.target);
-    else if (st.kind === "domain-service-call") {
-      // A `mutating`/`reading` service call dereferences every aggregate ARG it
-      // is passed (the service operates on them), so a `getById` load passed
-      // into one is load-or-throw — guard it, or the non-null `Account` param
-      // is a CS8604 under nullable-reference types (domain-services.md rev. 4).
-      const args = st.call.kind === "call" ? st.call.args : [];
-      for (const a of args) {
-        if (a.kind === "ref") names.add(a.name);
-      }
-    } else if (st.kind === "for-each") {
-      for (const n of collectDereferencedLoads(st.body)) names.add(n);
+  const visitExpr = (e: ExprIR): void => {
+    // Member/method reads on a plain ref dereference that name —
+    // `loaded.DataKey` on an unguarded `Task<T?>` result is the same CS8602
+    // an op-call deref is.
+    if ((e.kind === "member" || e.kind === "method-call") && e.receiver.kind === "ref") {
+      names.add(e.receiver.name);
     }
-    // Member/method reads on a plain ref anywhere in the statement's
-    // expressions (op-call args, emit/factory-let field seeds, preconditions…)
-    // dereference that name — `loaded.DataKey` on an unguarded `Task<T?>`
-    // result is the same CS8602 an op-call deref is.  The walk descends into
-    // nested `for-each`/`if-let` bodies, so top-level statements suffice.
-    walkWorkflowStmtExprsDeep(st, (e) => {
-      if ((e.kind === "member" || e.kind === "method-call") && e.receiver.kind === "ref") {
-        names.add(e.receiver.name);
+  };
+  // Rides `walkWorkflowStmtsDeep` (M-T6.50 class, wave-2 packet 2.3): the
+  // hand-rolled version only recursed into `for-each` bodies — an `op-call`
+  // / `domain-service-call` / member-dereferencing expression living inside
+  // an `if-let` branch was invisible to both halves of this collector, so a
+  // `getById` load only dereferenced there stayed unguarded and could throw
+  // CS8602/CS8604 under nullable-reference types.
+  for (const top of stmts) {
+    walkWorkflowStmtsDeep(top, (st) => {
+      if (st.kind === "op-call") names.add(st.target);
+      else if (st.kind === "domain-service-call") {
+        // A `mutating`/`reading` service call dereferences every aggregate ARG
+        // it is passed (the service operates on them), so a `getById` load
+        // passed into one is load-or-throw — guard it, or the non-null
+        // `Account` param is a CS8604 (domain-services.md rev. 4).
+        const args = st.call.kind === "call" ? st.call.args : [];
+        for (const a of args) {
+          if (a.kind === "ref") names.add(a.name);
+        }
       }
+      walkWorkflowStmtChildren(st, { expr: (e) => walkExprDeep(e, visitExpr) });
     });
   }
   return names;
@@ -1942,25 +1959,16 @@ export function renderExprWithCmdParams(
  *  needing no injection).  De-duplicated by service name. */
 function collectReadingServices(wf: WorkflowIR, ctx: EnrichedBoundedContextIR): Set<string> {
   const out = new Set<string>();
-  const visit = (e: ExprIR): void => {
-    if (e.kind === "call" && e.callKind === "domain-service" && e.serviceRef) {
-      const svc = ctx.domainServices?.find((s) => s.name === e.serviceRef!.service);
-      const op = svc?.operations.find((o) => o.name === e.serviceRef!.op);
-      if (op && readPortsForOperation(op).length > 0) out.add(e.serviceRef.service);
-    }
-    for (const c of exprChildrenForServiceScan(e)) visit(c);
-  };
-  const walk = (stmts: readonly WorkflowStmtIR[]): void => {
-    for (const st of stmts) {
-      for (const e of workflowStmtExprsForServiceScan(st)) visit(e);
-      if (st.kind === "for-each") walk(st.body);
-      else if (st.kind === "if-let") {
-        walk(st.thenBody);
-        walk(st.elseBody ?? []);
+  for (const s of wf.statements) {
+    walkWorkflowStmtExprsDeep(s, (e) => {
+      if (e.kind === "call" && e.callKind === "domain-service" && e.serviceRef) {
+        const svc = ctx.domainServices?.find((x) => x.name === e.serviceRef?.service);
+        const op = svc?.operations.find((o) => o.name === e.serviceRef?.op);
+        if (op && readPortsForOperation(op).length > 0 && e.serviceRef)
+          out.add(e.serviceRef.service);
       }
-    }
-  };
-  walk(wf.statements);
+    });
+  }
   return out;
 }
 
@@ -1977,58 +1985,6 @@ function workflowReadingServiceCallResolver(
     if (!operation || readPortsForOperation(operation).length === 0) return undefined;
     return { receiver: `_${lowerFirst(service)}`, method: `${upperFirst(op)}Async` };
   };
-}
-
-/** The expressions a workflow statement directly carries — for the reading-service
- *  scan (the per-kind nesting is handled by `collectReadingServices`'s spine). */
-function workflowStmtExprsForServiceScan(st: WorkflowStmtIR): ExprIR[] {
-  switch (st.kind) {
-    case "expr-let":
-    case "precondition":
-    case "requires":
-      return [st.expr];
-    case "resource-call":
-      return [st.call];
-    case "op-call":
-    case "repo-let":
-      return st.args;
-    case "factory-let":
-    case "emit":
-      return st.fields.map((f) => f.value);
-    case "for-each":
-      return [st.iterable];
-    case "if-let":
-      return st.retrievalArgs;
-    default:
-      return [];
-  }
-}
-
-/** Direct sub-expressions of an ExprIR (for the reading-service call scan). */
-function exprChildrenForServiceScan(e: ExprIR): ExprIR[] {
-  switch (e.kind) {
-    case "method-call":
-      return [e.receiver, ...e.args];
-    case "member":
-      return [e.receiver];
-    case "binary":
-      return [e.left, e.right];
-    case "ternary":
-      return [e.cond, e.then, e.otherwise];
-    case "unary":
-      return [e.operand];
-    case "paren":
-      return [e.inner];
-    case "call":
-      return e.args;
-    case "new":
-    case "object":
-      return e.fields.map((f) => f.value);
-    case "lambda":
-      return e.body ? [e.body] : [];
-    default:
-      return [];
-  }
 }
 
 // Render an ExprIR for an in-process event handler: rewrite the single bound

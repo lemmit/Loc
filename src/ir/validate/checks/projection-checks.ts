@@ -649,6 +649,13 @@ function foldImpurity(stmt: StmtIR): string | undefined {
       return "contains a 'return'";
     case "variant-match":
       return "contains an effect-form 'match'";
+    default: {
+      // Wave 2 packet 2.3 — every `StmtIR` kind is already listed above
+      // (this function's own docstring explains why that allowlist shape is
+      // load-bearing); this turns it into a compile-time guarantee too.
+      const _exhaustive: never = stmt;
+      return _exhaustive;
+    }
   }
 }
 
