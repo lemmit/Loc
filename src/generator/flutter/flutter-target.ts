@@ -969,6 +969,12 @@ export const flutterTarget: WalkerTarget = {
   // `Text('…')`): escape the backslash, the quote, `$`, and the newline.
   escapeText: (text: string) =>
     text.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/\$/g, "\\$").replace(/\n/g, "\\n"),
+  // Flutter has no separate HTML-attribute syntax — a widget property takes
+  // the same Dart string-literal body `escapeText` renders (`$` is Dart's
+  // interpolation sigil, escaped above) — so the attribute-position twin
+  // (Wave 2 packet 2.2) is the same rule.
+  escapeAttr: (text: string) =>
+    text.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/\$/g, "\\$").replace(/\n/g, "\\n"),
 
   // --- Handler seams — Dart closures ---------------------------------------
   // A button's `onPressed:` binds a `VoidCallback`.  The expression form is an

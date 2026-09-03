@@ -290,6 +290,9 @@ function comparesNullLiteral(e: BinaryExpr): boolean {
 }
 
 const JAVA_TARGET: ExprTarget<JavaRenderContext> = {
+  // Java double-quoted string literals don't interpolate — JSON's escaping is
+  // already correct Java syntax (_expr/target.ts).
+  escapeStringLiteral: (value) => JSON.stringify(value),
   literal: renderLiteral,
   // Within the owning class the id is a direct field read; lambda-param
   // receivers (`x.id`) read the package-visible field the same way.

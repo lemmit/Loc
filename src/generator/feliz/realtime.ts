@@ -25,6 +25,7 @@
 import type { ExprIR, UiIR, UiNotificationIR } from "../../ir/types/loom-ir.js";
 import type { RealtimeStreamCredential } from "../../ir/util/realtime-rooms.js";
 import { lines } from "../../util/code-builder.js";
+import { fsString } from "./fs-expr.js";
 import { type FelizRead, felizAllRead, refetchMsgCase } from "./wire.js";
 
 // A single self-contained JS toast: append a transient message element to a
@@ -175,10 +176,11 @@ function exprReadsBinding(e: ExprIR, bind: string): boolean {
 function renderFsToastMessage(e: ExprIR, bind: string): string {
   switch (e.kind) {
     case "literal":
-      // A string literal renders verbatim (F# and JSON share `"…"` escaping
-      // for the ASCII subset the DSL admits); a non-string literal is
+      // A `.ddd`-authored toast message literal routes through the funnel
+      // every F# string-literal site shares (Wave 2 packet 2.2) rather than
+      // a second `JSON.stringify` copy; a non-string literal is
       // string-coerced so it concatenates.
-      return e.lit === "string" ? JSON.stringify(e.value) : `(string ${e.value})`;
+      return e.lit === "string" ? fsString(e.value) : `(string ${e.value})`;
     case "ref":
       if (e.name === bind) return "(string payload)";
       throw new Error(

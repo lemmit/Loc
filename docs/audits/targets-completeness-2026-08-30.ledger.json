@@ -6358,11 +6358,6 @@
       "title": "Computed `to:` on Anchor/Button silently dropped on six of seven frontends"
     },
     {
-      "id": "G2667-A15-angular-apostrophe-crash",
-      "claimedBy": "#2667",
-      "title": "Angular + i18n: an apostrophe in any bound-attribute text slot crashes the whole generate run"
-    },
-    {
       "id": "G2644-M-T1.23-duplicate-decimal-import",
       "claimedBy": "#2671",
       "title": "#2644 F3 / M-T1.23 — a money form input makes the generated React/Svelte app fail to build (duplicate Decimal import)"
@@ -6429,19 +6424,9 @@
       "title": "-= on a datetime[] (or object-element) collection compares by reference — silent no-op on node"
     },
     {
-      "id": "G2667-D12-flutter-feliz-testid-escaping",
-      "claimedBy": "#2667",
-      "title": "Debt: flutter/feliz testid escaping — Timeline Key bypasses dartString; HTML-entity-escaped text in non-HTML testids"
-    },
-    {
       "id": "G2667-A13-i18n-consumption-gaps",
       "claimedBy": "#2667",
       "title": "i18n: modal trigger/submit labels and the sidebar render raw while their keys sit in the catalog"
-    },
-    {
-      "id": "G2667-C6-heex-testid-splice",
-      "claimedBy": "#2667",
-      "title": "08-17 register #6: unescaped data-testid=\"${testid}\" splices in heex-primitives — now 19 sites, plus ~8 literal-only testid renderers"
     },
     {
       "id": "G2667-A14-feliz-named-route-param",
@@ -6958,7 +6943,7 @@
       "title": "The Elixir `#{` escaping funnel is incomplete: four emit sites splice a `.ddd` string into Elixir code with bare `JSON.stringify`",
       "pr": "#2668",
       "sha": "e0aff5a",
-      "note": "fixed (P0 security): all four named sites now route through `elixirString` instead of bare `JSON.stringify` — verified at the exact cited lines on fresh main: schema-emit.ts:409 (`renderEctoDefault`), denial.ts:203/247/308, changeset-invariant-emit.ts:145, realtime-liveview.ts:67. Note the fix's second half (widening test/generator/hostile-inputs.test.ts to cover these four emitters directly) is NOT done — the gate still only exercises `renderElixirExpr`/`elixirString`."
+      "note": "fixed (P0 security): all four named sites now route through `elixirString` instead of bare `JSON.stringify` — verified at the exact cited lines on fresh main: schema-emit.ts:409 (`renderEctoDefault`), denial.ts:203/247/308, changeset-invariant-emit.ts:145, realtime-liveview.ts:67. Note the fix's second half (widening test/generator/hostile-inputs.test.ts to cover these four emitters directly) is NOT done — the gate still only exercises `renderElixirExpr`/`elixirString`. Wave 2 packet 2.2 (#2770) closes the residual gap this note named: `test/system/escape-funnel-census.test.ts` now scans every `JSON.stringify(` call under `src/generator/**` (not just the four named sites) and classifies it by destination, so a new bare splice into a non-JS-family position fails the census instead of waiting for the next manual sweep. `escapeStringLiteral` was also added to the shared `ExprTarget` contract (`_expr/target.ts`) and `escapeAttr` to `WalkerTarget` (`_walker/target.ts`), and `seed-emit.ts`'s duplicate `exStr` helper was deleted in favour of the shared `elixirString` import."
     },
     {
       "id": "F2-FFE-6",
@@ -7372,6 +7357,24 @@
       "pr": "#2770",
       "sha": "5e1ad1c74",
       "note": "fixed: src/generator/_expr/target.ts declares QueryEmissionMode + QUERY_EMISSION_VOCABULARY (per-mode accepted ExprIR.kind set) + refuseOutOfVocabulary, which every query-language renderer's out-of-vocabulary fallback routes through instead of an ad hoc per-arm throw (java/render-jpql.ts JpqlCtx.mode replaces the principalAccessors boolean flag this row names directly; sql-pg-expr.ts, dotnet/emit/dapper.ts whereToSql, python/find-predicate.ts requireLowered, typescript/repository-find-predicate.ts lowerToDrizzle route the same way; dotnet LINQ / Elixir Ecto document their reuse of the full ExprTarget for query positions). test/generator/_expr/emission-mode.test.ts is the census + vocabulary + reachability contract test, mutation-proved."
+    },
+    {
+      "id": "G2667-A15-angular-apostrophe-crash",
+      "title": "Angular + i18n: an apostrophe in any bound-attribute text slot crashes the whole generate run",
+      "pr": "#2667",
+      "note": "fixed (#2667): `angularTarget.renderAttrBinding` (`src/generator/angular/walker/angular-target.ts`) escapes a both-quote bound expression to `&quot;`/`'` instead of throwing, matching Vue's `quoteAttrExpr` (finding B21) — confirmed at the cited lines on fresh main by Wave 2 packet 2.2 (#2770) while reviewing the WalkerTarget attribute-escaping seam."
+    },
+    {
+      "id": "G2667-D12-flutter-feliz-testid-escaping",
+      "title": "Debt: flutter/feliz testid escaping — Timeline Key bypasses dartString; HTML-entity-escaped text in non-HTML testids",
+      "pr": "#2667",
+      "note": "fixed (#2667): Flutter's `renderTimeline`/`testidKey` (`flutter-target.ts`, `pack.ts`) route a static testid through `dartString`/the walker's `escapeText` seam, not a hand-rolled `'…'` — confirmed at the cited lines on fresh main by Wave 2 packet 2.2 (#2770) while reviewing the escape-funnel class."
+    },
+    {
+      "id": "G2667-C6-heex-testid-splice",
+      "title": "08-17 register #6: unescaped data-testid=\"${testid}\" splices in heex-primitives — now 19 sites, plus ~8 literal-only testid renderers",
+      "pr": "#2667",
+      "note": "fixed (#2667): every `data-testid` emit site in `heex-primitives.ts` routes through `attrValue`/`escapeHeexAttr` (a literal testid escapes `\"`/`&`/`<`/`>`) — confirmed at the cited lines on fresh main by Wave 2 packet 2.2 (#2770) while reviewing the HEEx attribute-escaping funnel."
     }
   ],
   "conflicts": [

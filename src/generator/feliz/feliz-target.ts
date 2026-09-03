@@ -886,6 +886,10 @@ export const felizTarget: WalkerTarget = {
   // Raw text for markup TEXT position — F# string-body escaping (the pack
   // wraps it in `Html.text "…"` or `prop.text "…"`).
   escapeText: (text: string) => text.replace(/\\/g, "\\\\").replace(/"/g, '\\"'),
+  // Feliz has no separate HTML-attribute syntax — a widget property takes the
+  // same F# string-literal body `escapeText` renders — so the attribute-
+  // position twin (Wave 2 packet 2.2) is the same rule.
+  escapeAttr: (text: string) => text.replace(/\\/g, "\\\\").replace(/"/g, '\\"'),
 
   /** F# member SPELLING for a plain read.  The walker's default is the JS
    *  `<recv>.<member>`, which Fable rejects for the handful of members F#

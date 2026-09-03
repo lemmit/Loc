@@ -22,8 +22,8 @@ Base: `main` @ 38580cd77 · built 2026-08-30 · claim map applied (PR #2667 = au
 | class: faulty-fix / regression | 1 / 0 |
 | size S / M / L | 44 / 69 / 47 |
 | provenance: fleet1-only / fleet2-only / corroborated by both | 143 / 16 / 1 |
-| claimed by an open PR | 64 |
-| done / merged | 129 |
+| claimed by an open PR | 61 |
+| done / merged | 132 |
 | conflicts | 10 |
 | checkedOk entries | 146 |
 | rows scheduled into waves | 134 across 13 packets |

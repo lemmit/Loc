@@ -197,6 +197,10 @@ export function addCsExprUsing(x: ExprIR, into: Set<string>, ns: string): void {
 }
 
 const CS_TARGET: ExprTarget<CsRenderContext> = {
+  // C# double-quoted string literals don't interpolate (that needs a `$"…"`
+  // prefix the emitter never uses for a splice) — JSON's escaping is already
+  // correct C# syntax (_expr/target.ts).
+  escapeStringLiteral: (value) => JSON.stringify(value),
   literal: renderLiteral,
   id: (ctx) => `${ctx.thisName}.${ctx.idAccessor ?? "Id"}`,
   ref: renderRef,

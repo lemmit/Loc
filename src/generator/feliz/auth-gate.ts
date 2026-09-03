@@ -17,6 +17,7 @@
 
 import type { BinOp, ExprIR, OperationIR, TypeIR, UiIR, UserIR } from "../../ir/types/loom-ir.js";
 import { upperFirst } from "../../util/naming.js";
+import { fsString } from "./fs-expr.js";
 import { typeToFs } from "./type-fs.js";
 import { decoderExprFor } from "./wire.js";
 
@@ -170,7 +171,10 @@ export function opActionGate(op: OperationIR): string | null {
 function renderGateLiteral(lit: string, value: string): string {
   switch (lit) {
     case "string":
-      return JSON.stringify(value);
+      // A `.ddd`-authored literal (`requires currentUser.role == "admin"`) —
+      // route through the funnel every F# string-literal site shares
+      // (Wave 2 packet 2.2), rather than a second `JSON.stringify` copy.
+      return fsString(value);
     case "bool":
       // F# bool literals are lowercase `true`/`false` — same spelling as source.
       return value;
