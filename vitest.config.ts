@@ -31,9 +31,12 @@ import { defineConfig } from "vitest/config";
 // that was already true under the default `forks` pool, which reuses
 // processes across files.
 //
-// Local affected-only runs: `npm test` = `vitest run --changed origin/main`
-// (files whose import graph reaches a changed file); `npm run test:all` is
-// the whole suite, what CI runs.
+// `npm test` is the whole suite (what CI runs).  `npm run test:changed` is the
+// opt-in affected-only run (`vitest --changed origin/main`): measured, it
+// spends ~90 s computing the import graph first, and because the platform
+// registry links every backend into src/system a generator edit still selects
+// ~1,260 of the 1,889 files — so it pays for test-only and island edits
+// (src/cli, src/trace, src/verify, src/api), not for the common case.
 
 /** Files that `vi.mock()` a src module — keep per-file isolation. */
 const MOCKED = [
@@ -65,7 +68,7 @@ const INCLUDE = ["test/**/*.test.ts", "packages/**/*.test.ts"];
 // this project's tests.
 // The slow opt-in suites under test/e2e/ are NOT excluded here: each
 // self-gates on a `LOOM_*` env var via `describe.skipIf(!ENABLED)`, so
-// in the default `vitest run` (== `npm run test:all`) they are discovered
+// in the default `vitest run` (== `npm test`) they are discovered
 // and cleanly skipped (no docker, no build) — the same way the many opt-in
 // e2e suites that were never in the old `--exclude` list already behave.
 // A dedicated `test:*` script opts each back in by naming its file path
