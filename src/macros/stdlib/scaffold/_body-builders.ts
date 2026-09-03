@@ -75,12 +75,47 @@ export function scaffoldNewForm(aggName: string): Expression {
   ]);
 }
 
+/** The field the built-in `softDeletable` capability adds (`src/macros/prelude.ts`)
+ *  and whose query filter (`filter !this.isDeleted`) hides a flagged row from
+ *  every read. */
+const SOFT_DELETE_FLAG = "isDeleted";
+
+/** An operation that takes the record OUT of the reads this Detail page makes —
+ *  a parameterless op whose body sets the `softDeletable` flag (`isDeleted :=
+ *  true`), i.e. the `softDelete` stdlib macro's operation and anything spelled
+ *  like it.
+ *
+ *  Derived from the body, not from the operation's NAME: the name is the user's
+ *  to choose, the assignment is what the read filter actually reacts to.
+ *  `restore` writes the same field with `false` and is therefore NOT one of
+ *  these — which is why the literal is part of the test. */
+function removesRecordFromReads(op: Operation): boolean {
+  if (op.params.length > 0) return false;
+  return op.body.some(
+    (s) =>
+      s.$type === "AssignOrCallStmt" &&
+      s.op === ":=" &&
+      s.target.head === SOFT_DELETE_FLAG &&
+      s.target.tail.length === 0 &&
+      s.value?.$type === "BoolLit" &&
+      s.value.value === "true",
+  );
+}
+
 /** `scaffoldOperations` — scaffolds the Detail page's operation surface:
  *  `Group(Modal × N)`, one Modal per public operation, each holding an
  *  `OperationForm(of: <Agg>, op: <opName>)` and triggered by a button (the
  *  first operation's button is primary, the rest secondary).  No public
  *  operations ⇒ an empty `Group()`.
- *  public = the aggregate's non-`private` operations. */
+ *  public = the aggregate's non-`private` operations.
+ *
+ *  ONE operation shape breaks out of the modal: a soft delete.  Once it
+ *  succeeds the row is behind the capability's read filter, so the Detail page
+ *  it was invoked from re-reads its own record and gets a 404 — the user is left
+ *  staring at stale fields under "Couldn't load &lt;entity&gt;".  Those ops render
+ *  as an `Action` with `then: navigate("/<plural>")` instead, which is the same
+ *  shape `DestroyForm` already uses for the hard delete: do the thing, then
+ *  leave the page that no longer has anything to show. */
 export function scaffoldOperations(agg: Aggregate, instanceVar?: string): Expression {
   const slug = snake(plural(agg.name));
   const publicOps = agg.members.filter(
@@ -103,23 +138,38 @@ export function scaffoldOperations(agg: Aggregate, instanceVar?: string): Expres
           { name: "op", value: nameRefExpr(op.name) },
           { name: "testid", value: stringLit(`${slug}-op-${op.name}`) },
         ]);
+  // The leave-the-page shape.  `Action` needs an in-scope record to read the id
+  // off (`<record>.<op>`), so it only applies inside the Detail QueryView's
+  // `data` lambda; without one the op keeps its modal.
+  const removalAction = (op: Operation): Expression =>
+    callExpr("Action", [
+      { value: memberAccess(nameRefExpr(instanceVar!), op.name) },
+      {
+        name: "then",
+        value: callExpr("navigate", [{ value: stringLit(`/${slug}`) }]),
+      },
+      { name: "testid", value: stringLit(`${slug}-op-${op.name}`) },
+    ]);
   return callExpr(
     "Group",
     publicOps.map((op, i) => ({
-      value: callExpr("Modal", [
-        {
-          value: opForm(op),
-        },
-        { name: "title", value: stringLit(humanize(op.name)) },
-        {
-          name: "trigger",
-          value: callExpr("Button", [
-            { value: stringLit(humanize(op.name)) },
-            { name: "emphasis", value: stringLit(i === 0 ? "primary" : "secondary") },
-            { name: "testid", value: stringLit(`${slug}-op-${op.name}`) },
-          ]),
-        },
-      ]),
+      value:
+        instanceVar && removesRecordFromReads(op)
+          ? removalAction(op)
+          : callExpr("Modal", [
+              {
+                value: opForm(op),
+              },
+              { name: "title", value: stringLit(humanize(op.name)) },
+              {
+                name: "trigger",
+                value: callExpr("Button", [
+                  { value: stringLit(humanize(op.name)) },
+                  { name: "emphasis", value: stringLit(i === 0 ? "primary" : "secondary") },
+                  { name: "testid", value: stringLit(`${slug}-op-${op.name}`) },
+                ]),
+              },
+            ]),
     })),
   );
 }

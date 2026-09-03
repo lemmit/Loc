@@ -756,14 +756,20 @@ describe("typescript generator", () => {
     expect(base).toMatch(/static _create<T extends OrderBase>/);
 
     // 3. Scaffold-once concrete subclass — user-owned, preserved on regen; the
-    //    default hook throws loudly (mirrors the Elixir analog's raise).
+    //    default hook throws loudly (mirrors the Elixir analog's raise).  The
+    //    class is `NotImplementedError`, not a bare `Error`: an unfilled seam is
+    //    an ABSENT implementation, and the router's ladder maps that class to
+    //    501 carrying this message.  A bare `Error` matched no arm and fell into
+    //    the generic 500 `"internal"` fallback, discarding the file-to-write
+    //    hint (see test/generator/extern-not-implemented-status.test.ts).
     const subclass = files.get("domain/order.ts")!;
     expect(subclass).toMatch(/loom:scaffold-once/);
     expect(subclass).toMatch(/import \{ OrderBase \} from ".\/order.base"/);
+    expect(subclass).toMatch(/import \{ NotImplementedError \} from ".\/errors"/);
     expect(subclass).toMatch(/export class Order extends OrderBase \{/);
     expect(subclass).toMatch(/protected override confirmExtern\(\): void \{/);
     expect(subclass).toMatch(
-      /throw new Error\("extern operation 'confirm' on Order is not implemented/,
+      /throw new NotImplementedError\("extern operation 'confirm' on Order is not implemented/,
     );
 
     // 4. Route calls the operation directly — no registry, no editor.

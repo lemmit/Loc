@@ -990,7 +990,12 @@ export function renderAction(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkC
     const eff = expr.args[i]!;
     if (eff.kind === "call" && eff.name === "navigate") {
       const target = eff.args[0];
-      if (target && target.kind === "ref") thenRoute = `/${snake(target.name)}`;
+      // A STRING argument is a literal route path — the shape a body uses when a
+      // page REF can't address the route unambiguously (every scaffolded
+      // aggregate names its list page `List`).  Twin of the JSX-side arm in
+      // `walker-core.ts`'s `tryRenderNavigateCall`.
+      if (target && target.kind === "literal" && target.lit === "string") thenRoute = target.value;
+      else if (target && target.kind === "ref") thenRoute = `/${snake(target.name)}`;
     }
   }
   if (!ctx.actionBindings.some((b) => b.eventName === eventName)) {

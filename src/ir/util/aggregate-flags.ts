@@ -13,7 +13,8 @@
 // event-sourced ⇒ concurrency" rule from drifting across five backends.
 // ---------------------------------------------------------------------------
 
-import type { AggregateIR } from "../types/loom-ir.js";
+import { emitsRestDestroy } from "../enrich/wire-projection.js";
+import type { AggregateIR, TypeIR } from "../types/loom-ir.js";
 import { aggregateIsEventSourced } from "./resolve-datasource.js";
 import { aggregateIsVersioned } from "./versioned-capability.js";
 
@@ -30,4 +31,39 @@ export function aggregatesNeedConcurrency(aggregates: readonly AggregateIR[]): b
  *  unique-violation (integrity → 409) handling. */
 export function aggregatesHaveUniqueKeys(aggregates: readonly AggregateIR[]): boolean {
   return aggregates.some((a) => (a.uniqueKeys?.length ?? 0) > 0);
+}
+
+/** Peel `optional` / `array` wrappers off a field type. */
+function unwrapType(t: TypeIR): TypeIR {
+  let cur = t;
+  while (cur.kind === "optional" || cur.kind === "array") {
+    cur = cur.kind === "optional" ? cur.inner : cur.element;
+  }
+  return cur;
+}
+
+/** True when hard-deleting one of these aggregates can trip a Postgres
+ *  `foreign_key_violation` (SQLSTATE 23503) — i.e. the project needs the
+ *  still-referenced → `ReferencedInUse` (409 by default) arm.
+ *
+ *  A cross-aggregate `X id` field becomes a FK column with `ON DELETE RESTRICT`
+ *  (`src/system/migrations-builder.ts`), so deleting a row another aggregate
+ *  still points at fails at the database.  Every backend answers that with the
+ *  resolved `ReferencedInUse` status instead of leaking a 500 — except java,
+ *  which gated its whole `DataIntegrityViolationException` advice on
+ *  `unique (...)` keys, so a model with a reference and no unique key answered
+ *  500 where the other four answered 409.  This predicate is that arm's own
+ *  gate; a project that can't trip 23503 stays byte-identical.
+ *
+ *  Both halves are required: something must be REST-deletable, and something
+ *  must hold a reference to an in-scope aggregate. */
+export function aggregatesCanTripReferencedDelete(aggregates: readonly AggregateIR[]): boolean {
+  if (!aggregates.some((a) => emitsRestDestroy(a))) return false;
+  const names = new Set(aggregates.map((a) => a.name));
+  return aggregates.some((a) =>
+    a.fields.some((f) => {
+      const t = unwrapType(f.type);
+      return t.kind === "id" && names.has(t.targetName);
+    }),
+  );
 }

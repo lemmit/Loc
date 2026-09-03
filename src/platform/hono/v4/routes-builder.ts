@@ -135,6 +135,14 @@ import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
  *  the patch at the bottom of `renderAggregateRoutes`). */
 const PROBLEM_IMPORT_PLACEHOLDER = "/* __LOOM_PROBLEM_IMPORT__ */";
 
+/** RFC 9110 §15.6.2 — the route exists and the request was fine, but the
+ *  implementation behind it is ABSENT.  That is what an `extern` operation whose
+ *  scaffold-once body is still the generated stub reports.  A RUNTIME arm only,
+ *  like the generic 500 fallback: it is not part of the operation's declared
+ *  error contract (filling the seam in makes it unreachable), so it stays out of
+ *  `openapi-errors.ts`'s declared status sets. */
+const NOT_IMPLEMENTED_STATUS = 501;
+
 /** Transaction wrapper for the audit / provenance history flush.  drizzle:
  *  `db.transaction`; mikroorm: the EntityManager's `db.transactional` (which
  *  opens a real DB transaction and threads its async context to the forked
@@ -474,12 +482,20 @@ export function buildRoutesFile(
   );
   lines.push(`import * as Ids from "../domain/ids";`);
   // `ConcurrencyError` only when this aggregate is `versioned` OR event-sourced — a
-  // non-versioned aggregate's route file stays byte-identical.
-  lines.push(
-    aggregateIsVersioned(agg) || aggregateIsEventSourced(agg)
-      ? `import { DomainError, AggregateNotFoundError, DisallowedError, ForbiddenError, ExternHandlerError, ConcurrencyError } from "../domain/errors";`
-      : `import { DomainError, AggregateNotFoundError, DisallowedError, ForbiddenError, ExternHandlerError } from "../domain/errors";`,
-  );
+  // non-versioned aggregate's route file stays byte-identical.  `NotImplementedError`
+  // rides the same rule on `extern` operations: only their scaffold-once stub
+  // raises it, and only this file's 501 arm catches it.
+  const hasExternOp = agg.operations.some((o) => o.extern);
+  const errorNames = [
+    "DomainError",
+    "AggregateNotFoundError",
+    "DisallowedError",
+    "ForbiddenError",
+    "ExternHandlerError",
+    ...(aggregateIsVersioned(agg) || aggregateIsEventSourced(agg) ? ["ConcurrencyError"] : []),
+    ...(hasExternOp ? ["NotImplementedError"] : []),
+  ];
+  lines.push(`import { ${errorNames.join(", ")} } from "../domain/errors";`);
   // `when` gates (and their auto-exposed can-query companions) render enum
   // values like `OrderStatus.Shipped` in the route file; import those enums
   // from value-objects so the predicate type-checks (else TS2304).
@@ -1294,6 +1310,9 @@ export function buildRoutesFile(
   if ((agg.uniqueKeys?.length ?? 0) > 0) emittedProblemStatuses.add(uniquenessStatus);
   if (aggregateIsVersioned(agg) || aggregateIsEventSourced(agg))
     emittedProblemStatuses.add(concurrencyStatus);
+  // The `NotImplementedError` → 501 arm below widens the `problem()` helper's
+  // status union; without this the emitted call is a TS type error.
+  if (agg.operations.some((o) => o.extern)) emittedProblemStatuses.add(NOT_IMPLEMENTED_STATUS);
   const problemStatusUnion = [...emittedProblemStatuses].sort((a, b) => a - b).join(" | ");
   // Domain-error handler.  Order matters — ForbiddenError checked
   // before DomainError so 403 wins over 400 when a `requires`
@@ -1400,6 +1419,20 @@ export function buildRoutesFile(
     );
     lines.push(`      recordDomainFault("conflict");`);
     lines.push(`      return problem(${concurrencyStatus}, "Conflict", err.message);`);
+    lines.push(`    }`);
+  }
+  // An `extern` operation whose scaffold-once body is still the generated stub.
+  // RFC 9110 §15.6.2: the route exists and the request was well-formed — the
+  // implementation is ABSENT, which is 501, not a 500 server fault.  The message
+  // names the file to fill in, so it is served rather than sanitized away
+  // (unlike the ExternHandlerError arm below, which wraps arbitrary USER code —
+  // RS-28).  Placed before that arm because both describe the extern seam.
+  if (hasExternOp) {
+    lines.push(`    if (err instanceof NotImplementedError) {`);
+    lines.push(
+      `      ${renderHonoLogCall("internalError", `error: err.message, status: ${NOT_IMPLEMENTED_STATUS}`)}`,
+    );
+    lines.push(`      return problem(${NOT_IMPLEMENTED_STATUS}, "Not Implemented", err.message);`);
     lines.push(`    }`);
   }
   lines.push(`    if (err instanceof ExternHandlerError) {`);
