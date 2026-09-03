@@ -3,6 +3,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { MantineProvider, createTheme } from "@mantine/core";
 import "@mantine/core/styles.css";
+import "@mantine/spotlight/styles.css";
 import App from "./App";
 import { ErrorBoundary, installGlobalErrorLogging } from "./ErrorBoundary";
 import { CrashTestHooks } from "./CrashTestHooks";

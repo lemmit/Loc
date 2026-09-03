@@ -357,6 +357,69 @@ export const examples: LoomExample[] = [
   },
 ];
 
+/** The concept an example teaches — the Examples pane groups by it, in this
+ *  order (CRUD → workflows → auth → persistence → multi-backend → frontends),
+ *  so a newcomer reads the list as a syllabus (M-T8.18). */
+export type ExampleConcept =
+  | "crud"
+  | "workflows"
+  | "auth"
+  | "tenancy"
+  | "multiBackend"
+  | "frontends";
+
+export const CONCEPT_ORDER: readonly ExampleConcept[] = [
+  "crud",
+  "workflows",
+  "auth",
+  "tenancy",
+  "multiBackend",
+  "frontends",
+];
+
+/** Example id → concept.  A separate table (not a field on each entry) so
+ *  the entries above stay the plain `?raw` + blurb shape; an example missing
+ *  here lands under `frontends` last, and the unit test pins completeness. */
+export const EXAMPLE_CONCEPTS: Readonly<Record<string, ExampleConcept>> = {
+  "sales-system": "crud",
+  "storefront-system": "crud",
+  "pokemon-world": "crud",
+  "subform-showcase": "crud",
+  "multifile-store": "crud",
+  "banking-system": "workflows",
+  "inventory-system": "workflows",
+  "fulfillment-newest": "workflows",
+  "dashboard-system": "workflows",
+  "action-showcase": "workflows",
+  "extern-showcase": "workflows",
+  "auth-capabilities": "auth",
+  "provenance-system": "tenancy",
+  "inheritance-system": "tenancy",
+  "persistence-shapes": "tenancy",
+  "acme-erp": "multiBackend",
+  acme: "multiBackend",
+  "storefront-dotnet": "multiBackend",
+  "storefront-elixir": "multiBackend",
+  "dotnet-backend": "multiBackend",
+  "loom-landing": "frontends",
+  "multifile-landing": "frontends",
+  "storybook-components": "frontends",
+  "store-showcase": "frontends",
+  "svelte-store-showcase": "frontends",
+  "storybook-mantine": "frontends",
+  "storybook-mantine-v9": "frontends",
+  "storybook-shadcn": "frontends",
+  "storybook-shadcn-v4": "frontends",
+  "storybook-mui": "frontends",
+  "storybook-mui-v7": "frontends",
+  "storybook-chakra": "frontends",
+  "storybook-chakra-v3": "frontends",
+};
+
+export function conceptOf(example: Pick<LoomExample, "id">): ExampleConcept {
+  return EXAMPLE_CONCEPTS[example.id] ?? "frontends";
+}
+
 // Default is the Sales System — the canonical full-stack demo with
 // aggregates, repositories, workflows, events, a React UI, AND the
 // requirements that the mobile-requirements e2e relies on (US-001,

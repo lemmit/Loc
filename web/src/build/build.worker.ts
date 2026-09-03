@@ -114,7 +114,7 @@ async function parseProject(
   }
 }
 
-function collectDiagnostics(docs: { uri: { toString(): string }; diagnostics?: { severity?: number; message: string | { value: string }; range?: { start: { line: number; character: number } }; source?: string }[] }[]): BuildDiagnostic[] {
+function collectDiagnostics(docs: { uri: { toString(): string }; diagnostics?: { severity?: number; message: string | { value: string }; range?: { start: { line: number; character: number } }; source?: string; code?: string | number }[] }[]): BuildDiagnostic[] {
   const out: BuildDiagnostic[] = [];
   for (const doc of docs) {
     for (const d of doc.diagnostics ?? []) {
@@ -124,6 +124,9 @@ function collectDiagnostics(docs: { uri: { toString(): string }; diagnostics?: {
         line: d.range ? d.range.start.line + 1 : undefined,
         column: d.range ? d.range.start.character + 1 : undefined,
         source: typeof d.source === "string" ? d.source : "loom",
+        // The `loom.*` code rides along so mobile's Problems rows (fed from
+        // generate, not an LSP) get the same chip / docs link as desktop.
+        code: typeof d.code === "string" ? d.code : undefined,
       });
     }
   }
@@ -270,6 +273,7 @@ function irValidate(loom: EnrichedLoomModel): BuildDiagnostic[] {
     severity: d.severity === "error" ? ("error" as const) : ("warning" as const),
     message: d.message,
     source: typeof d.source === "string" ? d.source : "loom-ir",
+    code: typeof d.code === "string" ? d.code : undefined,
   }));
 }
 

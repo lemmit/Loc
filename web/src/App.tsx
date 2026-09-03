@@ -84,6 +84,14 @@ import {
 import { fnv1a32 } from "./util/hash";
 import { downloadBytes, makeZip } from "./util/zip";
 import { usePersistedState } from "./util/usePersistedState";
+// M-T8.18 — the palette, the shortcut sheet, app-level hotkeys, F8.
+import { CommandPalette, openPalette } from "./layout/CommandPalette";
+import { ShortcutSheet } from "./layout/ShortcutSheet";
+import { hotkeyAction, isTextEntry } from "./util/hotkeys";
+import { inDocumentOrder, stepIndex, toEditorRange } from "./layout/problem-nav";
+import { PROBLEMS } from "./layout/vocabulary";
+import type { EditorRange } from "./editor/editor-handle";
+import type { AgentPromptRequest, CenterView, ExplorerMode } from "./layout/ctx";
 import { useStableFns } from "./util/useStableFns";
 import { initialPipelineState, pipelineReducer } from "./pipeline/reducer";
 import {
@@ -399,6 +407,35 @@ export default function App(): JSX.Element {
     !isDesktop && !userPickedCodeViewRef.current && isHeavyCodeView(persistedCodeView)
       ? "source"
       : persistedCodeView;
+
+  // ---------------------------------------------------------------------
+  // M-T8.18 — navigation seams: the desktop centre view and Explorer mode
+  // (lifted from DesktopShell so the palette / Problems rows / *Go to line*
+  // can switch them), the examples sheet, the Agent prompt hand-off, the
+  // first-run card, the shortcut sheet, and the F8 problem cursor.
+  // ---------------------------------------------------------------------
+  const [centerView, setCenterView] = useState<CenterView>("source");
+  const [explorerModeRaw, setExplorerMode] = usePersistedState<ExplorerMode>(
+    "loom.desktop.explorerMode",
+    // Default to your source files — the managed "User code" tree is the
+    // primary explorer; "Generated" browses emitted output; "Examples" is
+    // the syllabus.
+    "user",
+  );
+  const explorerMode: ExplorerMode =
+    explorerModeRaw === "generated" || explorerModeRaw === "examples" ? explorerModeRaw : "user";
+  const [examplesOpen, setExamplesOpen] = useState(false);
+  const [agentPrompt, setAgentPrompt] = useState<AgentPromptRequest | null>(null);
+  const agentPromptNonceRef = useRef(0);
+  const [shortcutSheetOpen, setShortcutSheetOpen] = useState(false);
+  const [firstRunDismissed, setFirstRunDismissed] = usePersistedState<boolean>(
+    "loom.firstRun.dismissed",
+    false,
+  );
+  // State (not just the ref above) so the card can react to the first edit.
+  const [userEdited, setUserEdited] = useState(false);
+  const [problemCursor, setProblemCursor] = useState(-1);
+  const [problemAnnouncement, setProblemAnnouncement] = useState("");
 
   // Test runner results, lifted here so the Output panel's Tests stream
   // can read them independently of the (sometimes-unmounted) Tests tab.
@@ -1928,9 +1965,120 @@ export default function App(): JSX.Element {
   // render, and listing them reproduces exactly the old behaviour (ctx picks
   // the latest ref value up on whatever render happens next).
   // ---------------------------------------------------------------------
+  // ---------------------------------------------------------------------
+  // M-T8.18 — navigation actions + the app-level hotkeys.
+  // ---------------------------------------------------------------------
+  const isDesktopRef = useRef(isDesktop);
+  isDesktopRef.current = isDesktop;
+  const diagnosticsRef = useRef(diagnostics);
+  diagnosticsRef.current = diagnostics;
+  const runFullRef = useRef<() => Promise<void>>(() => Promise.resolve());
+  runFullRef.current = runFull;
+
+  /** Switch to Source (desktop centre / mobile Code → Source) and reveal
+   *  `range`.  The reveal is deferred a tick so a just-mounted editor pane is
+   *  laid out before Monaco scrolls. */
+  function revealSourceRange(range: EditorRange): void {
+    if (isDesktopRef.current) setCenterView("source");
+    else {
+      setActiveTab("code");
+      setCodeView("source");
+    }
+    window.setTimeout(() => editorHandleRef.current?.revealRange(range), 0);
+  }
+
+  function stepProblem(dir: 1 | -1): void {
+    const ordered = inDocumentOrder(diagnosticsRef.current);
+    setProblemCursor((cur) => {
+      const next = stepIndex(cur >= ordered.length ? -1 : cur, ordered.length, dir);
+      if (next < 0) {
+        setProblemAnnouncement(PROBLEMS.announceNone);
+        return -1;
+      }
+      const d = ordered[next];
+      setProblemAnnouncement(PROBLEMS.announce(next + 1, ordered.length, d.range.start.line + 1, d.message));
+      revealSourceRange(toEditorRange(d));
+      return next;
+    });
+  }
+
+  function askAgent(text: string): void {
+    if (isDesktopRef.current) setDockTab("agent");
+    else setActiveTab("agent");
+    agentPromptNonceRef.current++;
+    setAgentPrompt({ text, nonce: agentPromptNonceRef.current });
+  }
+
+  function openExamples(): void {
+    if (isDesktopRef.current) setExplorerMode("examples");
+    else setExamplesOpen(true);
+  }
+
+  const dismissFirstRun = (): void => setFirstRunDismissed(true);
+  // Never edited in this browser, not loaded from a share link, not dismissed.
+  const firstRunVisible = !firstRunDismissed && !userEdited && sharedImport === null;
+
+  // One keydown listener for the whole app (audit M14).  The pure map decides
+  // (`util/hotkeys.ts`); this only reads the target and dispatches.  Esc
+  // closes whichever overlay is open, outermost first, and otherwise falls
+  // through to the browser / Monaco.
+  const hotkeyStateRef = useRef({ shortcutSheetOpen, firstRunVisible });
+  hotkeyStateRef.current = { shortcutSheetOpen, firstRunVisible };
+  const hotkeyFnsRef = useRef({ stepProblem, dismissFirstRun });
+  hotkeyFnsRef.current = { stepProblem, dismissFirstRun };
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent): void => {
+      const t = e.target as HTMLElement | null;
+      const textEntry = !!t && isTextEntry(t.tagName ?? "", t.getAttribute?.("contenteditable"));
+      const action = hotkeyAction(e, textEntry);
+      if (!action) return;
+      switch (action) {
+        case "generate":
+          if (errorCountRef.current === 0 && !generatingRef.current) void runGenerateRef.current();
+          break;
+        case "bundle-boot":
+          void runFullRef.current();
+          break;
+        case "next-problem":
+          hotkeyFnsRef.current.stepProblem(1);
+          break;
+        case "previous-problem":
+          hotkeyFnsRef.current.stepProblem(-1);
+          break;
+        case "palette":
+          openPalette();
+          break;
+        case "shortcuts":
+          setShortcutSheetOpen(true);
+          break;
+        case "escape": {
+          const s = hotkeyStateRef.current;
+          if (s.shortcutSheetOpen) setShortcutSheetOpen(false);
+          else if (s.firstRunVisible) hotkeyFnsRef.current.dismissFirstRun();
+          else return; // not ours — Monaco / Mantine overlays handle their own
+          break;
+        }
+      }
+      e.preventDefault();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
   const ctxFns = useStableFns({
     setExampleId,
     createWorkspaceFromExample,
+    setCenterView,
+    setExplorerMode,
+    setExamplesOpen,
+    openExamples,
+    revealSourceRange,
+    stepProblem,
+    askAgent,
+    consumeAgentPrompt: (): void => setAgentPrompt(null),
+    dismissFirstRun,
+    setShortcutSheetOpen,
+    openPalette,
     getSource: (): string => sourceRef.current,
     setActiveSourcePath: sources.setActivePath,
     // New-file: seed the VFS with a stub body, and only once that write
@@ -1960,6 +2108,9 @@ export default function App(): JSX.Element {
       // A real source change (typing in Monaco or a Builder Apply) — from
       // here on, mobile auto-generate is allowed (see hasUserEditedRef).
       hasUserEditedRef.current = true;
+      // …and as state, so the first-run card leaves on the first edit
+      // (M-T8.18).  A no-op re-set after the first is free.
+      setUserEdited(true);
       // Bump the live-sync tick **only** for editor-origin edits (the user
       // typing in Monaco).  Builder Apply also flows through here with
       // origin "builder" — bumping for those would re-seed the canvas
@@ -2106,6 +2257,13 @@ export default function App(): JSX.Element {
       evolutionBaselineRef,
       snapshotResult,
       snapshotRunning,
+      centerView,
+      explorerMode,
+      examplesOpen,
+      agentPrompt,
+      firstRunVisible,
+      shortcutSheetOpen,
+      problemAnnouncement,
       ...ctxFns,
     }),
     // Exhaustive over every VALUE field above, in the same order.  `ctxFns`
@@ -2181,6 +2339,13 @@ export default function App(): JSX.Element {
       evolutionBaselineRef,
       snapshotResult,
       snapshotRunning,
+      centerView,
+      explorerMode,
+      examplesOpen,
+      agentPrompt,
+      firstRunVisible,
+      shortcutSheetOpen,
+      problemAnnouncement,
     ],
   );
 
@@ -2196,6 +2361,17 @@ export default function App(): JSX.Element {
       padding={0}
     >
       <ConfirmHost />
+      {/* M-T8.18: the ⌘K palette, the `?` sheet, and the F8 announcer. */}
+      <CommandPalette ctx={ctx} />
+      <ShortcutSheet opened={shortcutSheetOpen} onClose={() => setShortcutSheetOpen(false)} />
+      <div
+        aria-live="polite"
+        aria-atomic="true"
+        data-testid="problem-announcer"
+        style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" }}
+      >
+        {problemAnnouncement}
+      </div>
       <AppShell.Header>
         {isDesktop ? <DesktopHeader ctx={ctx} /> : <MobileHeader ctx={ctx} />}
       </AppShell.Header>

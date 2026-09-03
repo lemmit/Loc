@@ -143,7 +143,7 @@ export function OutputPanel({ ctx, stream, setStream }: Props): JSX.Element {
       <Box style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
         {stream === "problems" && (
           <ScrollArea style={{ flex: 1, minHeight: 0 }}>
-            <ProblemsPanel items={ctx.diagnostics} />
+            <ProblemsPanel ctx={ctx} />
           </ScrollArea>
         )}
         {stream === "generator" && <GeneratorBody ctx={ctx} />}

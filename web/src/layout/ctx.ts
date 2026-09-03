@@ -12,7 +12,7 @@
 import type { MutableRefObject, ReactNode } from "react";
 import type { AgentMessage } from "../agent/demo";
 import type { AgentSettings } from "../agent/provider";
-import type { EditorHandle } from "../editor/editor-handle";
+import type { EditorHandle, EditorRange } from "../editor/editor-handle";
 import type { LoomLspClient } from "../lsp/client";
 import type { LoomBuildClient } from "../build/client";
 import type { RuntimeDispatcher, RuntimeEngine } from "../engine";
@@ -137,8 +137,56 @@ export type DockTab =
   | "history"
   | "auth";
 
+/** The desktop centre area's active document (lifted from DesktopShell in
+ *  M-T8.18 so the palette and the panes' *Go to line N* can switch it). */
+export type CenterView = "source" | "secondary" | "builder" | "model" | "requirements";
+
+/** The desktop Explorer's switcher: your files, the generated tree, or the
+ *  examples pane (M-T8.18). */
+export type ExplorerMode = "user" | "generated" | "examples";
+
+/** A prompt handed to the Agent composer from elsewhere (a Problems row's
+ *  *Ask the agent*, the first-run card).  `nonce` makes two identical
+ *  requests distinguishable; an empty `text` means "just focus". */
+export interface AgentPromptRequest {
+  text: string;
+  nonce: number;
+}
+
 export interface LayoutCtx {
   isDesktop: boolean;
+
+  // M-T8.18 — navigation seams the palette, Problems rows, the first-run
+  // card and the panes' parse-error state drive.
+  /** Desktop centre view; mobile mirrors it through `codeView`. */
+  centerView: CenterView;
+  setCenterView: (v: CenterView) => void;
+  explorerMode: ExplorerMode;
+  setExplorerMode: (m: ExplorerMode) => void;
+  /** Mobile: the examples bottom sheet. */
+  examplesOpen: boolean;
+  setExamplesOpen: (v: boolean) => void;
+  /** Show the examples pane (desktop Explorer) or sheet (mobile). */
+  openExamples: () => void;
+  /** Switch the centre to Source (and the mobile shell to Code → Source),
+   *  then reveal `range` in the editor.  Problems rows, `F8`, *Go to line N*. */
+  revealSourceRange: (range: EditorRange) => void;
+  /** Step to the next / previous problem (`F8` / `Shift+F8`), revealing it
+   *  and announcing it through the `aria-live` region. */
+  stepProblem: (dir: 1 | -1) => void;
+  /** The `aria-live` text of the last `stepProblem`. */
+  problemAnnouncement: string;
+  /** Open the Agent tab with `text` in the composer ("" just focuses it). */
+  askAgent: (text: string) => void;
+  agentPrompt: AgentPromptRequest | null;
+  consumeAgentPrompt: () => void;
+  /** First-run card: shown until dismissed, on a workspace never edited
+   *  in this browser and not loaded from a share link. */
+  firstRunVisible: boolean;
+  dismissFirstRun: () => void;
+  shortcutSheetOpen: boolean;
+  setShortcutSheetOpen: (v: boolean) => void;
+  openPalette: () => void;
 
   // Example picker
   exampleId: string;

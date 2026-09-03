@@ -3,8 +3,8 @@
 // edit round-trips through the `.ddd` source (the builder re-seeds from the
 // rewritten source). Pure client-side — no network.
 
-import { readEditorSource, expect, test, type Locator, type Page } from "@playwright/test";
-import { selectExample, waitForPlaygroundReady } from "./_helpers";
+import { expect, test, type Locator, type Page } from "@playwright/test";
+import { readEditorSource, selectExample, waitForPlaygroundReady } from "./_helpers";
 
 // Set the editor document in one shot via the editor's automation seam
 // (`window.__loomSetSource`), which dispatches onChange like a real edit —

@@ -104,6 +104,8 @@ import { ExprSlotEditor, type ExprMode } from "../system/ExpressionEditor";
 import { AstUtils, type AstNode } from "langium";
 import { isEventDecl } from "../../../../src/language/generated/ast.js";
 import { RefusalLine } from "../refusal";
+import { ParseErrorState } from "../ParseErrorState";
+import { PARSE_ERROR } from "../../layout/vocabulary";
 import { UndoRedo, paneUndoKeyHandler } from "../undo-redo";
 import { IDENTIFIER, renameMember } from "../system/rename";
 import AddPalette from "./AddPalette";
@@ -1679,7 +1681,7 @@ function Inner({ ctx, path, setPath, onOverview }: {
 
   // Below every hook, so the gate above can't change the hook order.
   if (!parseOk) {
-    return <Message>Source has syntax errors — fix them in the editor to use the model builder.</Message>;
+    return <ParseErrorState ctx={ctx} purpose={PARSE_ERROR.purpose.model} testid="model" />;
   }
 
   return (

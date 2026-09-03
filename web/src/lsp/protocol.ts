@@ -18,4 +18,8 @@ export interface Diagnostic {
   severity: "error" | "warning" | "info" | "hint";
   message: string;
   source?: string;
+  /** The stable `loom.*` code (M-T8.18) — what the Problems row's code chip,
+   *  docs link and Fix action key on.  Absent for a diagnostic that carries
+   *  none (a bare parser error). */
+  code?: string;
 }
