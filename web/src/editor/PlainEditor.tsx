@@ -36,9 +36,29 @@ export function PlainEditor({ initialValue, handleRef, onChange }: PlainEditorPr
     const handle: EditorHandle = {
       setSource: (text: string) => {
         const area = areaRef.current;
-        if (area && area.value !== text) area.value = text;
+        if (area) replaceValue(area, text);
         setLineCount(countLines(text));
       },
+      // The textarea's NATIVE stack.  `execCommand` only acts on the focused
+      // element, so undo/redo focus it first — on a phone that is the
+      // surface the user is looking at anyway.  The resulting `input` event
+      // runs `onChange` below, which is how the app learns the source moved.
+      undo: () => {
+        const area = areaRef.current;
+        if (!area) return;
+        area.focus();
+        document.execCommand("undo");
+      },
+      redo: () => {
+        const area = areaRef.current;
+        if (!area) return;
+        area.focus();
+        document.execCommand("redo");
+      },
+      // The DOM exposes no "is the native stack non-empty" — answer true
+      // once mounted and let `execCommand` no-op on an empty stack.
+      canUndo: () => areaRef.current !== null,
+      canRedo: () => areaRef.current !== null,
     };
     holder.current = handle;
     return () => {
@@ -56,7 +76,7 @@ export function PlainEditor({ initialValue, handleRef, onChange }: PlainEditorPr
     w.__loomSetSource = (text: string) => {
       const area = areaRef.current;
       if (!area) return;
-      area.value = text;
+      replaceValue(area, text);
       setLineCount(countLines(text));
       onChangeRef.current?.(text);
     };
@@ -134,9 +154,10 @@ export function PlainEditor({ initialValue, handleRef, onChange }: PlainEditorPr
           if (e.key !== "Tab") return;
           e.preventDefault();
           const area = e.currentTarget;
-          const { selectionStart: s, selectionEnd: t, value } = area;
-          area.value = `${value.slice(0, s)}  ${value.slice(t)}`;
-          area.selectionStart = area.selectionEnd = s + 2;
+          // Through the native edit path, so the indent is itself undoable.
+          if (!document.execCommand("insertText", false, "  ")) {
+            area.setRangeText("  ", area.selectionStart, area.selectionEnd, "end");
+          }
           setLineCount(countLines(area.value));
           onChangeRef.current?.(area.value);
         }}
@@ -175,6 +196,25 @@ const FONT = 16;
 const LINE_H = 24;
 const PAD = 8;
 const MONO = "var(--mantine-font-family-monospace)";
+
+/** Replace the whole buffer WITHOUT wiping the textarea's native undo stack.
+ *  Assigning `textarea.value` resets the stack (audit H9: an agent or Builder
+ *  write used to wipe even the user's own Ctrl+Z on mobile).  The edit-path
+ *  writes the browser keeps on the stack are `execCommand("insertText")` on
+ *  the focused element and, elsewhere, `setRangeText`; `value =` stays only
+ *  as the last resort for an environment that supports neither. */
+function replaceValue(area: HTMLTextAreaElement, text: string): void {
+  if (area.value === text) return;
+  if (document.activeElement === area) {
+    area.setSelectionRange(0, area.value.length);
+    if (document.execCommand("insertText", false, text) && area.value === text) return;
+  }
+  if (typeof area.setRangeText === "function") {
+    area.setRangeText(text, 0, area.value.length, "end");
+    if (area.value === text) return;
+  }
+  area.value = text;
+}
 
 function countLines(text: string): number {
   let n = 1;

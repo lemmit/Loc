@@ -10,6 +10,7 @@ import { resolver, resolverWithComponents } from "./components";
 import { PALETTE_PRIMITIVES, SINGLE_CHILD_NODES, defaultForItemLambda, defaultNode, expectedAssignEnum, propFields, syntheticDefaultProps, type PrimitiveName } from "./model";
 import { parseDdd } from "../parse";
 import type { Diagnostic } from "../../lsp/protocol";
+import { InlineConfirm, confirmSites } from "../../util/confirm";
 
 // A compact problems bar shown above the canvas when the current body has LSP
 // diagnostics, so the builder flags errors/warnings in place.
@@ -123,12 +124,12 @@ export default function PageBuilder({ initialNodes, liveNodes, pages, pageName, 
   const editorResolver = useMemo(() => resolverWithComponents(componentNames), [componentNames]);
   return (
     <Editor resolver={editorResolver} key={pageName}>
-      <LiveSync nodes={liveNodes} />
       {compact ? (
-        <CompactLayout initialNodes={initialNodes} pages={pages} pageName={pageName} options={options} operations={operations} enumCases={enumCases} pageEnumFields={pageEnumFields} diagnostics={diagnostics} onSelectPage={onSelectPage} onApply={onApply} />
+        <CompactLayout initialNodes={initialNodes} liveNodes={liveNodes} pages={pages} pageName={pageName} options={options} operations={operations} enumCases={enumCases} pageEnumFields={pageEnumFields} diagnostics={diagnostics} onSelectPage={onSelectPage} onApply={onApply} />
       ) : (
         <Box style={{ display: "flex", flexDirection: "column", height: "100%" }}>
           <Toolbar pages={pages} pageName={pageName} onSelectPage={onSelectPage} onApply={onApply} />
+          <LiveSync nodes={liveNodes} />
           <DiagnosticsBar diagnostics={diagnostics} />
           <Box style={{ flex: 1, minHeight: 0, display: "flex" }}>
             <Palette />
@@ -155,8 +156,19 @@ export default function PageBuilder({ initialNodes, liveNodes, pages, pageName, 
 // Skip the first run: `<Frame data={initialNodes}>` does the initial
 // seed, so a same-tree deserialize on mount would clobber craft's
 // selection state.
-function LiveSync({ nodes }: { nodes: SerializedNodes }): null {
+//
+// DIRTY GUARD (M-T8.17, audit H11): a re-seed used to discard whatever the
+// user had built on the canvas since the last Apply, silently.  The canvas is
+// dirty when craft's history has something to undo (the seed itself is
+// written outside history — `history.ignore()` — so only the user's own
+// edits count).  A re-seed that lands on a dirty canvas is HELD: this renders
+// an inline confirm instead, and only its Yes deserializes (the latest
+// pending seed, should several have arrived).  The owner default is "ask",
+// not auto-apply — see the program doc §4.
+function LiveSync({ nodes }: { nodes: SerializedNodes }): JSX.Element | null {
   const { actions, query } = useEditor();
+  const [held, setHeld] = useState<SerializedNodes | null>(null);
+  const heldRef = useRef<SerializedNodes | null>(null);
   // `nodes` is the ONLY dependency, deliberately.  craft's `useEditor()` hands
   // back a FRESHLY BUILT `actions` object on every render, so listing it (as
   // the exhaustive-deps rule wants) re-ran this effect on any re-render of the
@@ -169,8 +181,7 @@ function LiveSync({ nodes }: { nodes: SerializedNodes }): null {
   const apiRef = useRef({ actions, query });
   apiRef.current = { actions, query };
   const firstRef = useRef(true);
-  useEffect(() => {
-    if (firstRef.current) { firstRef.current = false; return; }
+  const reseed = (next: SerializedNodes): void => {
     const { actions: act, query: q } = apiRef.current;
     // Snapshot the current selection path *before* deserialize.  The
     // selection event holds the craft node id; we map it to a structural
@@ -180,22 +191,55 @@ function LiveSync({ nodes }: { nodes: SerializedNodes }): null {
     const path = selectedId && currentSerialized
       ? pathOfNode(currentSerialized as unknown as Record<string, { nodes?: string[]; parent?: string | null }>, selectedId)
       : null;
-    act.deserialize(nodes);
+    // Outside history: the seed is not a user edit, and a re-seed must leave
+    // the canvas CLEAN (nothing to undo = nothing to lose).
+    act.history.ignore().deserialize(next);
     // Re-select at the same path in the freshly-deserialized tree.  An
     // unresolvable path (node moved or removed) just clears selection.
     if (path) {
       const fresh = q.getSerializedNodes();
-      const next = findNodeAtPath(fresh as unknown as Record<string, { nodes?: string[]; parent?: string | null }>, path);
-      if (next && next !== "ROOT") act.selectNode(next);
+      const next2 = findNodeAtPath(fresh as unknown as Record<string, { nodes?: string[]; parent?: string | null }>, path);
+      if (next2 && next2 !== "ROOT") act.selectNode(next2);
     }
+  };
+  useEffect(() => {
+    if (firstRef.current) { firstRef.current = false; return; }
+    if (apiRef.current.query.history.canUndo()) {
+      heldRef.current = nodes;
+      setHeld(nodes);
+      return;
+    }
+    reseed(nodes);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `nodes` is the one signal; see above.
   }, [nodes]);
-  return null;
+  if (!held) return null;
+  return (
+    <Box px="xs" py={4} bg="dark.7" style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}>
+      <InlineConfirm
+        spec={confirmSites.discardCanvasEdits("reseed")}
+        size="compact-xs"
+        onConfirm={() => {
+          const pending = heldRef.current;
+          heldRef.current = null;
+          setHeld(null);
+          if (pending) reseed(pending);
+        }}
+        // Cancel keeps the canvas as the user left it; the next source
+        // change re-arms the prompt with the newer seed.
+        onCancel={() => {
+          heldRef.current = null;
+          setHeld(null);
+        }}
+        testids={{ base: "c4builder-reseed" }}
+      />
+    </Box>
+  );
 }
 
 // Mobile layout: full-width canvas; the palette ("Add") and settings ("Edit")
 // move into bottom drawers reachable from the toolbar.  The settings drawer
 // auto-opens on selection so tap-to-select flows straight into editing.
-function CompactLayout({ initialNodes, pages, pageName, options, operations = {}, enumCases, pageEnumFields, diagnostics = [], onSelectPage, onApply }: Omit<PageBuilderProps, "compact" | "liveNodes">): JSX.Element {
+function CompactLayout({ initialNodes, liveNodes, pages, pageName, options, operations = {}, enumCases, pageEnumFields, diagnostics = [], onSelectPage, onApply }: Omit<PageBuilderProps, "compact">): JSX.Element {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const { selectedId } = useEditor((state) => ({ selectedId: [...state.events.selected][0] }));
@@ -215,6 +259,7 @@ function CompactLayout({ initialNodes, pages, pageName, options, operations = {}
         onOpenPalette={() => setPaletteOpen(true)}
         onOpenSettings={() => setSettingsOpen(true)}
       />
+      <LiveSync nodes={liveNodes} />
       <DiagnosticsBar diagnostics={diagnostics} />
       <ScrollArea style={{ flex: 1, minWidth: 0 }}>
         <Box style={{ padding: 8 }}>
@@ -232,25 +277,61 @@ function CompactLayout({ initialNodes, pages, pageName, options, operations = {}
 }
 
 function Toolbar({ pages, pageName, onSelectPage, onApply, compact = false, onOpenPalette, onOpenSettings }: Pick<PageBuilderProps, "pages" | "pageName" | "onSelectPage" | "onApply"> & { compact?: boolean; onOpenPalette?: () => void; onOpenSettings?: () => void }): JSX.Element {
-  const { query } = useEditor();
+  // `dirty` = craft has something to undo since the seed (the seed and every
+  // re-seed are written with `history.ignore()`, so only user edits count).
+  // Collected, not read once, so the badge and the guard follow the canvas.
+  const { query, dirty } = useEditor((_state, q) => ({ dirty: q.history.canUndo() }));
+  // Switching pages remounts the craft Editor (keyed on the page), which
+  // would drop a dirty canvas on the floor (H11) — hold the switch behind an
+  // inline confirm instead.
+  const [pendingPage, setPendingPage] = useState<string | null>(null);
+  const pickPage = (v: string): void => {
+    if (v === pageName) return;
+    if (dirty) setPendingPage(v);
+    else onSelectPage(v);
+  };
   const apply = (
     <Button size="xs" data-testid="c4builder-apply" onClick={() => onApply(query.getSerializedNodes())}>
       Apply to source
     </Button>
   );
   return (
-    <Group px="xs" py={4} bg="dark.6" gap="xs" justify="space-between" style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}>
-      <Select size="xs" data={pages} value={pageName} onChange={(v) => v && onSelectPage(v)} data-testid="c4builder-page-select" allowDeselect={false} />
-      {compact ? (
+    <>
+      <Group px="xs" py={4} bg="dark.6" gap="xs" justify="space-between" style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}>
         <Group gap="xs" wrap="nowrap">
-          <Button size="xs" variant="default" data-testid="c4builder-add" onClick={onOpenPalette}>Add</Button>
-          <Button size="xs" variant="default" data-testid="c4builder-edit" onClick={onOpenSettings}>Edit</Button>
-          {apply}
+          <Select size="xs" data={pages} value={pageName} onChange={(v) => v && pickPage(v)} data-testid="c4builder-page-select" allowDeselect={false} />
+          {dirty && (
+            <Text size="xs" c="yellow" title="Canvas edits not yet applied to the source" data-testid="c4builder-dirty">
+              unapplied edits
+            </Text>
+          )}
         </Group>
-      ) : (
-        apply
+        {compact ? (
+          <Group gap="xs" wrap="nowrap">
+            <Button size="xs" variant="default" data-testid="c4builder-add" onClick={onOpenPalette}>Add</Button>
+            <Button size="xs" variant="default" data-testid="c4builder-edit" onClick={onOpenSettings}>Edit</Button>
+            {apply}
+          </Group>
+        ) : (
+          apply
+        )}
+      </Group>
+      {pendingPage !== null && (
+        <Box px="xs" py={4} bg="dark.7" style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}>
+          <InlineConfirm
+            spec={confirmSites.discardCanvasEdits("switch")}
+            size="compact-xs"
+            onConfirm={() => {
+              const next = pendingPage;
+              setPendingPage(null);
+              onSelectPage(next);
+            }}
+            onCancel={() => setPendingPage(null)}
+            testids={{ base: "c4builder-switch" }}
+          />
+        </Box>
       )}
-    </Group>
+    </>
   );
 }
 

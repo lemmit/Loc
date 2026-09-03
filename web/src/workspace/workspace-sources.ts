@@ -133,6 +133,13 @@ export async function snapshotSources(store: GitStore): Promise<Map<string, stri
   return out;
 }
 
+/** How many `.ddd` sources the store holds — what a workspace delete would
+ *  destroy, named in its confirm modal.  One list, no reads. */
+export async function countSourceFiles(store: GitStore): Promise<number> {
+  const paths = await store.list(WORKSPACE_PREFIX, SKIP_GENERATED);
+  return paths.filter(isDddSource).length;
+}
+
 /** Re-derive the empty-folder set: every workspace dir entry that
  *  has no `.ddd` descendants.  A folder gains a `.ddd` child →
  *  silently drops out of the set on the next snapshot (the

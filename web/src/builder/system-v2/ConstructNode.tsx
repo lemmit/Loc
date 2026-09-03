@@ -7,6 +7,8 @@
 import { Box, Button, Group, MultiSelect, Select, Stack, Text, TextInput } from "@mantine/core";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { useEffect, useState, type ReactNode } from "react";
+import { InlineConfirm, confirmSites } from "../../util/confirm";
+import { IDENTIFIER, IDENTIFIER_RULE } from "../system/rename";
 import type { VBadge, ViewKind } from "./view-graph";
 
 /** A small inline multi-select on the node — used for multi-valued bindings
@@ -188,6 +190,13 @@ export default function ConstructNode({ data }: NodeProps): JSX.Element {
   const d = data as unknown as ConstructNodeData;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(d.name);
+  // The `×` ARMS an inline confirm under the name (M-T8.17, audit H8: a
+  // whole aggregate used to vanish on one click while a cosmetic layout
+  // reset asked first).  `onDelete` only fires from the confirm's Yes.
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  // A rename draft that isn't an identifier used to snap back to the old
+  // name with no message (H10).  Now the input stays open and shows the rule.
+  const [renameError, setRenameError] = useState<string | null>(null);
   const hasDetail =
     (d.inputs?.length ?? 0) > 0 || (d.selects?.length ?? 0) > 0 || (d.actions?.length ?? 0) > 0;
   const detailShown = hasDetail && (!d.detailsLabel || d.detailsOpen === true);
@@ -196,15 +205,25 @@ export default function ConstructNode({ data }: NodeProps): JSX.Element {
   useEffect(() => {
     setDraft(d.name);
     setEditing(false);
+    setConfirmingDelete(false);
+    setRenameError(null);
   }, [d.name]);
 
   const commit = (): void => {
-    setEditing(false);
     const next = draft.trim();
     if (!next || next === d.name || !d.onRename) {
+      setEditing(false);
+      setRenameError(null);
       setDraft(d.name);
       return;
     }
+    if (!IDENTIFIER.test(next)) {
+      // Stay in edit mode with the rule shown; Escape still cancels.
+      setRenameError(IDENTIFIER_RULE);
+      return;
+    }
+    setEditing(false);
+    setRenameError(null);
     d.onRename(next);
   };
 
@@ -301,17 +320,22 @@ export default function ConstructNode({ data }: NodeProps): JSX.Element {
           // typing into the rename input must not start a node drag.
           className="nodrag"
           data-testid="c4system-v2-rename-input"
-          onChange={(e) => setDraft(e.currentTarget.value)}
+          error={renameError}
+          onChange={(e) => {
+            setDraft(e.currentTarget.value);
+            if (renameError) setRenameError(null);
+          }}
           onBlur={commit}
           onClick={(e) => e.stopPropagation()}
           onKeyDown={(e) => {
-            if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur();
+            if (e.key === "Enter") commit();
             else if (e.key === "Escape") {
               setDraft(d.name);
+              setRenameError(null);
               setEditing(false);
             }
           }}
-          styles={{ input: { fontSize: 12, padding: "2px 4px", minHeight: 22 } }}
+          styles={{ input: { fontSize: 12, padding: "2px 4px", minHeight: 22 }, error: { fontSize: 9 } }}
         />
       ) : (
         <Text
@@ -433,13 +457,28 @@ export default function ConstructNode({ data }: NodeProps): JSX.Element {
               styles={{ root: { paddingInline: 4, height: 18, minHeight: 18, color: "white" } }}
               onClick={(e) => {
                 e.stopPropagation();
-                d.onDelete!();
+                setConfirmingDelete(true);
               }}
             >
               ×
             </Button>
           )}
         </Group>
+      )}
+      {confirmingDelete && d.onDelete && (
+        <Box mt={6} className="nodrag">
+          <InlineConfirm
+            spec={confirmSites.declarationDelete(d.kind, d.name)}
+            stacked
+            size="compact-xs"
+            onConfirm={() => {
+              setConfirmingDelete(false);
+              d.onDelete?.();
+            }}
+            onCancel={() => setConfirmingDelete(false)}
+            testids={{ base: "c4system-v2-delete" }}
+          />
+        </Box>
       )}
       {d.expressionEditor && (
         <Box mt={6} className="nodrag" data-testid="c4system-v2-expression-editor">

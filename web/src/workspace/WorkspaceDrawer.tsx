@@ -31,6 +31,8 @@ import {
 } from "@mantine/core";
 import { defaultExample, type LoomExample } from "../examples";
 import type { WorkspaceState } from "../layout/ctx";
+import { ConfirmModal, confirmSites } from "../util/confirm";
+import { countSourceFiles } from "./workspace-sources";
 
 interface Props {
   opened: boolean;
@@ -76,11 +78,24 @@ export function WorkspaceDrawer({
     setStartExample(defaultExample.id);
     onClose();
   };
-  const onDelete = (id: string, name: string): void => {
+  // Delete: the shared modal (type the name to confirm).  The file count is
+  // only cheaply known for the ACTIVE workspace (its store is open); another
+  // workspace's row says "every file in it" rather than opening a second store.
+  const [pendingDelete, setPendingDelete] = useState<{ id: string; name: string } | null>(null);
+  const [fileCount, setFileCount] = useState<number | null>(null);
+  const armDelete = (id: string, name: string): void => {
     if (workspaces.length <= 1) return;
-    if (window.confirm(`Delete workspace "${name}"? Its files are removed.`)) {
-      deleteWorkspace(id);
+    setFileCount(null);
+    setPendingDelete({ id, name });
+    const store = workspace.store;
+    if (store && id === activeId) {
+      void countSourceFiles(store).then(setFileCount, () => setFileCount(null));
     }
+  };
+  const confirmDelete = (): void => {
+    const target = pendingDelete;
+    setPendingDelete(null);
+    if (target) deleteWorkspace(target.id);
   };
 
   return (
@@ -149,7 +164,7 @@ export function WorkspaceDrawer({
                   color="red"
                   aria-label={`Delete ${w.name}`}
                   disabled={workspaces.length <= 1}
-                  onClick={() => onDelete(w.id, w.name)}
+                  onClick={() => armDelete(w.id, w.name)}
                 >
                   🗑
                 </ActionIcon>
@@ -203,6 +218,13 @@ export function WorkspaceDrawer({
           </Stack>
         </Box>
       </Stack>
+      <ConfirmModal
+        opened={pendingDelete !== null}
+        spec={confirmSites.workspaceDelete(pendingDelete?.name ?? "", fileCount)}
+        onConfirm={confirmDelete}
+        onCancel={() => setPendingDelete(null)}
+        testids={{ base: "workspace-delete" }}
+      />
     </Drawer>
   );
 }

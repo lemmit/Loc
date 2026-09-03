@@ -10,7 +10,7 @@
 // from the Targetable symbol index we already compute in the language
 // scope provider, so qualified names stay in sync with the model.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ActionIcon,
   Badge,
@@ -36,6 +36,8 @@ import type { LayoutCtx } from "../../layout/ctx";
 import { spliceNodeIfParses } from "../edit-engine";
 import { RefusalLine } from "../refusal";
 import { usePaneHarness } from "../pane-harness";
+import { UndoRedo, paneUndoKeyHandler } from "../undo-redo";
+import { InlineConfirm, confirmSites } from "../../util/confirm";
 import {
   printRequirementText,
   printSolutionText,
@@ -252,6 +254,28 @@ export default function RequirementsPane({ ctx }: { ctx: LayoutCtx }): JSX.Eleme
   const { parsed, rev, refusal } = harness;
   const trace = useMemo(() => collect(parsed.ast), [parsed]);
   const [selected, setSelected] = useState<Selection | null>(null);
+  // DIRTY GUARD (M-T8.17, audit H11): the detail form reports whether it
+  // holds unsaved edits; a row click (or mobile "Back") while it does is
+  // held behind an inline confirm instead of dropping the form.  `undefined`
+  // = nothing pending; `null` = "back to the list" is pending.
+  const [formDirty, setFormDirty] = useState(false);
+  const [pendingSelect, setPendingSelect] = useState<Selection | null | undefined>(undefined);
+  const select = (next: Selection | null): void => {
+    const same =
+      next !== null && selected !== null && next.kind === selected.kind && next.id === selected.id;
+    if (same) return;
+    if (formDirty && selected !== null) {
+      setPendingSelect(next);
+      return;
+    }
+    setPendingSelect(undefined);
+    setSelected(next);
+  };
+  const forceSelect = (next: Selection | null): void => {
+    setPendingSelect(undefined);
+    setFormDirty(false);
+    setSelected(next);
+  };
 
   // Live verification overlay: lower + enrich the parsed model to get the
   // traceability index, then join the shared `testResults` (lifted into
@@ -282,7 +306,8 @@ export default function RequirementsPane({ ctx }: { ctx: LayoutCtx }): JSX.Eleme
   // spliced candidate is re-parsed by the harness before it commits — a reprint
   // that would leave the file unparseable is refused, not written.
   const apply = (originalNode: AstNode, newText: string): void => {
-    harness.applyOrRefuse(spliceNodeIfParses(ctx.getSource(), originalNode, newText));
+    const what = `${originalNode.$type} ${(originalNode as { name?: string }).name ?? ""}`.trim();
+    harness.on(what).applyOrRefuse(spliceNodeIfParses(ctx.getSource(), originalNode, newText));
   };
 
   /** Append a fresh top-level block to the end of the source.  We don't
@@ -335,8 +360,18 @@ export default function RequirementsPane({ ctx }: { ctx: LayoutCtx }): JSX.Eleme
   const showDetail = isDesktop || selected !== null;
 
   return (
-    <Box style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, minWidth: 0 }}>
-    <RefusalLine refused={refusal.refused} />
+    // `tabIndex={-1}` + the key handler: a click in the list focuses the pane
+    // so ⌘Z / ⌘⇧Z reach the editor's undo stack; the form's inputs keep
+    // their own native undo (`undo-keys.ts`).
+    <Box
+      style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, minWidth: 0, outline: "none" }}
+      tabIndex={-1}
+      onKeyDown={paneUndoKeyHandler(ctx.editorHandleRef)}
+    >
+    <Group px="xs" py={2} bg="dark.7" gap="xs" style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}>
+      <UndoRedo handleRef={ctx.editorHandleRef} testidPrefix="requirements" />
+    </Group>
+    <RefusalLine refusal={refusal} />
     <Box
       style={{
         flex: 1,
@@ -368,7 +403,7 @@ export default function RequirementsPane({ ctx }: { ctx: LayoutCtx }): JSX.Eleme
             />
             <Stack gap={2}>
               {roots.flatMap((r) =>
-                renderReqRow(r.name, 0, reqById, trace, verification, selected, setSelected),
+                renderReqRow(r.name, 0, reqById, trace, verification, selected, select),
               )}
             </Stack>
             <Divider my="sm" />
@@ -389,7 +424,7 @@ export default function RequirementsPane({ ctx }: { ctx: LayoutCtx }): JSX.Eleme
                   key={t.name}
                   testid={`req-row-tc-${t.name}`}
                   active={selected?.kind === "testCase" && selected.id === t.name}
-                  onClick={() => setSelected({ kind: "testCase", id: t.name })}
+                  onClick={() => select({ kind: "testCase", id: t.name })}
                 >
                   <Group gap={6} wrap="nowrap">
                     <Text size="sm" fw={500}>{t.name}</Text>
@@ -417,7 +452,7 @@ export default function RequirementsPane({ ctx }: { ctx: LayoutCtx }): JSX.Eleme
                     key={s.name}
                     testid={`req-row-sol-${s.name}`}
                     active={selected?.kind === "solution" && selected.id === s.name}
-                    onClick={() => setSelected({ kind: "solution", id: s.name })}
+                    onClick={() => select({ kind: "solution", id: s.name })}
                   >
                     <Group gap={6} wrap="nowrap">
                       <Text size="sm" fw={500}>{s.name}</Text>
@@ -446,7 +481,7 @@ export default function RequirementsPane({ ctx }: { ctx: LayoutCtx }): JSX.Eleme
               <Button
                 size="xs"
                 variant="subtle"
-                onClick={() => setSelected(null)}
+                onClick={() => select(null)}
                 data-testid="req-back-to-list"
               >
                 ← Back
@@ -455,6 +490,17 @@ export default function RequirementsPane({ ctx }: { ctx: LayoutCtx }): JSX.Eleme
                 {selected.id}
               </Text>
             </Group>
+          )}
+          {pendingSelect !== undefined && selected !== null && (
+            <Box px="sm" py={6} style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}>
+              <InlineConfirm
+                spec={confirmSites.discardFormEdits(selected.id)}
+                size="compact-xs"
+                onConfirm={() => forceSelect(pendingSelect)}
+                onCancel={() => setPendingSelect(undefined)}
+                testids={{ base: "req-select" }}
+              />
+            </Box>
           )}
           <ScrollArea style={{ flex: 1 }}>
           <Box p="md">
@@ -473,7 +519,8 @@ export default function RequirementsPane({ ctx }: { ctx: LayoutCtx }): JSX.Eleme
                 trace={trace}
                 verification={verification}
                 onApply={apply}
-                onSelect={setSelected}
+                onSelect={select}
+                onDirtyChange={setFormDirty}
               />
             )}
             {selected?.kind === "testCase" && tcById.get(selected.id) && (
@@ -483,7 +530,8 @@ export default function RequirementsPane({ ctx }: { ctx: LayoutCtx }): JSX.Eleme
                 trace={trace}
                 verification={verification}
                 onApply={apply}
-                onSelect={setSelected}
+                onSelect={select}
+                onDirtyChange={setFormDirty}
               />
             )}
             {selected?.kind === "solution" && solById.get(selected.id) && (
@@ -492,7 +540,8 @@ export default function RequirementsPane({ ctx }: { ctx: LayoutCtx }): JSX.Eleme
                 sol={solById.get(selected.id)!}
                 trace={trace}
                 onApply={apply}
-                onSelect={setSelected}
+                onSelect={select}
+                onDirtyChange={setFormDirty}
               />
             )}
           </Box>
@@ -510,7 +559,7 @@ export default function RequirementsPane({ ctx }: { ctx: LayoutCtx }): JSX.Eleme
           onCreate={(text, newId) => {
             append(text);
             setWizard(null);
-            setSelected({ kind: "requirement", id: newId });
+            forceSelect({ kind: "requirement", id: newId });
           }}
         />
       )}
@@ -522,7 +571,7 @@ export default function RequirementsPane({ ctx }: { ctx: LayoutCtx }): JSX.Eleme
           onCreate={(text, newId) => {
             append(text);
             setWizard(null);
-            setSelected({ kind: "testCase", id: newId });
+            forceSelect({ kind: "testCase", id: newId });
           }}
         />
       )}
@@ -534,7 +583,7 @@ export default function RequirementsPane({ ctx }: { ctx: LayoutCtx }): JSX.Eleme
           onCreate={(text, newId) => {
             append(text);
             setWizard(null);
-            setSelected({ kind: "solution", id: newId });
+            forceSelect({ kind: "solution", id: newId });
           }}
         />
       )}
@@ -707,6 +756,17 @@ function Row({
 // Forms
 // ---------------------------------------------------------------------------
 
+/** Report the form's dirty flag to the pane (for the row-switch guard) —
+ *  on every change and, via the cleanup, as `false` when the form unmounts
+ *  (a Save re-keys the form; a switch replaces it). */
+function useDirtyReport(dirty: boolean, onDirtyChange?: (dirty: boolean) => void): void {
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+    return () => onDirtyChange?.(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the callback is a state setter; `dirty` is the signal.
+  }, [dirty]);
+}
+
 function dirtyBadge(): JSX.Element {
   return (
     <Badge size="xs" color="yellow" variant="light" title="Unsaved changes">
@@ -750,12 +810,14 @@ function RequirementForm({
   verification,
   onApply,
   onSelect,
+  onDirtyChange,
 }: {
   req: Requirement;
   trace: CollectedTrace;
   verification: VerificationIR | null;
   onApply: (node: AstNode, newText: string) => void;
   onSelect: (s: Selection) => void;
+  onDirtyChange?: (dirty: boolean) => void;
 }): JSX.Element {
   const initial: Required<Pick<RequirementSpec, "type" | "title">> & {
     status: RequirementStatus | "";
@@ -770,6 +832,7 @@ function RequirementForm({
   };
   const [form, setForm] = useState(initial);
   const dirty = JSON.stringify(form) !== JSON.stringify(initial);
+  useDirtyReport(dirty, onDirtyChange);
   const solIds = trace.solutionsFor[req.name] ?? [];
   const tcIds = trace.testCasesByRequirement[req.name] ?? [];
 
@@ -941,11 +1004,13 @@ function SolutionForm({
   trace,
   onApply,
   onSelect,
+  onDirtyChange,
 }: {
   sol: Solution;
   trace: CollectedTrace;
   onApply: (node: AstNode, newText: string) => void;
   onSelect: (s: Selection) => void;
+  onDirtyChange?: (dirty: boolean) => void;
 }): JSX.Element {
   const initial = {
     title: sol.title ?? "",
@@ -954,6 +1019,7 @@ function SolutionForm({
   };
   const [form, setForm] = useState(initial);
   const dirty = JSON.stringify(form) !== JSON.stringify(initial);
+  useDirtyReport(dirty, onDirtyChange);
 
   const save = (): void => {
     onApply(
@@ -1021,12 +1087,14 @@ function TestCaseForm({
   verification,
   onApply,
   onSelect,
+  onDirtyChange,
 }: {
   tc: TestCase;
   trace: CollectedTrace;
   verification: VerificationIR | null;
   onApply: (node: AstNode, newText: string) => void;
   onSelect: (s: Selection) => void;
+  onDirtyChange?: (dirty: boolean) => void;
 }): JSX.Element {
   const initial = {
     title: tc.title ?? "",
@@ -1035,6 +1103,7 @@ function TestCaseForm({
   };
   const [form, setForm] = useState(initial);
   const dirty = JSON.stringify(form) !== JSON.stringify(initial);
+  useDirtyReport(dirty, onDirtyChange);
 
   const save = (): void => {
     onApply(

@@ -15,6 +15,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { type CommitFileChange, type CommitInfo, commitOnSave } from "../workspace/git";
 import { readOnlyMessage } from "../workspace/workspace-sources";
+import { InlineConfirm, confirmSites } from "../util/confirm";
 import type { LayoutCtx } from "./ctx";
 import { classifyCommit, formatRelativeTime, shortOid } from "./history-format";
 
@@ -290,28 +291,23 @@ export function HistoryBody({
                     {c.oid !== headOid && writable && (
                       <Box mt={6}>
                         {confirmOid === c.oid ? (
-                          <Group gap={6} wrap="nowrap" data-testid="history-restore-confirm">
-                            <Text size="xs" c="dimmed" style={{ flex: 1 }}>
-                              Restore the workspace to this version?
-                            </Text>
-                            <Button
-                              size="compact-xs"
-                              color="orange"
-                              loading={restoringOid === c.oid}
-                              onClick={() => restore(c.oid)}
-                              data-testid="history-restore-do"
-                            >
-                              Restore
-                            </Button>
-                            <Button
-                              size="compact-xs"
-                              variant="subtle"
-                              disabled={restoringOid === c.oid}
-                              onClick={() => setConfirmOid(null)}
-                            >
-                              Cancel
-                            </Button>
-                          </Group>
+                          // The copy says BOTH halves of what restore does:
+                          // the live edits are replaced, and the restore is
+                          // recorded as a new commit (`commitOnSave` above),
+                          // so it is itself restorable from this list.
+                          <InlineConfirm
+                            spec={confirmSites.historyRestore(shortOid(c.oid))}
+                            stacked
+                            size="compact-xs"
+                            loading={restoringOid === c.oid}
+                            onConfirm={() => restore(c.oid)}
+                            onCancel={() => setConfirmOid(null)}
+                            testids={{
+                              base: "history-restore",
+                              root: "history-restore-confirm",
+                              yes: "history-restore-do",
+                            }}
+                          />
                         ) : (
                           <Button
                             size="compact-xs"

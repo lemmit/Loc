@@ -16,6 +16,7 @@ import { PlainJsonBody } from "../backend/PlainJsonBody";
 import { LazyJsonBodyEditor } from "./lazy-panels";
 import { SqlConsole } from "../backend/SqlConsole";
 import { CUSTOM_ENDPOINT, groupEndpointsByTag } from "../backend/openapi";
+import { ConfirmAction, confirmSites } from "../util/confirm";
 
 interface Props {
   ctx: LayoutCtx;
@@ -117,16 +118,23 @@ export function BackendBody({ ctx }: Props): JSX.Element {
           </Code>
           {honoBundle && (
             <Group gap={6} align="center">
-              <Button
-                size="xs"
-                variant="default"
-                color="red"
-                onClick={runResetData}
-                loading={pipeline.booting}
-                data-testid="btn-reset-data"
-              >
-                Clear stored data &amp; retry
-              </Button>
+              <ConfirmAction
+                spec={confirmSites.clearStoredData()}
+                onConfirm={runResetData}
+                testids={{ base: "btn-reset-data", yes: "btn-reset-data-confirm" }}
+                trigger={(arm) => (
+                  <Button
+                    size="xs"
+                    variant="default"
+                    color="red"
+                    onClick={arm}
+                    loading={pipeline.booting}
+                    data-testid="btn-reset-data"
+                  >
+                    Clear stored data &amp; retry…
+                  </Button>
+                )}
+              />
               <Text size="xs" c="dimmed">
                 If the boot fails on stale persisted data, this drops the saved database and reboots clean.
               </Text>
@@ -376,43 +384,32 @@ function DatabaseView({
 
 // Two-step reset: the first click reveals the consequence and a confirm,
 // so one stray click can't drop every row.  The explanation sits ABOVE
-// the button so it is read before, not after, the action.
+// the button so it is read before, not after, the action.  The two-step
+// itself is the shared `ConfirmAction` (inline shape) — the same control
+// every other destructive action in the playground uses.
 function ResetDatabase({ runWipe }: { runWipe: () => void }): JSX.Element {
-  const [armed, setArmed] = useState(false);
   return (
     <Stack gap={4}>
       <Text size="xs" c="dimmed">
         Reset drops every row and re-applies the schema. The table structure stays — only your data is cleared.
       </Text>
-      {armed ? (
-        <Group gap={6}>
+      <ConfirmAction
+        spec={confirmSites.resetDatabase()}
+        onConfirm={runWipe}
+        testids={{ base: "btn-wipe", yes: "btn-wipe-confirm" }}
+        trigger={(arm) => (
           <Button
             size="xs"
+            variant="default"
             color="red"
-            onClick={() => {
-              setArmed(false);
-              runWipe();
-            }}
-            data-testid="btn-wipe-confirm"
+            onClick={arm}
+            style={{ alignSelf: "flex-start" }}
+            data-testid="btn-wipe"
           >
-            Yes, clear all rows
+            Reset database…
           </Button>
-          <Button size="xs" variant="subtle" color="gray" onClick={() => setArmed(false)}>
-            Cancel
-          </Button>
-        </Group>
-      ) : (
-        <Button
-          size="xs"
-          variant="default"
-          color="red"
-          onClick={() => setArmed(true)}
-          style={{ alignSelf: "flex-start" }}
-          data-testid="btn-wipe"
-        >
-          Reset database…
-        </Button>
-      )}
+        )}
+      />
     </Stack>
   );
 }
