@@ -10,20 +10,20 @@ Base: `main` @ 38580cd77 · built 2026-08-30 · claim map applied (PR #2667 = au
 
 | metric | value |
 |---|---|
-| open rows | **160** |
+| open rows | **158** |
 | P0 | 0 |
 | P1 | 9 |
-| P2 | 17 |
+| P2 | 15 |
 | P3 | 32 |
 | P4 | 90 |
 | P5 | 12 |
-| kind: silent / honest / breadth / mission / stale-prose | 26 / 32 / 26 / 64 / 12 |
-| confidence: proven / likely / suspected | 30 / 128 / 2 |
+| kind: silent / honest / breadth / mission / stale-prose | 24 / 32 / 26 / 64 / 12 |
+| confidence: proven / likely / suspected | 30 / 126 / 2 |
 | class: faulty-fix / regression | 1 / 0 |
-| size S / M / L | 44 / 69 / 47 |
-| provenance: fleet1-only / fleet2-only / corroborated by both | 143 / 16 / 1 |
+| size S / M / L | 43 / 68 / 47 |
+| provenance: fleet1-only / fleet2-only / corroborated by both | 141 / 16 / 1 |
 | claimed by an open PR | 61 |
-| done / merged | 132 |
+| done / merged | 134 |
 | conflicts | 10 |
 | checkedOk entries | 146 |
 | rows scheduled into waves | 134 across 13 packets |
@@ -51,12 +51,10 @@ Sorted P0 (security / data-integrity, silent, proven) → P1 (other silent prove
 | P2 ! | `dapper-no-schema-evolution` | silent | like | dotnet | L | `persistence: dapper` has no ALTER path at all — every post-first-boot model change is silently unapplied (migrations-on-adapters slice 2) |
 | P2 | `F2-FFE-8` | silent | susp | feliz, flutter | S | Flutter and Feliz persisted stores write a FLAT JSON blob under the same `loom.store.<Name>` key the JS frontends use for zustand's `{state,version}` envelope |
 | P2 | `F2-W-06` | silent | like | elixir | S | elixir persists `datetime` at SECOND precision (`:utc_datetime`) where the other four use TIMESTAMPTZ(µs) |
-| P2 | `G2667-D3-projection-join-unguarded-index` | silent | like | dotnet, node | S | Debt: query-time projection `join` indexes the joined dictionary unguarded — 500 from ordinary data |
 | P2 | `M-T6.2-s14-audit-wiresnapshot` | silent | like | elixir | S | Elixir audit before/after snapshots still dump the raw snake_case Ecto struct while the other four record the wireShape |
 | P2 | `G2646-open-heex-layout-inert` | silent | like | elixir | M | #2646 documented, NOT fixed: HEEx layout primitives semantically inert (Grid ≡ Stack, bare divs); non-server-paged Table gets no pager; i18nFormat wrapper dropped |
 | P2 | `M-T1.16-invariant-validation-feliz-flutter` | silent | like | feliz, flutter | M | Invariant-derived client-side form validation is missing on BOTH self-hosting frontends — Feliz and Flutter enforce "Required" only |
 | P2 | `M-T5.14-reading-service-readport-not-threaded` | silent | like | node, python, dotnet, java, elixir | M | A `reading` domain service called from a command/query handler emits a port-less call — the generated module does not compile |
-| P2 | `provenanced-bare-read-in-page-body` | silent | like | react, vue, svelte, angular, feliz, flutter | M | Provenanced<T> (#2653, merged 2026-08-24) changed the wire shape of a `provenanced` field under every page-body read; only the scaffold macro was taught `.value`, so a hand-written body reading the field bare now emits an object into a text slot with no gate |
 | P2 | `queryview-lambda-int-plus-literal-concat` | silent | like | react, vue, svelte, angular | M | An int LITERAL operand of `+` against a read-record member in a page body lowers to string concatenation — `o.qty + 1` renders `o.qty + String(1)` |
 | P2 | `schemathesis-F11-int32-range` | silent | like | node, dotnet, java, python, elixir | M | F11/W11+W12 — an `int` body field publishes no bound while the column is Postgres `int4`, so a contract-conforming value 500s; explicitly deferred by both open schemathesis PRs |
 | P2 | `sourcemap-feliz-flutter-not-emitted` | silent | like | feliz, flutter | M | `--sourcemap` records NOTHING for the feliz and flutter frontends — the plan files it as a test-parity skew, but the emission is absent |

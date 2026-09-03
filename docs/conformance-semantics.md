@@ -1408,3 +1408,98 @@ nothing and the test passes vacuously.
   `{"pointer":"/sku","message":"is invalid"}` — the inner field, the authored
   text and the wire code all gone. Tier: **generator**; a wire golden carrying a
   VO-collection violation is still wanted (only 4 of 31 record any error body).
+
+### RS-34 · A query-time projection `join` is LEFT, not INNER — the joined field is wire `null` when the target is absent
+- **Guarantee.** `join <Agg> as c on <idRef>` in a query-time `projection`
+  bulk-loads the followed aggregate **through its own repository** — so the
+  joined aggregate's OWN capability filters (a `softDeletable` target that has
+  been soft-deleted, an out-of-tenant target under `tenantOwned`, or an
+  ordinary dangling `<idRef>` with no row on the other end) apply to that
+  load, independently of whether the SOURCE row itself is visible. When the
+  join target is absent from that bulk-load, the source row still ships and
+  every `select`ed field read through the join alias carries the WIRE VALUE
+  **`null`**, on every backend — never a thrown exception (`NullPointerException`
+  / `KeyNotFoundException`), never a silently dropped source row.
+- **Why "the wire carries `null`," not the backend's own scalar default.**
+  Two shapes were on the table, and they disagree exactly at a non-nullable
+  scalar joined field (a joined `int`, `bool`, `decimal`, or `datetime`, never
+  exercised by the fixture that first pinned this rule — see Scope below): one
+  language's own zero/default value (.NET's `default!` — `0` for `int`, `false`
+  for `bool`, `DateTime.MinValue` for `datetime`) is NOT the same value as
+  every other backend's `null`/`None`/`nil`, and the projection's Response
+  schema declares the field's ordinary (non-nullable) type either way — so
+  BOTH shapes read as a violation of their own declared wire type on a
+  non-string field. The rule adopts **wire `null`, uniformly**, because it is
+  the only value that means the same thing on every backend's wire
+  serialization and needs no per-type default table. **Scope, stated plainly:**
+  every backend's LANDED implementation was verified against a joined
+  **`string`** field (the RS-15-adjacent fixture: `customerName = c.name`),
+  where `null`/`default!`(`null` for a reference type) happen to coincide — so
+  the rule as *implemented* is proven on reference-typed joined fields, and
+  the value-typed case (a joined `int`/`decimal`/`bool`/`datetime`) is a
+  DOCUMENTED GAP on .NET specifically (`default!` reads `0`/`false`/
+  `DateTime.MinValue`, not `null`, for those kinds), not yet re-verified nor
+  fixed — see Open below.
+- **Trigger.** Any query-time `projection … join <Agg> as c on <idRef> …
+  select f = c.<member>` where the target aggregate can genuinely be absent
+  from its own bulk-load: `softDeletable`, `tenantOwned`, or simply a
+  reference with no live row.
+- **The split when raised (wave 1, `G2667-D3`).** All five backends indexed
+  the bulk-load map/dictionary UNGUARDED — .NET
+  `customerById[d.CustomerId].Name` (`KeyNotFoundException`), node
+  `customerById.get(...)!.name` (undefined deref), python
+  `customer_by_id[str(...)].name` (`KeyError`), java
+  `customerById.get(a.customerId().value()).name()` (`NullPointerException`),
+  elixir `Map.get(customer_by_id, record.customer_id).name` (`nil.name` —
+  `FunctionClauseError`/`KeyError` depending on the struct access form) — every
+  one a 500 on data the model **permits**, on a route that is not even about
+  the missing row.
+- **Rejected: dropping the source row instead.** A FOREIGN aggregate's
+  filters would then change THIS projection's row count while the source
+  aggregate's own list still shows the row unfiltered — one silent failure
+  traded for another, and a worse one (the row disappears from a read that
+  never mentioned the join target at all).
+- **Per-backend shape.** .NET: `customerById.TryGetValue(d.CustomerId, out var
+  __j0) ? __j0.Name : default!` — one `out var` PER joined select, all in one
+  lambda scope (distinct temp names, `CS0128`-safe), the wire coercion sitting
+  INSIDE the guarded arm. Node: `const __j0 = customerById.get(r.customerId as
+  string); … __j0 === undefined ? null : __j0.name` — one binding per row
+  per join alias, reused across every select reading that alias. Python: a
+  walrus-bound guard inline per select, `(__j0.name if (__j0 :=
+  customer_by_id.get(str(r.customer_id))) is not None else None)`. Elixir: a
+  total `__joined/2` reader, `__joined(Map.get(customer_by_id,
+  record.customer_id), :name)`, nil-safe by construction. Java (wave-2
+  residue): a null-guarded ternary re-evaluating the map `.get(...)` (Java has
+  no `out var`/walrus binding inside a record-constructor argument list),
+  `customerById.get(a.customerId().value()) == null ? null :
+  customerById.get(a.customerId().value()).name()`, the wire coercion
+  (`domainToWire`) applied to the member-read expression INSIDE the guard's
+  true-branch so a joined `money`/`decimal`/`datetime` field's non-null
+  narrowing (`.setScale(…)`, `.doubleValue()`, `.toString()`) never runs on
+  the absent row.
+- **Conforms.** node, dotnet, python, elixir, java (all five arms landed:
+  dotnet/python/elixir/node in wave 1, java in the wave-2 residue).
+- **Open.** The `.NET` value-typed joined-field gap named above (a joined
+  `int`/`decimal`/`bool`/`datetime` reads `default(T)`, not wire `null`) is
+  UNVERIFIED and UNFIXED — no fixture in the corpus or the pinned test suite
+  exercises a joined field of those kinds today. Flipping .NET's absent-branch
+  from `default!` to an explicitly-nullable wire type (and widening the
+  Response schema's field to nullable for a joined member) is a one-line
+  change in `src/generator/dotnet/query-projection-emit.ts`'s `joinAliasRead`
+  branch per the wave-1 dotnet hand-off, but is not done here.
+- **Provenance.** Raised as ledger row `G2667-D3-projection-join-unguarded-index`.
+  Landed dotnet (`b75ce2c`) and node (`40202d9`) in wave 1 packets 1b/1c;
+  python in wave 1 packet 1e; elixir in wave 1 packet 1d. Java landed in the
+  wave-2 residue (`src/generator/java/emit/query-projection-reads.ts`'s
+  `renderSelectWire`), pinned by
+  `test/generator/java/query-projection-join-missing.test.ts` and the java arm
+  of `test/ir/projection-comprehension.test.ts`'s Hono-emission describe
+  block. **Mutation-proven**: reverting `renderSelectWire` to the pre-fix
+  unguarded `<mapVar>.get(<key>).<member>()` (file-copy revert, never
+  `git checkout --`) fails 4 named assertions across those two files. Tier:
+  **generator** (string-pinned per backend); no wire golden yet carries a
+  join-target-absent row on all five backends — the corpus fixtures never
+  declare a query-time projection `join` at all (grepped empty across
+  `examples/**` and `web/src/examples/**`), so this rule's coverage is
+  entirely the dedicated fixture tests named above, not the corpus/behavioral
+  legs.

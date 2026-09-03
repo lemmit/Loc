@@ -122,7 +122,7 @@ describe("feliz `persist: local|session` — Web Storage hydration", () => {
     const fs = await app(LOCAL_STORE);
     expect(fs).toContain("let updateWithPersist (msg: Msg) (model: Model) =");
     expect(fs).toContain("StorePersist.save next");
-    expect(fs).toContain("Program.mkProgram init updateWithPersist view");
+    expect(fs).toContain("Program.mkProgram init updateWithPersist safeView");
   });
 });
 
@@ -164,7 +164,7 @@ describe("feliz `persist:` — what it must NOT touch", () => {
     // The memory store still folds into the Model + init exactly as before.
     expect(fs).toContain("CartItems: int");
     expect(fs).toContain("CartItems = 0");
-    expect(fs).toContain("Program.mkProgram init update view");
+    expect(fs).toContain("Program.mkProgram init update safeView");
   });
 
   it("a memory store ALONGSIDE persisted ones keeps its declared init", async () => {
