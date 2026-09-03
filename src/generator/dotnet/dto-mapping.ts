@@ -282,6 +282,10 @@ export function dtoParam(
   /** Which request slot this DTO is.  `create` keeps the implicit-bool
    *  optionality (RS-6); `operation` requires every declared param (RS-26). */
   slot: "create" | "operation" = "create",
+  /** True when this member is a VALUE TYPE on the wire ({@link isWireValueType}).
+   *  Such a member needs `[property: JsonRequired]` in EVERY request slot, not
+   *  just `operation` — see below. */
+  wireValueType = false,
 ): string {
   if (defaultLiteral !== undefined && dir === "request") {
     return `${csType} ${name} = ${defaultLiteral}`;
@@ -302,7 +306,33 @@ export function dtoParam(
   // questions.  JsonRequired asks "was the member present"; Required asks "is
   // the bound value null".  Dropping Required here would let an explicit
   // `"name": null` reach the domain, which it does not today.
-  const jsonRequired = dir === "request" && slot === "operation" ? "[property: JsonRequired] " : "";
+  //
+  // The same hole exists in EVERY request slot, not only `operation` — the
+  // exemption above is about an omitted field being legitimately absent, which
+  // is a statement about the CREATE CONTRACT, not about whether `[Required]`
+  // can see the absence. It cannot, for any value type, anywhere.
+  //
+  // Measured on a booted .NET app (`POST /api/widgets`, every one of these
+  // marked `required` in the published schema):
+  //
+  //     omit name  (string)          422   ← reference type, [Required] sees null
+  //     omit price (record)          422   ← reference type
+  //     omit qty   (int)             201   ← VALUE TYPE, bound to 0
+  //     omit ratio (decimal)         201   ← VALUE TYPE, bound to 0
+  //     omit price.amount (decimal)  201   ← VALUE TYPE, bound to 0
+  //     omit active (bool)           201   ← correct: RS-6 keeps it OPTIONAL,
+  //                                          and the schema agrees (not in
+  //                                          `required`), so nothing is claimed
+  //                                          that is not enforced.
+  //
+  // A zero-priced product / a zero-quantity widget is written from a body the
+  // published contract forbids (schemathesis F30). So the guard follows the
+  // question it answers — "can `[Required]` see this absence?" — rather than
+  // the slot. Reference-typed members are deliberately NOT given it: their
+  // `[Required]` already answers 422, and adding JsonRequired would move them
+  // to the 400 arm.
+  const jsonRequired =
+    dir === "request" && (slot === "operation" || wireValueType) ? "[property: JsonRequired] " : "";
   // Request → parameter target (bare `[Required]`) so ASP.NET record
   // validation doesn't throw at model-binding time; response → property
   // target (`[property: Required]`).  See the doc comment above.
@@ -400,19 +430,7 @@ export function wireToCommandArgument(
     // On the .NET wire every id crosses as `Guid` (a value type), so a nullable
     // id ref is always `Guid?` → `.Value`.
     const innerT = peelNullable(t);
-    const inner = wireTypeInfo(innerT, "request");
-    const valueWire =
-      inner.refKind === "id" ||
-      inner.refKind === "enum" ||
-      (inner.refKind === "primitive" &&
-        inner.primitive !== "string" &&
-        inner.primitive !== "money" &&
-        inner.primitive !== "datetime" &&
-        // `File` crosses the wire as the `FileRef` RECORD, not a value type —
-        // `request.Doc!.Value` on it is CS1061 (M-T6.39; the sibling of the
-        // same omission in `csIsValueType` below).
-        inner.primitive !== "File");
-    const unwrap = valueWire ? `${expr}!.Value` : `${expr}!`;
+    const unwrap = isWireValueType(innerT) ? `${expr}!.Value` : `${expr}!`;
     return `(${expr} is null ? null : ${wireToCommandArgument(unwrap, innerT, ctx, site)})`;
   }
   if (info.isCollection) {
@@ -645,6 +663,33 @@ export function domainToRequestExpr(
  *  must be unwrapped with `.Value` before any method call.  `string`
  *  and `List<T>` are reference types; everything else (primitives, ids,
  *  enums) is a value type. */
+/** Is this type a VALUE TYPE **on the wire** — i.e. as it appears on a request
+ *  DTO member?
+ *
+ *  Distinct from {@link csIsValueType}, which asks about the DOMAIN
+ *  representation: `money` and `datetime` are `decimal` / `DateTime` in the
+ *  domain but cross the wire as STRINGS, so their DTO members are reference
+ *  types. `File` crosses as the `FileRef` record for the same reason.
+ *
+ *  Two consumers, and they must agree:
+ *    • `wireToCommandArgument` — a nullable wire value type unwraps `.Value`,
+ *      a reference one unwraps `!`.
+ *    • `dtoParam` — a REQUIRED wire value type needs `[property: JsonRequired]`,
+ *      because `[Required]` alone cannot see its absence (below). */
+export function isWireValueType(t: TypeIR): boolean {
+  const info = wireTypeInfo(t, "request");
+  if (info.isCollection || info.isNullable) return false;
+  return (
+    info.refKind === "id" ||
+    info.refKind === "enum" ||
+    (info.refKind === "primitive" &&
+      info.primitive !== "string" &&
+      info.primitive !== "money" &&
+      info.primitive !== "datetime" &&
+      info.primitive !== "File")
+  );
+}
+
 function csIsValueType(t: TypeIR): boolean {
   const info = wireTypeInfo(t, "response");
   if (info.isCollection) return false;

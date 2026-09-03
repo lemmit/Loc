@@ -182,3 +182,35 @@ describe("Angular store — url tier uses the native router", () => {
     expect(m).not.toContain("popstate");
   });
 });
+
+// ---------------------------------------------------------------------------
+// F2-FFE-1 (angular half) — the `url` tier's constructor decode used the TYPE
+// ZERO as its fallback, and `queryParamMap` REPLAYS the current params the
+// moment it subscribes: so every declared initializer the signal was just
+// constructed with was overwritten one tick later.  `persist: memory` honoured
+// `= "dark"`; `persist: url` booted it as `""`.
+// ---------------------------------------------------------------------------
+
+describe("Angular store — declared defaults survive the url tier", () => {
+  const DEFAULTED = `
+      store Prefs persist: url {
+        state { mode: string = "dark"  pageSize: int = 25  compact: bool = true }
+      }
+      page P { route: "/p" body: Heading { Prefs.mode, level: 1 } }`;
+
+  it("the replayed queryParamMap decode falls back to the declared literal", async () => {
+    const m = (await angularFiles(DEFAULTED)).get("web/src/app/stores/prefs.store.ts")!;
+    expect(m).toContain('readonly mode = signal<string>("dark");');
+    expect(m).toContain('this.mode.set(p.get("mode") ?? "dark");');
+    expect(m).toContain(
+      'this.pageSize.set(p.has("pageSize") && Number.isFinite(Number(p.get("pageSize"))) ? Number(p.get("pageSize")) : 25);',
+    );
+    expect(m).toContain('this.compact.set(p.has("compact") ? p.get("compact") === "true" : true);');
+  });
+
+  it("the encoder drops a param that equals the declared default", async () => {
+    const m = (await angularFiles(DEFAULTED)).get("web/src/app/stores/prefs.store.ts")!;
+    expect(m).toContain('mode: this.mode() !== "dark" ? String(this.mode()) : null,');
+    expect(m).toContain("pageSize: this.pageSize() !== 25 ? String(this.pageSize()) : null,");
+  });
+});

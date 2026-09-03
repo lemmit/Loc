@@ -7,7 +7,7 @@ using CatalogApi.Domain.Enums;
 
 namespace CatalogApi.Application.Customers.Requests;
 
-public sealed record CreateCustomerRequest([Required(AllowEmptyStrings = true)] string Username, [Required(AllowEmptyStrings = true)] string Email, [Required] int Age);
+public sealed record CreateCustomerRequest([Required(AllowEmptyStrings = true)] string Username, [Required(AllowEmptyStrings = true)] string Email, [property: JsonRequired] [Required] int Age);
 
 public sealed record UpdateCustomerRequest([property: JsonRequired] [Required(AllowEmptyStrings = true)] string Username, [property: JsonRequired] [Required(AllowEmptyStrings = true)] string Email, [property: JsonRequired] [Required] int Age);
 

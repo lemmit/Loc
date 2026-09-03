@@ -190,16 +190,18 @@ export interface LoadedPack {
   setChromeI18n(enabled: boolean): void;
 }
 
-let helpersRegistered = false;
+/** A Handlebars environment — the isolation unit.  `Handlebars.create()`
+ *  returns a fresh registry of helpers and partials sharing the same compiler,
+ *  so two packs can register the same logical name without either seeing the
+ *  other's. */
+type HbsEnv = ReturnType<typeof Handlebars.create>;
 
-/** Register IR-semantic helpers globally — naming utilities + a
- *  `lookup`-by-default-key helper.  Called lazily on first pack load.
- *  Helpers are NOT pack-overridable: they're invariants of the IR
- *  contract, not theme decisions (a pack can't redefine "humanize"
- *  to mean something different and still consume the same VMs). */
-export function registerHelpersOnce(): void {
-  if (helpersRegistered) return;
-  helpersRegistered = true;
+/** Register IR-semantic helpers on ONE pack environment — naming utilities +
+ *  a `lookup`-by-default-key helper.  Helpers are NOT pack-overridable:
+ *  they're invariants of the IR contract, not theme decisions (a pack can't
+ *  redefine "humanize" to mean something different and still consume the same
+ *  VMs), which is why every environment gets the identical set. */
+function registerCoreHelpers(Handlebars: HbsEnv): void {
   Handlebars.registerHelper("humanize", (s: unknown) => humanize(String(s)));
   Handlebars.registerHelper("camel", (s: unknown) => lowerFirst(String(s)));
   Handlebars.registerHelper("pascal", (s: unknown) => upperFirst(String(s)));
@@ -254,13 +256,14 @@ export function registerHelpersOnce(): void {
  *  import-resolve errors at TS-compile time rather than being
  *  silently dropped.
  *
- *  Helpers register globally on Handlebars (no per-pack scoping).
- *  In practice each generation loads exactly one pack, so the
- *  global registration is fine; if two packs declared the same
- *  helper name with different tables, the most recently loaded
- *  pack wins.  shadcn's `lucide` helper (tabler→lucide name
- *  remap) is the only built-in user today. */
-function registerPackHelpers(manifest: PackManifest): void {
+ *  Registered on THIS PACK's own Handlebars environment, so two packs
+ *  declaring the same helper name with different tables cannot clobber each
+ *  other — a `react + vue + svelte + angular` system loads four packs in one
+ *  process, and the "one pack per generation" assumption that made global
+ *  registration safe has not held since the second frontend shipped.
+ *  shadcn's `lucide` helper (tabler→lucide name remap) is the only built-in
+ *  user today. */
+function registerPackHelpers(Handlebars: HbsEnv, manifest: PackManifest): void {
   for (const [name, table] of Object.entries(manifest.helpers ?? {})) {
     Handlebars.registerHelper(name, (key: unknown) => {
       const k = String(key);
@@ -301,8 +304,15 @@ export function compilePack(
    *  40+ primitive set just to assert one manifest field parses. */
   options: { validateRequired?: boolean } = {},
 ): LoadedPack {
-  registerHelpersOnce();
-  registerPackHelpers(manifest);
+  // One environment per pack: helpers and partials registered below are
+  // visible ONLY to this pack's templates.  Registering into the module-global
+  // `Handlebars` was safe only while a generation loaded exactly one pack —
+  // a multi-framework system loads four, and their identically-named partials
+  // (`primitive-button`, `app-shell`, …) overwrote each other in load order,
+  // an invariant nothing enforced (G2667-D8).
+  const env = Handlebars.create();
+  registerCoreHelpers(env);
+  registerPackHelpers(env, manifest);
   if (!manifest.emits || typeof manifest.emits !== "object") {
     throw new Error(
       `loader: pack at ${rootDir} has no \`emits\` map in pack.json.  Add { emits: { "page-list": "page-list.hbs", ... } }.`,
@@ -315,7 +325,7 @@ export function compilePack(
   // so the same shared file produces Mantine output under one pack
   // and shadcn output under another.
   for (const [name, source] of Object.entries(sharedSources)) {
-    Handlebars.registerPartial(name, source);
+    env.registerPartial(name, source);
   }
 
   const templates = new Map<string, CompiledTemplate>();
@@ -330,7 +340,7 @@ export function compilePack(
     // silently rendering them as empty.  Forces preparer + template
     // to stay in sync; missing fields surface immediately during
     // tests instead of leaking blanks into generated output.
-    const fn = Handlebars.compile(source, {
+    const fn = env.compile(source, {
       strict: true,
       noEscape: false,
     });
@@ -352,7 +362,7 @@ export function compilePack(
     // (page-list.hbs, page-detail.hbs, …) keep their explicit
     // import header and we use partials only where the parent
     // already imports the relevant components.
-    Handlebars.registerPartial(logicalName, source);
+    env.registerPartial(logicalName, source);
   }
   // Shared templates the pack hasn't overridden also become
   // renderable via `pack.render(name, ctx)` — orchestration code
@@ -362,7 +372,7 @@ export function compilePack(
   // already won the templates.set race when names collide.
   for (const [name, source] of Object.entries(sharedSources)) {
     if (templates.has(name)) continue;
-    const fn = Handlebars.compile(source, {
+    const fn = env.compile(source, {
       strict: true,
       noEscape: false,
     });

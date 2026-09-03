@@ -1,6 +1,6 @@
 # M-T9.26 — `RouteTarget`: seal the HTTP-emission surface behind a contract
 
-*Phase 1 (divergence audit) + Phase 2 (seam contract + slicing plan). This is the **design-first deliverable for maintainer sign-off**, per [`RUNBOOK.md`](../RUNBOOK.md) step 3 and the [M-T9.2](./M-T9.2-persistence-seam-design.md) precedent. **No extraction code lands until this is signed off.***
+*Phase 1 (divergence audit) + Phase 2 (seam contract + slicing plan). This is the **design-first deliverable for maintainer sign-off**, per [`RUNBOOK.md`](../RUNBOOK.md) step 3 and the [M-T9.2](../archive/missions/M-T9.2-persistence-seam-design.md) precedent. **No extraction code lands until this is signed off.***
 
 > **STATUS: DESIGN — awaiting sign-off.** Measurements below are code-verified against `main` @ `e1eec64` (2026-08-03) using `examples/showcase.ddd` → `hono_api`. Re-verify before implementing; this repo's statuses rot.
 
