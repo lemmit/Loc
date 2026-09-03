@@ -76,7 +76,7 @@ const RENDERERS: RendererDecl[] = [
     file: "src/generator/sql-pg-expr.ts",
     mode: "sql-postgres-migration",
     anchor: /export function renderSqlScalarExpr\(/,
-    declares: 'refuseOutOfVocabulary(MODE,',
+    declares: "refuseOutOfVocabulary(MODE,",
   },
   {
     file: "src/generator/dotnet/emit/dapper.ts",

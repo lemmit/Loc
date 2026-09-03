@@ -19,8 +19,8 @@ import {
 } from "../../ir/util/projection-aggregate.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
-import { responsePyType } from "./emit/http-models.js";
 import { refuseOutOfVocabulary } from "../_expr/target.js";
+import { responsePyType } from "./emit/http-models.js";
 import {
   contextFilterPredicate,
   lowerProjectionFilterToSqlAlchemy,
@@ -67,7 +67,9 @@ function conjoinPy(own: PyPredicate | null, caps: PyPredicate | null): PyPredica
  *  every row of the table from an endpoint the author scoped — a wrong answer
  *  that generates, compiles and boots clean. */
 function requireLowered(proj: ProjectionIR, pred: PyPredicate | null): PyPredicate {
-  return pred ?? refuseOutOfVocabulary("sqlalchemy-filter", `where-clause for projection '${proj.name}'`);
+  return (
+    pred ?? refuseOutOfVocabulary("sqlalchemy-filter", `where-clause for projection '${proj.name}'`)
+  );
 }
 
 export function buildPyQueryProjectionsFile(

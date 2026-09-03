@@ -368,7 +368,11 @@ export function renderJavaSpringDataRepository(
   const methodLines = finds.flatMap((f) => {
     if (f.params.length > 0) imports.add("org.springframework.data.repository.query.Param");
     imports.add("org.springframework.data.jpa.repository.Query");
-    const where = jpqlWhere(f.filter ? renderJpqlWhere(f.filter, { alias: "e", enumsPkg, mode: "jpql-spring-data" }) : null);
+    const where = jpqlWhere(
+      f.filter
+        ? renderJpqlWhere(f.filter, { alias: "e", enumsPkg, mode: "jpql-spring-data" })
+        : null,
+    );
     const declaredParams = f.params.map((p) => {
       collectJavaTypeImports(p.type, imports);
       return `@Param("${p.name}") ${renderJavaType(p.type)} ${p.name}`;
@@ -403,7 +407,9 @@ export function renderJavaSpringDataRepository(
       // impl passes Pageable.unpaged() for the bare run.  The `order by`
       // is baked into the JPQL (an unsorted Pageable leaves it alone).
       imports.add("org.springframework.data.domain.Pageable");
-      const where = jpqlWhere(renderJpqlWhere(r.where, { alias: "e", enumsPkg, mode: "jpql-spring-data" }));
+      const where = jpqlWhere(
+        renderJpqlWhere(r.where, { alias: "e", enumsPkg, mode: "jpql-spring-data" }),
+      );
       const params = r.params
         .map((p) => {
           collectJavaTypeImports(p.type, imports);
@@ -446,7 +452,11 @@ export function renderJavaSpringDataRepository(
     imports.add("org.springframework.data.jpa.repository.Query");
     imports.add("org.springframework.data.repository.query.Param");
     imports.add("java.util.Optional");
-    const writeClause = renderJpqlWhere(agg.writeScopeFilter, { alias: "e", enumsPkg, mode: "jpql-spring-data" });
+    const writeClause = renderJpqlWhere(agg.writeScopeFilter, {
+      alias: "e",
+      enumsPkg,
+      mode: "jpql-spring-data",
+    });
     writeOverride.push(
       `    @Query("select e from ${agg.name} e where e.id = :id and ${writeClause}")`,
       `    Optional<${agg.name}> findByIdForWrite(@Param("id") ${idClass} id);`,
@@ -529,7 +539,9 @@ export function renderJavaSpringDataRepository(
 function principalJpqlClause(agg: EnrichedAggregateIR, enumsPkg: string): string | null {
   const preds = (agg.contextFilters ?? []).filter(exprUsesCurrentUser);
   if (preds.length === 0) return null;
-  return preds.map((p) => `(${renderJpqlWhere(p, { alias: "e", enumsPkg, mode: "jpql-spring-data" })})`).join(" and ");
+  return preds
+    .map((p) => `(${renderJpqlWhere(p, { alias: "e", enumsPkg, mode: "jpql-spring-data" })})`)
+    .join(" and ");
 }
 
 export function renderJavaRepositoryImpl(

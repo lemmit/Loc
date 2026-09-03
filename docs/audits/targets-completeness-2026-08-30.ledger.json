@@ -2898,45 +2898,6 @@
       "P": 4
     },
     {
-      "id": "G2667-F2-render-mode-in-seam",
-      "title": "Architecture: make emission MODE part of the shared seam and refuse out-of-vocabulary constructs loudly (root cause of A1 + A8)",
-      "kind": "mission",
-      "class": null,
-      "confidence": "likely",
-      "targets": [
-        "java",
-        "dotnet",
-        "node",
-        "python",
-        "elixir"
-      ],
-      "fileTrees": [
-        "src/generator/_expr/target.ts",
-        "src/generator/java/render-jpql.ts",
-        "src/generator/dotnet/render-expr.ts"
-      ],
-      "evidence": [
-        {
-          "fleet": 1,
-          "id": "G2667-F2-render-mode-in-seam",
-          "text": "Recommended by register-only PR #2667 §F2. Grounded in A8 (render-jpql.ts:186-189 emits SpEL in a mode where SpEL is illegal, while dotnet/render-expr.ts:399-418 correctly gates on ctx.efQuery) and A1 (columns-vs-document mode guessed per arm)."
-        }
-      ],
-      "repro": null,
-      "impact": null,
-      "fix": "Add an explicit mode to RenderCtx (efQuery|principalAccessors; relational|document) and have the renderers THROW at generate time on a construct outside the active mode's vocabulary, the way _expr/target.ts already throws on authz-filter. Converts the next A1/A8 from a silent 500 into a one-line gate.",
-      "size": "M",
-      "sources": [
-        "fleet1:pr-registers"
-      ],
-      "related_to": [
-        "G2667-A1-document-shape-aggregation, G2667-A8-java-spel-prefilter-mode — the two concrete defects",
-        "adjacency: #2667 lands the A8/A1 point fixes in render-jpql.ts/_expr/target.ts; the mode-in-seam contract itself is not built"
-      ],
-      "securityClass": false,
-      "P": 4
-    },
-    {
       "id": "G2667-F3-one-ref-walker-per-ir-family",
       "title": "Architecture: one ref-walker per IR family, never hand-enumerated switches (root cause of A16 ×3 and A17)",
       "kind": "mission",
@@ -7404,6 +7365,13 @@
       "pr": "#2752 (wave 1, sweeper)",
       "sha": "6a0a6cd",
       "note": "Wave 1 sweeper: <DomainService>.<op>(...) arm added to typeOfPostfixChain; test/language/type-system/domainservice-requires-typing.test.ts."
+    },
+    {
+      "id": "G2667-F2-render-mode-in-seam",
+      "title": "Architecture: make emission MODE part of the shared seam and refuse out-of-vocabulary constructs loudly (root cause of A1 + A8)",
+      "pr": "#2770",
+      "sha": "5e1ad1c74",
+      "note": "fixed: src/generator/_expr/target.ts declares QueryEmissionMode + QUERY_EMISSION_VOCABULARY (per-mode accepted ExprIR.kind set) + refuseOutOfVocabulary, which every query-language renderer's out-of-vocabulary fallback routes through instead of an ad hoc per-arm throw (java/render-jpql.ts JpqlCtx.mode replaces the principalAccessors boolean flag this row names directly; sql-pg-expr.ts, dotnet/emit/dapper.ts whereToSql, python/find-predicate.ts requireLowered, typescript/repository-find-predicate.ts lowerToDrizzle route the same way; dotnet LINQ / Elixir Ecto document their reuse of the full ExprTarget for query positions). test/generator/_expr/emission-mode.test.ts is the census + vocabulary + reachability contract test, mutation-proved."
     }
   ],
   "conflicts": [

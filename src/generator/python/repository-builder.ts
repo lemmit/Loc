@@ -487,7 +487,10 @@ export function relationalFindMethod(
   // must REFUSE, not silently fall through as "no filter" — `requireLowered`
   // is what stops a validator gap here from becoming an unfiltered read.
   const pred = find.filter
-    ? requireLowered(`find '${find.name}' on '${agg.name}'`, lowerToSqlAlchemy(find.filter, agg, ctx))
+    ? requireLowered(
+        `find '${find.name}' on '${agg.name}'`,
+        lowerToSqlAlchemy(find.filter, agg, ctx),
+      )
     : conventionPredicate(agg, find);
   // Per-find capability filter — a `find … ignoring <Cap>`/`ignoring *` OMITS
   // the named capability predicate(s) for this method only (the bypass is
@@ -687,7 +690,10 @@ function viewFindMethod(
   // Same refusal discipline as `findQueryMethod` above — a declared
   // `view.filter` that fails to lower must not silently drop.
   const pred = view.filter
-    ? requireLowered(`query-time projection '${view.name}' on '${agg.name}'`, lowerToSqlAlchemy(view.filter, agg, ctx))
+    ? requireLowered(
+        `query-time projection '${view.name}' on '${agg.name}'`,
+        lowerToSqlAlchemy(view.filter, agg, ctx),
+      )
     : null;
   // A read `… ignoring <Cap>`/`ignoring *` OMITS the named capability
   // predicate(s) for this read only (baked in statically).

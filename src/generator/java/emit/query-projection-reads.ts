@@ -156,7 +156,12 @@ function aggregationScope(
   // raw JPQL through the EntityManager, not a Spring Data `@Query` method, so
   // a `currentUser.<claim>` member must bind as a plain `:name` parameter
   // (`principalAccessors`) rather than Spring Data SpEL — see `JpqlCtx.mode`.
-  const jpqlCtx: JpqlCtx = { alias: "e", enumsPkg, mode: "jpql-entity-manager", principalAccessors };
+  const jpqlCtx: JpqlCtx = {
+    alias: "e",
+    enumsPkg,
+    mode: "jpql-entity-manager",
+    principalAccessors,
+  };
   const filter = proj.query!.filter;
   const ownWhere = filter ? renderJpqlWhere(filter, jpqlCtx) : null;
   if (filter) collectJavaExprImports(filter, imports);

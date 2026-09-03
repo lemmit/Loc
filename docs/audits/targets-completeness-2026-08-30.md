@@ -10,20 +10,20 @@ Base: `main` @ 38580cd77 · built 2026-08-30 · claim map applied (PR #2667 = au
 
 | metric | value |
 |---|---|
-| open rows | **161** |
+| open rows | **160** |
 | P0 | 0 |
 | P1 | 9 |
 | P2 | 17 |
 | P3 | 32 |
-| P4 | 91 |
+| P4 | 90 |
 | P5 | 12 |
-| kind: silent / honest / breadth / mission / stale-prose | 26 / 32 / 26 / 65 / 12 |
-| confidence: proven / likely / suspected | 30 / 129 / 2 |
+| kind: silent / honest / breadth / mission / stale-prose | 26 / 32 / 26 / 64 / 12 |
+| confidence: proven / likely / suspected | 30 / 128 / 2 |
 | class: faulty-fix / regression | 1 / 0 |
-| size S / M / L | 44 / 70 / 47 |
-| provenance: fleet1-only / fleet2-only / corroborated by both | 144 / 16 / 1 |
+| size S / M / L | 44 / 69 / 47 |
+| provenance: fleet1-only / fleet2-only / corroborated by both | 143 / 16 / 1 |
 | claimed by an open PR | 64 |
-| done / merged | 128 |
+| done / merged | 129 |
 | conflicts | 10 |
 | checkedOk entries | 146 |
 | rows scheduled into waves | 134 across 13 packets |
@@ -118,7 +118,6 @@ Sorted P0 (security / data-integrity, silent, proven) → P1 (other silent prove
 | P4 | `G2667-C-looseends` | breadth | like | react, vue, svelte, angular, test harness, ci | M | 08-17 loose ends still open: Card variant/shadow honoured by 3 of 15 packs (C9); branch-protection up-to-date rule (B4/M-T9.7); no emitter ever produces a node@v4 project (C10 CI half); API versioning golden count rising (D5); runtime-gate parity manifest (E7) |
 | P4 | `G2667-C10-stmttarget-normalizations` | breadth | like | node, dotnet, java, python, elixir | M | 08-17 register #10: StmtTarget's three preserved inconsistencies stay un-normalized |
 | P4 | `G2667-D5-handler-atomicity-asymmetry` | mission | like | java, dotnet, node | M | Debt: handler atomicity asymmetry — java handlers are class-@Transactional, .NET/node commit per SaveAsync |
-| P4 | `G2667-F2-render-mode-in-seam` | mission | like | java, dotnet, node, python, elixir | M | Architecture: make emission MODE part of the shared seam and refuse out-of-vocabulary constructs loudly (root cause of A1 + A8) |
 | P4 | `G2667-F3-one-ref-walker-per-ir-family` | mission | like | elixir, python, java, dotnet | M | Architecture: one ref-walker per IR family, never hand-enumerated switches (root cause of A16 ×3 and A17) |
 | P4 | `G2667-F4-realtime-plan-contract` | mission | like | node, dotnet, java, python, elixir | M | Architecture: give realtime a plan-level contract (streams inherit deployable auth; durable events tee at write-time) |
 | P4 | `M-T1.10-phoenix-sse-no-rooms` | mission | like | elixir | M | M-T1.10 — the Phoenix SSE relay implements no tenant ROOMS: every tenant-scoped event degrades to a broadcast refetch ticket |
