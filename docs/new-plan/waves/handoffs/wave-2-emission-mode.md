@@ -70,6 +70,14 @@ necessary for "text lives in the catalog" to actually hold; low collision
 risk — a single array-literal entry). `test/system/diagnostic-catalog.test.ts`
 passes (10/10).
 
+`test/system/diagnostic-firing-census.test.ts` (M-T9.33) separately enumerates
+every catalog code and demands a `.ddd`-driven `validate()` fixture, an
+`UNREACHABLE_PINS` entry, or membership in the two frozen/shrink-only lists.
+`loom.query-emission-invalid` is not a `validate()` diagnostic at all (it
+fires from generator code the census's harness cannot drive), so it is pinned
+in `UNREACHABLE_PINS` with that reason, pointing back at this packet's own
+contract test for its real coverage. Passes (103/103).
+
 ## Hard gate 1 — byte-identical emission
 
 Generated `test/fixtures/corpus/*.ddd` (58) + `examples/*.ddd` (23) +
@@ -78,13 +86,23 @@ Generated `test/fixtures/corpus/*.ddd` (58) + `examples/*.ddd` (23) +
 before (`ee8c2f0ec`, a clean worktree checkout) and after (this branch,
 `5e1ad1c74`).
 
-- **`diff -r` over all 144 generated trees: empty.** <!-- FINAL_DIFF_RESULT -->
-- **`ddd parse` diagnostics: byte-identical** on every fixture (stdout compared
-  file-for-file). <!-- FINAL_PARSE_RESULT -->
-- **The new refusal never fires on the corpus** — confirmed by `generate`
-  exiting 0 on every fixture both before and after (a firing would abort
-  generation with a non-zero exit and a stack trace naming
-  `QueryEmissionRefusal`).
+- **File-set + content diff over all 144 generated trees: empty** after
+  normalizing two pre-existing, unrelated non-determinisms present on BOTH
+  base and head equally (verified they are the ONLY diffs before
+  normalization, on every one of the 13 fixtures that showed raw diffs): the
+  absolute checkout path embedded in dotnet's `#line` sourcemap directives
+  (base and head are two different checkout locations — an artifact of this
+  diff methodology, not codegen) and the crypto-random `SECRET_KEY_BASE` in
+  `docker-compose.yml` (regenerated every `generate system` run by design).
+  `generate.exitcode`: 0/0 mismatches across 144 fixtures. Script:
+  `<scratch>/diff-corpus.mjs` (not committed — scratch tooling).
+- **`ddd parse` diagnostics: byte-identical** on every fixture — 0/144
+  mismatches (`parse.log`, normalized only for the same checkout-path prefix).
+- **The new refusal never fires on the corpus** — confirmed both by `generate`
+  exiting 0 on every fixture on both sides (a firing would abort generation
+  non-zero with a `QueryEmissionRefusal` stack trace) and by the file-set
+  equality check above (a refusal mid-generation would leave a partial `gen/`
+  tree, which the file-set comparison would have caught).
 
 ## Hard gate 2 — census mutation-proved
 
@@ -176,8 +194,12 @@ the shape never appears in the corpus — see hard gate 1).
 - `npx tsc -b` — clean.
 - `npm run lint` (`biome ci .` after `biome check --write .` for formatting) — clean, 0 errors, 12 pre-existing warnings (none touch files in this packet's tree).
 - `npx vitest run test/generator/_expr test/generator/java test/generator/python test/generator/dotnet test/generator/typescript test/system/diagnostic-catalog.test.ts test/system/unsupported-register.test.ts` — **2338/2338 passed** (370 files).
+- `npx vitest run test/generator/elixir test/generator/elixir-vanilla` — 1200/1200 passed (doc-comment-only touch there; ran anyway).
+- `npx vitest run test/system/diagnostic-firing-census.test.ts` — 103/103 passed (after the `UNREACHABLE_PINS` addition).
+- `npx vitest run test/platform/pipeline-layering.test.ts test/platform/backend-packages-layering.test.ts` — 11/11 passed (confirms the new `src/generator/_expr/target.ts → src/diagnostics/messages.ts` import doesn't cross a banned layer — `diagnostics/` isn't one of the pipeline's tracked layers).
 - `npx vitest run test/generator/_expr/emission-mode.test.ts` — 35/35 passed (the packet's own contract test, in isolation).
-- Corpus byte-identical diff (hard gate 1) — see above.
+- Corpus byte-identical diff (hard gate 1) — see above: **BYTE-IDENTICAL: yes** (144/144 fixtures, 0 exit-code / parse.log / generated-tree mismatches after the two documented normalizations).
+- Did NOT run the full `npm test` (per instructions) or any docker compile leg (java/dotnet/elixir corpus builds) — the refusal fires before any target-language source is written on the "removed" side becoming reachable, so a compile leg would not exercise anything the reachability suite + hard gate 1 didn't already cover; see hard gate 3's note.
 
 ## Hand-offs
 
