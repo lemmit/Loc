@@ -100,6 +100,52 @@ test("Add a page: a system with no page at all gets one editable page from the e
   expect(source).toMatch(/ui \w+ \{[\s\S]*page Home \{/);
 });
 
+test("Model pane: the detail level hides summaries per view and persists; Overview names what uses a construct", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Sales System \(Hono/);
+  await page.getByTestId("doc-tab-model").click();
+  await expect(page.getByTestId("c4system-v2-pane")).toBeVisible({ timeout: 10_000 });
+
+  // Drill to the Sales context: its projection / repository nodes carry
+  // summary lines at Everything (the default).
+  await page.locator('.react-flow__node[data-id^="system:"]').first().click();
+  await page.locator('.react-flow__node[data-id^="subdomain:"]').first().click();
+  await page.locator('.react-flow__node[data-id^="context:"]').first().click();
+  await expect(page.getByTestId("c4system-v2-crumb-2")).toBeVisible();
+  const summaries = page.getByTestId("c4system-v2-summary");
+  await expect(summaries.first()).toBeVisible({ timeout: 10_000 });
+
+  const level = page.getByTestId("c4system-v2-detail-level");
+  await level.getByText("Names", { exact: true }).click();
+  await expect(summaries).toHaveCount(0);
+  // The construct nodes themselves are still there.
+  await expect(page.locator('.react-flow__node[data-id="aggregate:Order"]')).toBeVisible();
+
+  // Persisted per VIEW: the aggregate view starts at its own default …
+  await page.locator('.react-flow__node[data-id="aggregate:Order"]').click();
+  await expect(page.getByTestId("c4system-v2-crumb-3")).toBeVisible();
+  await expect(level.locator("input:checked")).toHaveValue("everything");
+  // … and the context view remembers Names on the way back.
+  await page.getByTestId("c4system-v2-crumb-2").click();
+  await expect(page.getByTestId("c4system-v2-crumb-3")).toHaveCount(0);
+  await expect(level.locator("input:checked")).toHaveValue("names");
+  await expect(summaries).toHaveCount(0);
+  await level.getByText("Everything", { exact: true }).click();
+  await expect(summaries.first()).toBeVisible();
+
+  // Overview: selecting the Sales context names what references it.
+  await page.getByTestId("c4system-v2-crumb-home").click();
+  await page.getByTestId("c4system-v2-overview-toggle").click();
+  await page.locator('.react-flow__node[data-id="context:Sales"]').click();
+  await expect(page.getByTestId("c4system-v2-overview-selected")).toHaveText("Sales");
+  const usedBy = page.getByTestId("c4system-v2-overview-usedby");
+  await expect(usedBy).toContainText("Used by");
+  await expect(usedBy).toContainText("deployable api");
+});
+
 test("no button in the Builder, Model or Requirements panes lacks an accessible name", async ({ page }) => {
   await page.goto("/");
   await waitForPlaygroundReady(page);
