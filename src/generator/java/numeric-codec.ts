@@ -38,12 +38,18 @@ export const JAVA_NUMERIC: NumericTarget = {
     // `Number` rather than a direct cast (the provider's runtime type
     // varies: `BigDecimal` for a `sum`, `Double` for an `avg`).
     "projection-read": (e) => `((Number) ${e}).doubleValue()`,
+    // A channel envelope's untyped `data` map value reconstructs into the
+    // domain `BigDecimal` the same way `String.valueOf` normalises a JSON
+    // number OR string entry before parsing.
+    "find-param": (e) => `new BigDecimal(String.valueOf(${e}))`,
   },
   int: {
     "projection-read": (e) => `((Number) ${e}).intValue()`,
+    "find-param": (e) => `((Number) ${e}).intValue()`,
   },
   long: {
     "projection-read": (e) => `((Number) ${e}).longValue()`,
+    "find-param": (e) => `((Number) ${e}).longValue()`,
   },
 };
 

@@ -2,7 +2,9 @@ import type { EventIR, SystemIR, TypeIR } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst } from "../../../util/naming.js";
 import type { BrokerBinding } from "../../_channels/bindings.js";
+import { numericEncode } from "../../_numeric/target.js";
 import { javaLogEvent } from "../../_obs/render-java.js";
+import { JAVA_NUMERIC } from "../numeric-codec.js";
 
 // ---------------------------------------------------------------------------
 // Broker transport classes (M-T4.4 slices 6b + 7c — the Java/Spring Boot leg
@@ -101,7 +103,13 @@ function toDataExpr(access: string, t: TypeIR): string {
   const inner = t.kind === "optional" ? t.inner : t;
   const conv = (): string | null => {
     if (inner.kind === "primitive" && inner.name === "datetime") return `${access}.toString()`;
-    if (inner.kind === "primitive" && inner.name === "money") return `${access}.toPlainString()`;
+    // money pins the FIXED wire scale (RS-12) — a bare `toPlainString()` echoes
+    // whatever scale the domain `BigDecimal` happens to carry (the write scale,
+    // an arithmetic result's scale), which need not be 4dp: the SAME class of
+    // divergence #2549 fixed for the REST wire, unfixed here until now (no
+    // corpus fixture exercises a money field on a channel payload — F18).
+    if (inner.kind === "primitive" && inner.name === "money")
+      return numericEncode(JAVA_NUMERIC, "money", "dto-map", access);
     if (inner.kind === "id") return `${access}.toString()`;
     if (inner.kind === "enum") return `${access}.name()`;
     return null;
@@ -126,17 +134,17 @@ function fromDataExpr(
       case "primitive":
         switch (inner.name) {
           case "int":
-            return `((Number) ${get}).intValue()`;
+            return numericEncode(JAVA_NUMERIC, "int", "find-param", get);
           case "long":
-            return `((Number) ${get}).longValue()`;
+            return numericEncode(JAVA_NUMERIC, "long", "find-param", get);
           case "bool":
             return `(Boolean) ${get}`;
           case "decimal":
             imports.add("java.math.BigDecimal");
-            return `new BigDecimal(String.valueOf(${get}))`;
+            return numericEncode(JAVA_NUMERIC, "decimal", "find-param", get);
           case "money":
             imports.add("java.math.BigDecimal");
-            return `new BigDecimal((String) ${get})`;
+            return numericEncode(JAVA_NUMERIC, "money", "find-param", `(String) ${get}`);
           case "datetime":
             imports.add("java.time.Instant");
             return `Instant.parse((String) ${get})`;

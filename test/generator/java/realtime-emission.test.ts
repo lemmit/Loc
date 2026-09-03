@@ -27,7 +27,7 @@ system RealtimeShop {
     }
     repository Shipments for Shipment { }
 
-    event OrderPlaced { order: Order id, at: datetime }
+    event OrderPlaced { order: Order id, at: datetime, amount: money }
     event ShipmentRequested { shipment: Shipment id, order: Order id, at: datetime }
 ${channel}
     workflow OrderFulfillment {
@@ -97,6 +97,13 @@ describe("realtime SSE wire — Java (delivery: broadcast)", () => {
     // camelCase wire payload with the `type` tag + unwrapped ids.
     expect(rc).toContain('m.put("type", "OrderPlaced");');
     expect(rc).toContain('m.put("order", e.order().value());');
+    // money on an SSE frame pins the FIXED RS-12 wire scale — the SAME
+    // encoding the REST wire applies (`domainToWire`) and NOT a bare
+    // `toPlainString()` echoing the domain `BigDecimal`'s own scale
+    // (M-T9.36 seam; a bare `toPlainString()` here is the un-fixed shape).
+    expect(rc).toContain(
+      'm.put("amount", e.amount().setScale(4, java.math.RoundingMode.HALF_UP).toPlainString());',
+    );
 
     // (c) The tee is the @EventListener on the always-published domain-event bus.
     expect(rc).toContain("@EventListener");
