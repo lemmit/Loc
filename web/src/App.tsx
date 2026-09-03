@@ -30,7 +30,20 @@ import type { AgentMessage } from "./agent/demo";
 // The `callTool` / `applyPatches` calls the plan gate makes are still reached
 // through `await import(...)` below, for exactly the reason above.
 import { buildPlan, exclusionPatches, isStructural, planIsEmpty } from "./agent/plan";
-import { attachTurnExtras, type TurnExtras, withTurnExtras } from "./agent/turn";
+import {
+  diagnosticKeys,
+  EMPTY_LOOP_GUARD,
+  type LoopGuardState,
+  recordFixTurn,
+  resetLoopGuard,
+  type StuckSignal,
+} from "./agent/loop-guard";
+import {
+  attachTurnExtras,
+  type TurnCheckpoint,
+  type TurnExtras,
+  withTurnExtras,
+} from "./agent/turn";
 // Type-only from `src/tools` too (`Complete` etc.) — no runtime edge; this
 // module's own body is small and provider-shaped.
 import { createOpenAiCompatibleComplete } from "./agent/openai-transport";
@@ -382,6 +395,16 @@ export default function App(): JSX.Element {
   // One-line feedback after a Restore from a chat message — which point it
   // landed on, or why it could not.
   const [agentRestoreNote, setAgentRestoreNote] = useState<string | null>(null);
+  // Loop guard (slice 5) — the streak state is a ref (it is folded once per
+  // turn, never rendered) and the STOP signal is state (it gates the composer
+  // and renders the "I'm stuck" card).
+  const loopGuardRef = useRef<LoopGuardState>(EMPTY_LOOP_GUARD);
+  const [agentStuck, setAgentStuck] = useState<StuckSignal | null>(null);
+  const agentStuckRef = useRef<StuckSignal | null>(null);
+  agentStuckRef.current = agentStuck;
+  // The newest turn whose write validated clean — where *Restore last green*
+  // goes.  Null until a turn produces one.
+  const [agentLastGreen, setAgentLastGreen] = useState<TurnCheckpoint | null>(null);
   // Live agent chat (M-T8.3): BYOK provider settings (persisted) + the raw
   // Anthropic-shaped transcript carried across turns.  `agentMessages` above is
   // the shared DISPLAY list (the demo and the live chat both render into it).
@@ -2125,14 +2148,18 @@ export default function App(): JSX.Element {
   }): Promise<void> {
     const sourceAfter = sourceRef.current;
     const { callTool } = await import("../../src/tools/index.js");
-    const countErrors = async (source: string): Promise<number> => {
-      const report = (await callTool("loom_validate", { source })) as ValidateReport;
-      return report.diagnostics.filter((d) => d.severity === "error").length;
-    };
+    const reportFor = async (source: string): Promise<ValidateReport> =>
+      (await callTool("loom_validate", { source })) as ValidateReport;
+    const errorsIn = (r: ValidateReport): number =>
+      r.diagnostics.filter((d) => d.severity === "error").length;
+
     // One validate when nothing was written — the same number on both sides is
     // the honest reading of "this turn changed no source".
-    const before = await countErrors(args.sourceBefore);
-    const after = args.sourceBefore === sourceAfter ? before : await countErrors(sourceAfter);
+    const beforeReport = await reportFor(args.sourceBefore);
+    const afterReport =
+      args.sourceBefore === sourceAfter ? beforeReport : await reportFor(sourceAfter);
+    const before = errorsIn(beforeReport);
+    const after = errorsIn(afterReport);
 
     const { foldReceipt } = await import("./agent/receipt");
     const receipt = foldReceipt({
@@ -2144,7 +2171,32 @@ export default function App(): JSX.Element {
       validator: { before, after },
       usage: args.usage,
     });
-    setAgentExtras((prev) => withTurnExtras(prev, args.turn, { receipt }));
+
+    // ---- the loop guard (slice 5) -------------------------------------
+    // A FIX TURN is one that began with errors on the board.  Anything else
+    // breaks the run of consecutive repairs, so the streak starts over.
+    let stuck: StuckSignal | null = null;
+    if (before > 0) {
+      loopGuardRef.current = recordFixTurn(
+        loopGuardRef.current,
+        diagnosticKeys(afterReport.diagnostics),
+      );
+      stuck = loopGuardRef.current.stuck;
+    } else {
+      loopGuardRef.current = resetLoopGuard();
+    }
+    setAgentStuck(stuck);
+
+    setAgentExtras((prev) =>
+      withTurnExtras(prev, args.turn, stuck ? { receipt, stuck } : { receipt }),
+    );
+
+    // The newest turn whose write validated clean is where *Restore last
+    // green* goes.  Read the checkpoint the same turn recorded.
+    if (after === 0) {
+      const cp = agentExtrasRef.current[args.turn]?.checkpoint;
+      if (cp) setAgentLastGreen(cp);
+    }
   }
 
   // Persist BYOK settings whenever they change.
@@ -2162,6 +2214,10 @@ export default function App(): JSX.Element {
     // without a real provider key.
     const injected = (window as unknown as { __loomAgentComplete?: Complete }).__loomAgentComplete;
     if (agentRunning || !text.trim()) return;
+    // The circuit breaker: while the loop guard has stopped, another fix turn
+    // is exactly what the research says burns credits for nothing.  One of the
+    // exit ramps has to clear it first.
+    if (agentStuckRef.current) return;
     if (!injected && !settingsReady(agentSettings)) return;
     agentSignalRef.current = { cancelled: false };
     agentTurnRef.current += 1;
@@ -2505,6 +2561,10 @@ export default function App(): JSX.Element {
     rejectAgentPlan,
     restoreAgentCheckpoint,
     dismissAgentRestoreNote: (): void => setAgentRestoreNote(null),
+    dismissAgentStuck: (): void => {
+      loopGuardRef.current = resetLoopGuard();
+      setAgentStuck(null);
+    },
     sendAgentMessage: (text: string): void => void sendAgentMessage(text),
     clearAgentChat,
     runGenerate: (): void => void runGenerate(true),
@@ -2599,6 +2659,8 @@ export default function App(): JSX.Element {
       agentRunning,
       agentPlanMode,
       agentRestoreNote,
+      agentStuck,
+      agentLastGreen,
       agentSettings,
       evolution,
       evolutionRunning,
@@ -2684,6 +2746,8 @@ export default function App(): JSX.Element {
       agentRunning,
       agentPlanMode,
       agentRestoreNote,
+      agentStuck,
+      agentLastGreen,
       agentSettings,
       evolution,
       evolutionRunning,

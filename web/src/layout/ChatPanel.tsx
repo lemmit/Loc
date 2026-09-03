@@ -21,6 +21,7 @@ import {
 } from "@mantine/core";
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import type { AgentMessage, AgentToolCall } from "../agent/demo";
+import type { StuckSignal } from "../agent/loop-guard";
 import type { PlanItem } from "../agent/plan";
 import { planSummary } from "../agent/plan";
 import { type AgentSettings, PROVIDER_PRESETS, presetById, settingsReady } from "../agent/provider";
@@ -28,7 +29,7 @@ import type { TurnReceipt } from "../agent/receipt";
 import { fileDeltaIsEmpty } from "../agent/receipt";
 import type { PlanCard as PlanCardData, TurnCheckpoint } from "../agent/turn";
 import type { LayoutCtx } from "./ctx";
-import { CHAT, CHECKPOINT, PLAN, RECEIPT } from "./vocabulary";
+import { CHAT, CHECKPOINT, PLAN, RECEIPT, STUCK } from "./vocabulary";
 
 // "Agent" dock tab — two modes over one shared transcript display:
 //   • the deterministic M-T8.3 wedge demo (prose → `.ddd` → generate → green),
@@ -174,7 +175,7 @@ export function ChatBody({ ctx }: { ctx: LayoutCtx }): JSX.Element {
           <Button
             onClick={submit}
             loading={agentRunning}
-            disabled={!ready || !input.trim()}
+            disabled={!ready || !input.trim() || ctx.agentStuck !== null}
             data-testid="agent-send"
           >
             {CHAT.send}
@@ -190,10 +191,16 @@ export function ChatBody({ ctx }: { ctx: LayoutCtx }): JSX.Element {
               data-testid="agent-plan-toggle"
             />
           </Tooltip>
-          {!ready && (
-            <Text size="xs" c="dimmed">
-              Live chat needs a provider + API key.
+          {ctx.agentStuck ? (
+            <Text size="xs" c="red" data-testid="agent-stuck-hint">
+              {STUCK.title} — {STUCK.body(ctx.agentStuck.code, ctx.agentStuck.node, ctx.agentStuck.turns)}
             </Text>
+          ) : (
+            !ready && (
+              <Text size="xs" c="dimmed">
+                Live chat needs a provider + API key.
+              </Text>
+            )
           )}
         </Group>
       </Box>
@@ -344,6 +351,7 @@ function ChatMessage({ m, ctx }: { m: AgentMessage; ctx: LayoutCtx }): JSX.Eleme
         {m.extras?.checkpoint && (
           <CheckpointRow cp={m.extras.checkpoint} ctx={ctx} />
         )}
+        {m.extras?.stuck && <StuckCard signal={m.extras.stuck} ctx={ctx} />}
       </Box>
     </Box>
   );
@@ -482,6 +490,87 @@ function PlanRow({
         </Text>
       )}
     </Group>
+  );
+}
+
+/** The circuit breaker (M-T8.19 slice 5; research §4 #13).
+ *
+ *  Three consecutive fix turns left the same `loom.*` code on the same node,
+ *  so the loop stops rather than spending another turn on it — the failure
+ *  every builder's users complain about.  A stop is only useful with an exit,
+ *  so the card carries all three the literature asks for: go back to something
+ *  that worked, shrink the request, or look at the problem yourself. */
+function StuckCard({ signal, ctx }: { signal: StuckSignal; ctx: LayoutCtx }): JSX.Element {
+  const green = ctx.agentLastGreen;
+  return (
+    <Box
+      mt={6}
+      p={8}
+      data-testid="agent-stuck"
+      style={{
+        borderRadius: 6,
+        background: "var(--mantine-color-body)",
+        border: "1px solid var(--mantine-color-red-filled)",
+      }}
+    >
+      <Group gap={6} mb={4} wrap="nowrap">
+        <Badge size="xs" variant="light" color="red">
+          {STUCK.title}
+        </Badge>
+        <Code style={{ fontSize: 11, background: "transparent" }}>{signal.code}</Code>
+      </Group>
+      <Text size="xs" mb={6}>
+        {STUCK.body(signal.code, signal.node, signal.turns)}
+      </Text>
+      <Group gap={6} wrap="wrap">
+        <Tooltip label={green ? STUCK.restoreGreenHint : STUCK.noGreen} withArrow>
+          <Button
+            size="compact-xs"
+            variant="light"
+            disabled={!green}
+            onClick={() => {
+              if (!green) return;
+              ctx.dismissAgentStuck();
+              ctx.restoreAgentCheckpoint(green.oid, green.point);
+            }}
+            data-testid="agent-stuck-restore-green"
+          >
+            {STUCK.restoreGreen}
+          </Button>
+        </Tooltip>
+        <Tooltip label={STUCK.narrowHint} withArrow>
+          <Button
+            size="compact-xs"
+            variant="light"
+            color="gray"
+            onClick={() => {
+              ctx.dismissAgentStuck();
+              ctx.askAgent(STUCK.narrowPrompt(signal.code, signal.node));
+            }}
+            data-testid="agent-stuck-narrow"
+          >
+            {STUCK.narrow}
+          </Button>
+        </Tooltip>
+        <Tooltip label={STUCK.openProblemHint} withArrow>
+          <Button
+            size="compact-xs"
+            variant="subtle"
+            color="gray"
+            onClick={() => {
+              ctx.dismissAgentStuck();
+              ctx.setOutputStream("problems");
+              if (ctx.isDesktop) ctx.setDockTab("output");
+              else ctx.setActiveTab("output");
+              ctx.stepProblem(1);
+            }}
+            data-testid="agent-stuck-open-problem"
+          >
+            {STUCK.openProblem}
+          </Button>
+        </Tooltip>
+      </Group>
+    </Box>
   );
 }
 

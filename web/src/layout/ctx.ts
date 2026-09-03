@@ -11,7 +11,9 @@
 
 import type { MutableRefObject, ReactNode } from "react";
 import type { AgentMessage } from "../agent/demo";
+import type { StuckSignal } from "../agent/loop-guard";
 import type { AgentSettings } from "../agent/provider";
+import type { TurnCheckpoint } from "../agent/turn";
 import type { EditorHandle, EditorRange } from "../editor/editor-handle";
 import type { LoomLspClient } from "../lsp/client";
 import type { LoomBuildClient } from "../build/client";
@@ -471,6 +473,15 @@ export interface LayoutCtx {
   /** One-line outcome of the last Restore from a chat message, or null. */
   agentRestoreNote: string | null;
   dismissAgentRestoreNote: () => void;
+  /** The loop guard's stop signal (M-T8.19 slice 5) — three consecutive fix
+   *  turns left the same diagnostic code on the same node.  While set, a send
+   *  is refused: another fix turn is what burns credits for nothing.  Cleared
+   *  by any of the exit ramps on the "I'm stuck" card. */
+  agentStuck: StuckSignal | null;
+  dismissAgentStuck: () => void;
+  /** The newest agent turn whose write validated clean — where *Restore last
+   *  green* goes.  Null until a turn produces one. */
+  agentLastGreen: TurnCheckpoint | null;
 
   // Actions
   runGenerate: () => void;

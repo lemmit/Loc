@@ -14,6 +14,7 @@
 
 import type { AgentMessage } from "./demo.js";
 import type { AgentPlan } from "./plan.js";
+import type { StuckSignal } from "./loop-guard.js";
 import type { TurnReceipt } from "./receipt.js";
 
 /** The plan card's lifecycle.  `pending` is the only state that blocks the
@@ -46,6 +47,9 @@ export interface TurnExtras {
   receipt?: TurnReceipt;
   /** The labelled commit this turn's write produced (slice 4). */
   checkpoint?: TurnCheckpoint;
+  /** The loop guard stopped here — three fix turns left the same diagnostic
+   *  on the same node (slice 5). */
+  stuck?: StuckSignal;
 }
 
 /** Graft `extras[n]` onto the LAST bubble of turn `n`.

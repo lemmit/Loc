@@ -284,6 +284,74 @@ test("live chat: the turn is a labelled commit, and Restore is itself undoable",
   ).toBeVisible({ timeout: 30_000 });
 });
 
+test("live chat: three fix turns on the same diagnostic stop the loop", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+
+  // A model that never validates.  Turn 1 writes it (the model was clean
+  // before, so that is not yet a repair); turns 2-4 each "fix" it back to the
+  // same broken shape — exactly the loop the circuit breaker exists for.
+  const broken = `context Ops {
+  aggregate Ticket { subject: NotAType }
+}
+`;
+  await page.evaluate((model) => {
+    (window as unknown as { __loomAgentComplete: unknown }).__loomAgentComplete = async ({
+      messages,
+    }: { messages: { role: string; content: { type: string }[] }[] }) => {
+      const last = messages[messages.length - 1];
+      if (last?.content.some((b) => b.type === "tool_result")) {
+        return { stop_reason: "end_turn", content: [{ type: "text", text: "Fixed it." }] };
+      }
+      return {
+        stop_reason: "tool_use",
+        content: [
+          { type: "text", text: "This should do it." },
+          { type: "tool_use", id: "v", name: "loom_validate", input: { source: model } },
+        ],
+      };
+    };
+  }, broken);
+
+  await page.getByTestId("devtools-tab-agent").click();
+
+  // Turn 1 — the only one that changes the model, so the only one gated.
+  await page.getByTestId("agent-input").fill("Attempt 1.");
+  await page.getByTestId("agent-send").click();
+  await expect(page.getByTestId("agent-plan")).toBeVisible({ timeout: 20_000 });
+  await page.getByTestId("agent-plan-approve").click();
+  await expect
+    .poll(async () => await readEditorSource(page), { timeout: 20_000 })
+    .toContain("NotAType");
+
+  // Turns 2-4: three consecutive repairs that leave the same code on the same
+  // node.  The third trips the guard.
+  for (let i = 2; i <= 4; i++) {
+    await expect(page.getByTestId("agent-input")).toBeEnabled({ timeout: 30_000 });
+    if (await page.getByTestId("agent-stuck").isVisible().catch(() => false)) break;
+    await page.getByTestId("agent-input").fill(`Attempt ${i}.`);
+    await page.getByTestId("agent-send").click();
+  }
+
+  const stuck = page.getByTestId("agent-stuck");
+  await expect(stuck).toBeVisible({ timeout: 30_000 });
+  await expect(stuck).toContainText("loom.");
+  await expect(stuck).toContainText("aggregate Ops.Ticket");
+  // All three exit ramps are offered, and the loop is actually stopped.
+  await expect(stuck.getByTestId("agent-stuck-restore-green")).toBeVisible();
+  await expect(stuck.getByTestId("agent-stuck-narrow")).toBeVisible();
+  await expect(stuck.getByTestId("agent-stuck-open-problem")).toBeVisible();
+  await page.getByTestId("agent-input").fill("One more go.");
+  await expect(page.getByTestId("agent-send")).toBeDisabled();
+
+  // *Narrow the ask* is the ramp back: it clears the stop and prefills a
+  // smaller request.
+  await stuck.getByTestId("agent-stuck-narrow").click();
+  await expect(page.getByTestId("agent-stuck-hint")).toBeHidden();
+  await expect(page.getByTestId("agent-input")).toHaveValue(/^Only fix loom\./);
+  await expect(page.getByTestId("agent-send")).toBeEnabled();
+});
+
 test("live chat: settings gear configures a BYOK provider", async ({ page }) => {
   await page.goto("/");
   await waitForPlaygroundReady(page);
