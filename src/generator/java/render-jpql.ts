@@ -11,6 +11,7 @@ import {
 import { intrinsicFor, intrinsicKey } from "../../util/intrinsics.js";
 import type { DurationUnit } from "../../util/temporal.js";
 import { javaSubtreeLikePattern, spelSubtreeLikePattern } from "../_expr/subtree-like.js";
+import { refuseOutOfVocabulary } from "../_expr/target.js";
 
 // ---------------------------------------------------------------------------
 // Find-filter → JPQL renderer.  Spring Data derived method names can't
@@ -41,13 +42,36 @@ export interface JpqlCtx {
   alias: string;
   /** Fully-qualified package of the generated enums (for enum literals). */
   enumsPkg: string;
-  /** When present, a `currentUser.<claim>` reference renders as a PLAIN JPQL
-   *  named parameter (`:__cuTenantId`) instead of the Spring Data SpEL bean
-   *  form, and the accessor it needs is recorded here for the caller to bind.
-   *  `EntityManager.createQuery` has no SpEL layer — `:#{…}` is not a legal
-   *  parameter name there — so the reads that build JPQL directly (query-time
-   *  projection aggregations) bind the principal themselves. */
+  /** Declared `QueryEmissionMode` (§F2, Wave 2 packet 2.4) — which of the two
+   *  JPQL sub-languages this render targets.  Both modes accept the same
+   *  `ExprIR.kind` vocabulary (`QUERY_EMISSION_VOCABULARY["jpql-*"]`); they
+   *  diverge ONLY in how a `currentUser.<claim>` member renders (see
+   *  `renderPrincipal` / `renderSubtreeLikePattern`), which is why this is a
+   *  mode rather than a second vocabulary table.  Defaults to
+   *  `"jpql-spring-data"` when omitted (every existing call site but the
+   *  query-projection aggregation reads) so the default stays
+   *  byte-identical. */
+  mode?: "jpql-spring-data" | "jpql-entity-manager";
+  /** Populated (by the renderer) with every `currentUser.<claim>` accessor
+   *  (or `subtreeLike:<accessor>` derived pattern) read while rendering, when
+   *  `mode === "jpql-entity-manager"`.  `EntityManager.createQuery` has no
+   *  SpEL layer — `:#{…}` is not a legal parameter name there — so the reads
+   *  that build JPQL directly (query-time projection aggregations) bind the
+   *  principal themselves, off this set.  Ignored (and need not be supplied)
+   *  under `"jpql-spring-data"`. */
   principalAccessors?: Set<string>;
+}
+
+/** True when `ctx` targets the plain `EntityManager.createQuery` sub-mode —
+ *  the one JPQL rendering decision the two sub-modes disagree on.  The
+ *  `principalAccessors` branch this packet was named for (§F2) is now a
+ *  CONSUMER of the declared mode rather than the mode itself: presence of the
+ *  accessor set used to BE the flag, so a caller in entity-manager mode that
+ *  forgot to allocate one silently fell back to SpEL (illegal outside Spring
+ *  Data — `:#{…}` throws at `createQuery` parse time).  Mode is now the
+ *  source of truth; the set is just where bindings land. */
+function isEntityManagerMode(ctx: JpqlCtx): boolean {
+  return ctx.mode === "jpql-entity-manager";
 }
 
 /** Marker prefix for a recorded binding that is not a bare claim read but the
@@ -88,8 +112,8 @@ export function principalBindExpr(entry: string, principalVar: string): string {
  *  parameter when the caller opted into `principalAccessors`, else the Spring
  *  Data SpEL bean read. */
 function renderPrincipal(accessor: string, ctx: JpqlCtx): string {
-  if (ctx.principalAccessors) {
-    ctx.principalAccessors.add(accessor);
+  if (isEntityManagerMode(ctx)) {
+    ctx.principalAccessors?.add(accessor);
     return `:${principalParamName(accessor)}`;
   }
   return `:#{@${CURRENT_USER_BEAN}.user()?.${accessor}()}`;
@@ -107,9 +131,9 @@ function renderPrincipal(accessor: string, ctx: JpqlCtx): string {
  *     `setParameter` site, exactly as the plain claims already are.
  *     (The .NET twin splits the same way on `ctx.efQuery`.) */
 function renderSubtreeLikePattern(accessor: string, ctx: JpqlCtx): string {
-  if (ctx.principalAccessors) {
+  if (isEntityManagerMode(ctx)) {
     const entry = `${SUBTREE_LIKE_BIND}${accessor}`;
-    ctx.principalAccessors.add(entry);
+    ctx.principalAccessors?.add(entry);
     return `:${principalParamName(entry)}`;
   }
   return `:#{${spelSubtreeLikePattern(`@${CURRENT_USER_BEAN}.user()?.${accessor}()`)}}`;
@@ -241,7 +265,7 @@ function render(e: ExprIR, ctx: JpqlCtx): string {
         }
         default: {
           const _exhaustive: never = e.filter;
-          throw unsupported(`authz-filter kind '${(_exhaustive as { kind: string }).kind}'`);
+          throw unsupported(ctx, `authz-filter kind '${(_exhaustive as { kind: string }).kind}'`);
         }
       }
     }
@@ -277,10 +301,10 @@ function render(e: ExprIR, ctx: JpqlCtx): string {
           );
         }
       }
-      throw unsupported(`method call '${e.member}'`);
+      throw unsupported(ctx, `method call '${e.member}'`);
     }
     default:
-      throw unsupported(`expression kind '${e.kind}'`);
+      throw unsupported(ctx, `expression kind '${e.kind}'`);
   }
 }
 
@@ -309,7 +333,7 @@ function renderRef(e: Extract<ExprIR, { kind: "ref" }>, ctx: JpqlCtx): string {
       // JPQL enum literals must be fully qualified.
       return `${ctx.enumsPkg}.${e.enumName}.${e.name}`;
     default:
-      throw unsupported(`ref kind '${e.refKind}' ('${e.name}')`);
+      throw unsupported(ctx, `ref kind '${e.refKind}' ('${e.name}')`);
   }
 }
 
@@ -421,8 +445,11 @@ function jpqlOp(op: string): string {
   }
 }
 
-function unsupported(what: string): Error {
-  return new Error(
-    `JPQL renderer: ${what} is outside the queryable subset — the IR validator should have rejected this filter.`,
-  );
+/** Route a JPQL out-of-vocabulary construct through the shared
+ *  `QueryEmissionRefusal` (§F2, Wave 2 packet 2.4) — `ctx.mode` defaults to
+ *  `"jpql-spring-data"` (both sub-modes share the same vocabulary, so the
+ *  choice only affects the diagnostic's `mode` field, never whether it
+ *  fires). */
+function unsupported(ctx: JpqlCtx, what: string): never {
+  refuseOutOfVocabulary(ctx.mode ?? "jpql-spring-data", what);
 }

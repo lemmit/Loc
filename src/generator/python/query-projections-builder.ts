@@ -20,6 +20,7 @@ import {
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
 import { responsePyType } from "./emit/http-models.js";
+import { refuseOutOfVocabulary } from "../_expr/target.js";
 import {
   contextFilterPredicate,
   lowerProjectionFilterToSqlAlchemy,
@@ -66,13 +67,7 @@ function conjoinPy(own: PyPredicate | null, caps: PyPredicate | null): PyPredica
  *  every row of the table from an endpoint the author scoped — a wrong answer
  *  that generates, compiles and boots clean. */
 function requireLowered(proj: ProjectionIR, pred: PyPredicate | null): PyPredicate {
-  if (!pred) {
-    throw new Error(
-      `internal: where-clause for projection '${proj.name}' could not lower to SQLAlchemy, ` +
-        "but the validator should have caught this. Please file a bug.",
-    );
-  }
-  return pred;
+  return pred ?? refuseOutOfVocabulary("sqlalchemy-filter", `where-clause for projection '${proj.name}'`);
 }
 
 export function buildPyQueryProjectionsFile(

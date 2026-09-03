@@ -1,3 +1,4 @@
+import { diagMessage } from "../../diagnostics/messages.js";
 import { unionInstanceName, variantTag } from "../../ir/stdlib/unions.js";
 import type { ExprIR, LiteralKind } from "../../ir/types/loom-ir.js";
 import type { OriginRef } from "../../ir/types/origin.js";
@@ -340,6 +341,232 @@ export function renderExprWith<Ctx extends ExprCtxBase>(
         "renderExprWith: 'authz-filter' must be handled by the backend's query-filter translator, not the generic expression dispatcher",
       );
   }
+}
+
+// ---------------------------------------------------------------------------
+// Emission mode (§F2, Wave 2 packet 2.4) — a declared vocabulary for the
+// QUERY-LANGUAGE renderers.
+//
+// The `ExprTarget` above is the DOMAIN-LOGIC contract: a general-purpose host
+// language accepting the full `ExprIR` surface (that is what the 17-arm
+// switch in `renderExprWith` is for).  A second family of renderers is much
+// narrower — `java/render-jpql.ts` (JPQL, a foreign query-string language),
+// `sql-pg-expr.ts` (raw Postgres SQL, migration backfills),
+// `dotnet/emit/dapper.ts` `whereToSql` (raw Postgres SQL again, hand-rolled),
+// `python/find-predicate.ts` `lowerToSqlAlchemy` (SQLAlchemy Core's operator
+// vocabulary, distinct from plain Python `renderPyExpr`), and
+// `typescript/repository-find-predicate.ts` `lowerToDrizzle` (Drizzle's
+// function-call operator vocabulary, distinct from plain TS) each translate a
+// NARROW, validator-gated subset of `ExprIR` into their target query
+// language.  Two more backends reuse the FULL domain-logic `ExprTarget`
+// itself for query positions rather than a separate narrow renderer —
+// dotnet's `CsRenderContext.efQuery` flag (EF Core LINQ translates nearly the
+// whole C# surface the domain-logic target already emits) and Elixir's Ecto
+// `where:` fragments (Ecto queries are themselves valid Elixir syntax, so the
+// same `ELIXIR_TARGET` table serves both) — their `QueryEmissionMode`
+// vocabulary is deliberately the FULL kind set (see `ALL_EXPR_KINDS` below);
+// what narrows them is the IR-validate-phase `firstNonQueryableNode` gate,
+// not a renderer-level refusal.
+//
+// Each such renderer used to decide "is this construct in my vocabulary" with
+// its own per-arm `if`/`default: throw new Error(...)`, undeclared anywhere
+// outside that renderer's own source (the java `principalAccessors` branch
+// this packet was named for is one instance of the pattern, not the only
+// one).  `QueryEmissionMode` names each renderer's target sub-language;
+// `QUERY_EMISSION_VOCABULARY` declares, ONCE, which `ExprIR.kind`s each mode
+// accepts; and `refuseOutOfVocabulary` is the one place that turns "this
+// construct isn't in my vocabulary" into a coded `loom.*` refusal instead of
+// a bare, ad hoc `Error`.
+//
+// The IR validator (`firstNonQueryableNode` and its per-backend callers) is
+// what actually keeps an ordinary `.ddd` program off this path — reaching a
+// refusal is a validator gap or a compiler bug, never a user mistake, which
+// is why the diagnostic carries the `-invalid` suffix (deliberately refused,
+// not a `-unsupported` backlog item — see the classification note atop
+// `src/diagnostics/unsupported-register.ts`).
+//
+// `test/generator/_expr/emission-mode.test.ts` is the completeness gate: a
+// CENSUS confirms every query-language renderer in `QUERY_EMISSION_RENDERERS`
+// references `refuseOutOfVocabulary` with its declared mode (an undeclared
+// one fails naming file:line), and a VOCABULARY suite pins each mode's
+// accepted `kinds` and asserts every kind outside it is refused.
+// ---------------------------------------------------------------------------
+
+/** Every `ExprIR.kind` a DOMAIN-LOGIC position accepts — the full set
+ *  `renderExprWith` dispatches, minus `action-ref` (a UI-only marker that is
+ *  never valid in a domain expression — see the `renderExprWith` arm above).
+ *  The two query-language modes that reuse the full domain-logic target for
+ *  query positions (dotnet LINQ, Elixir Ecto) vocabulary to this whole set. */
+export const ALL_EXPR_KINDS: ReadonlySet<ExprIR["kind"]> = new Set([
+  "literal",
+  "this",
+  "id",
+  "ref",
+  "member",
+  "method-call",
+  "call",
+  "lambda",
+  "new",
+  "object",
+  "paren",
+  "unary",
+  "binary",
+  "ternary",
+  "convert",
+  "duration",
+  "i18nFormat",
+  "match",
+  "list",
+  "authz-filter",
+]);
+
+export const QUERY_EMISSION_MODES = [
+  /** Spring Data `@Query` JPQL — `currentUser.<claim>` reads render as a
+   *  SpEL bean expression (`:#{@currentUserAccessor.user()?.<claim>()}`). */
+  "jpql-spring-data",
+  /** Raw `EntityManager.createQuery(jpql)` — no SpEL layer, so
+   *  `currentUser.<claim>` reads instead render as a plain `:name` bind
+   *  parameter the caller `setParameter`s off `JpqlCtx.principalAccessors`. */
+  "jpql-entity-manager",
+  /** `sql-pg-expr.ts` — a `migration` block's `backfillColumn` scalar SQL. */
+  "sql-postgres-migration",
+  /** dotnet `emit/dapper.ts` `whereToSql` — hand-rolled raw Postgres SQL for
+   *  the `persistence: dapper` adapter's finds/retrievals/criteria. */
+  "sql-dapper",
+  /** dotnet EF Core LINQ (`CsRenderContext.efQuery`) — reuses the full
+   *  domain-logic `CS_TARGET_EF`; vocabulary is `ALL_EXPR_KINDS`. */
+  "linq-efcore",
+  /** python `find-predicate.ts` `lowerToSqlAlchemy` / the workflow and
+   *  projection-filter siblings in the same file — SQLAlchemy Core's
+   *  operator-overload vocabulary. */
+  "sqlalchemy-filter",
+  /** node `repository-find-predicate.ts` `lowerToDrizzle` — Drizzle's
+   *  function-call operator vocabulary (`eq`/`and`/`or`/…). */
+  "drizzle-predicate",
+  /** Elixir Ecto `where:` fragments — reuses the full domain-logic
+   *  `ELIXIR_TARGET`/`renderExpr` (Ecto queries are valid Elixir syntax);
+   *  vocabulary is `ALL_EXPR_KINDS`. */
+  "ecto-fragment",
+] as const;
+
+export type QueryEmissionMode = (typeof QUERY_EMISSION_MODES)[number];
+
+/** The vocabulary one `QueryEmissionMode` accepts: which top-level
+ *  `ExprIR.kind` arms the renderer implements.  A construct whose `kind` is
+ *  outside this set is out of vocabulary for the mode and must be refused
+ *  (see `refuseOutOfVocabulary`) rather than silently falling through to a
+ *  general renderer that emits something that compiles nowhere. */
+export interface EmissionVocabulary {
+  kinds: ReadonlySet<ExprIR["kind"]>;
+}
+
+/** JPQL's vocabulary (`java/render-jpql.ts`'s `render` switch): literal /
+ *  this / id / ref / member / paren / unary / binary / authz-filter /
+ *  method-call (membership + queryable scalar intrinsics only — see
+ *  `JPQL_INTRINSIC_SQL`).  Identical for both JPQL sub-modes; they diverge
+ *  only in HOW a `currentUser.<claim>` member renders, not in which `kind`s
+ *  are accepted. */
+const JPQL_KINDS: ReadonlySet<ExprIR["kind"]> = new Set([
+  "literal",
+  "this",
+  "id",
+  "ref",
+  "member",
+  "paren",
+  "unary",
+  "binary",
+  "authz-filter",
+  "method-call",
+]);
+
+/** `sql-pg-expr.ts`'s `renderSqlScalarExpr` switch. */
+const SQL_MIGRATION_KINDS: ReadonlySet<ExprIR["kind"]> = new Set([
+  "literal",
+  "ref",
+  "paren",
+  "unary",
+  "binary",
+  "ternary",
+]);
+
+/** dotnet `emit/dapper.ts`'s `whereToSql` switch. */
+const SQL_DAPPER_KINDS: ReadonlySet<ExprIR["kind"]> = new Set([
+  "paren",
+  "unary",
+  "binary",
+  "method-call",
+  "member",
+  "ref",
+  "authz-filter",
+  "literal",
+]);
+
+/** python `find-predicate.ts`'s `lower` switch (the shape `lowerToSqlAlchemy`
+ *  / `lowerWorkflowFilterToSqlAlchemy` / `lowerProjectionFilterToSqlAlchemy`
+ *  all recurse through). */
+const SQLALCHEMY_KINDS: ReadonlySet<ExprIR["kind"]> = new Set([
+  "literal",
+  "this",
+  "id",
+  "ref",
+  "member",
+  "paren",
+  "unary",
+  "binary",
+  "authz-filter",
+  "method-call",
+]);
+
+/** node `repository-find-predicate.ts`'s `lowerToDrizzle` switch. */
+const DRIZZLE_KINDS: ReadonlySet<ExprIR["kind"]> = new Set([
+  "literal",
+  "this",
+  "id",
+  "ref",
+  "member",
+  "paren",
+  "unary",
+  "binary",
+  "authz-filter",
+  "method-call",
+]);
+
+export const QUERY_EMISSION_VOCABULARY: Record<QueryEmissionMode, EmissionVocabulary> = {
+  "jpql-spring-data": { kinds: JPQL_KINDS },
+  "jpql-entity-manager": { kinds: JPQL_KINDS },
+  "sql-postgres-migration": { kinds: SQL_MIGRATION_KINDS },
+  "sql-dapper": { kinds: SQL_DAPPER_KINDS },
+  "linq-efcore": { kinds: ALL_EXPR_KINDS },
+  "sqlalchemy-filter": { kinds: SQLALCHEMY_KINDS },
+  "drizzle-predicate": { kinds: DRIZZLE_KINDS },
+  "ecto-fragment": { kinds: ALL_EXPR_KINDS },
+};
+
+/** A construct outside its `QueryEmissionMode`'s declared vocabulary reached
+ *  a query-language renderer.  Carries the `loom.query-emission-invalid`
+ *  code (its wording lives in `src/diagnostics/messages.ts`) — the
+ *  `-invalid` suffix marks it "deliberately refused", not `-unsupported`
+ *  backlog work: `firstNonQueryableNode` (or a backend-specific queryable
+ *  gate) is what keeps a valid `.ddd` program off this path, so reaching it
+ *  is a validator gap or a compiler bug, never a user mistake. */
+export class QueryEmissionRefusal extends Error {
+  readonly code = "loom.query-emission-invalid" as const;
+  readonly mode: QueryEmissionMode;
+  readonly what: string;
+  constructor(mode: QueryEmissionMode, what: string) {
+    super(diagMessage("loom.query-emission-invalid", { mode, what }));
+    this.name = "QueryEmissionRefusal";
+    this.mode = mode;
+    this.what = what;
+  }
+}
+
+/** The one place every query-language renderer's `default:` / unsupported
+ *  fallback routes through.  `what` is free text describing the offending
+ *  construct (e.g. `` expression kind 'call' `` or `` method call 'foo' ``),
+ *  matching the wording each renderer already threw by hand. */
+export function refuseOutOfVocabulary(mode: QueryEmissionMode, what: string): never {
+  throw new QueryEmissionRefusal(mode, what);
 }
 
 // ---------------------------------------------------------------------------

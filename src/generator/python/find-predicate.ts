@@ -22,6 +22,7 @@ import { snake } from "../../util/naming.js";
 import type { DurationUnit } from "../../util/temporal.js";
 import { desugarAuthzFilterInApp } from "../_expr/authz-filter-inapp.js";
 import { pySubtreeLikePattern } from "../_expr/subtree-like.js";
+import { refuseOutOfVocabulary } from "../_expr/target.js";
 import { joinRowClassName, rowClassName } from "./py-columns.js";
 import { PY_INTRINSIC_RENDERERS, renderPyExpr } from "./render-expr.js";
 
@@ -33,10 +34,26 @@ import { PY_INTRINSIC_RENDERERS, renderPyExpr } from "./render-expr.js";
 // sub-columns, enum values, parameters, literals, and
 // `<refColl>.contains(x)` join-table membership (correlated EXISTS).
 //
-// The Python mirror of `lowerToDrizzle` / the .NET LINQ lowering —
-// lowering never silently drops a predicate because the validator
-// gated the expression shape first.
+// The Python mirror of `lowerToDrizzle` / the .NET LINQ lowering.  Declared
+// `QueryEmissionMode` (§F2, Wave 2 packet 2.4): `"sqlalchemy-filter"` — the
+// internal `lower`/`lowerOver` walk returns `null` (not a throw) for a shape
+// it can't lower, exactly like `lowerToDrizzle`; a caller that has an actual
+// declared filter in hand MUST route a `null` result through
+// `requireLowered` below rather than treating it as "no filter" — two call
+// sites (`findQueryMethod`, `viewFindMethod` in repository-builder.ts) used
+// to do the latter, which silently emitted a `WHERE` clause that dropped the
+// filter instead of refusing (found by this packet; see the hand-off note).
 // ---------------------------------------------------------------------------
+
+/** `pred` is a lowered predicate for a filter/`where` clause that IS declared
+ *  (the caller already checked presence) — `null` here means `lowerOver`
+ *  could not translate it to SQLAlchemy, which the IR validator
+ *  (`firstNonQueryableNode`) should have rejected upstream.  Refuses loudly
+ *  (`QUERY_EMISSION_MODES["sqlalchemy-filter"]`) instead of letting the
+ *  caller silently drop the filter — see the module doc comment above. */
+export function requireLowered(what: string, pred: PyPredicate | null): PyPredicate {
+  return pred ?? refuseOutOfVocabulary("sqlalchemy-filter", `where-clause for ${what}`);
+}
 
 export interface PyPredicate {
   expr: string;

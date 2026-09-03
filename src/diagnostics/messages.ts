@@ -3087,6 +3087,18 @@ export const DIAGNOSTIC_MESSAGES = {
   // ----------------------------------------------------------------------
   "loom.ir-internal#generation": (p: { err: unknown }) =>
     `IR phase failed before generation: ${p.err}`,
+
+  // ----------------------------------------------------------------------
+  // src/generator/_expr/target.ts — QueryEmissionRefusal (§F2, Wave 2
+  // packet 2.4).  A construct outside a query-language renderer's declared
+  // vocabulary (see QUERY_EMISSION_VOCABULARY) reached codegen — a validator
+  // gap or a compiler bug, never a user mistake (the IR validator's
+  // `firstNonQueryableNode`, or a backend-specific queryable gate, is what
+  // keeps an ordinary `.ddd` program off this path).
+  // ----------------------------------------------------------------------
+  "loom.query-emission-invalid": (p: { mode: unknown; what: unknown }) =>
+    `${p.mode}: ${p.what} is outside the declared query-emission vocabulary — ` +
+    `the IR validator should have rejected this filter before codegen reached it.`,
 } satisfies Record<string, MessageEntry>;
 
 type Catalog = typeof DIAGNOSTIC_MESSAGES;

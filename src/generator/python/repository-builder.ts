@@ -53,6 +53,7 @@ import {
   type FilterBypass,
   lowerToSqlAlchemy,
   type PyPredicate,
+  requireLowered,
   writeScopeDeniesAll,
   writeScopePredicate,
 } from "./find-predicate.js";
@@ -482,8 +483,11 @@ export function relationalFindMethod(
   // currentUser-scoped finds take the actor as the trailing parameter;
   // the predicate renders `current_user.<claim>` as a plain bind value.
   if (findUsesCurrentUser(find)) params.push("current_user: User");
+  // §F2 (Wave 2 packet 2.4): a DECLARED `find.filter` that fails to lower
+  // must REFUSE, not silently fall through as "no filter" — `requireLowered`
+  // is what stops a validator gap here from becoming an unfiltered read.
   const pred = find.filter
-    ? lowerToSqlAlchemy(find.filter, agg, ctx)
+    ? requireLowered(`find '${find.name}' on '${agg.name}'`, lowerToSqlAlchemy(find.filter, agg, ctx))
     : conventionPredicate(agg, find);
   // Per-find capability filter — a `find … ignoring <Cap>`/`ignoring *` OMITS
   // the named capability predicate(s) for this method only (the bypass is
@@ -680,7 +684,11 @@ function viewFindMethod(
 ): string {
   const root = rowClassName(tableOwnerName(agg, ctx.aggregates));
   const kind = discriminatorValue(agg, ctx.aggregates);
-  const pred = view.filter ? lowerToSqlAlchemy(view.filter, agg, ctx) : null;
+  // Same refusal discipline as `findQueryMethod` above — a declared
+  // `view.filter` that fails to lower must not silently drop.
+  const pred = view.filter
+    ? requireLowered(`query-time projection '${view.name}' on '${agg.name}'`, lowerToSqlAlchemy(view.filter, agg, ctx))
+    : null;
   // A read `… ignoring <Cap>`/`ignoring *` OMITS the named capability
   // predicate(s) for this read only (baked in statically).
   const methodFilterPred =
@@ -716,13 +724,10 @@ function runMethod(
   // When an inline `ignoring` call-site reaches this retrieval, OMIT the
   // bypassed capability predicate(s) (the union across sites — baked in).
   const methodFilterPred = bypass ? contextFilterPredicate(agg, ctx, bypass) : filterPred;
-  const pred = lowerToSqlAlchemy(retrieval.where, agg, ctx);
-  if (!pred) {
-    throw new Error(
-      `internal: where-clause for retrieval '${retrieval.name}' on '${agg.name}' could not ` +
-        "lower to SQLAlchemy, but validateRetrievals should have caught this.",
-    );
-  }
+  const pred = requireLowered(
+    `retrieval '${retrieval.name}' on '${agg.name}'`,
+    lowerToSqlAlchemy(retrieval.where, agg, ctx),
+  );
   const orderBy =
     retrieval.sort.length > 0
       ? `.order_by(${retrieval.sort

@@ -57,6 +57,16 @@ function catalogedSources(): string[] {
   out.push(path.join("src", "macros", "expander.ts"));
   out.push(path.join("src", "api", "evolve.ts"));
   out.push(path.join("src", "api", "index.ts"));
+  // QueryEmissionRefusal (§F2, Wave 2 packet 2.4) is a generation-time
+  // (phase ⑧) diagnostic raised inside a query-language renderer, not a
+  // validate-phase (④/⑦) check — its `loom.query-emission-invalid` message
+  // lives in the catalog like every other coded diagnostic, so its one
+  // `diagMessage(...)` call site is scanned here too (the object-literal /
+  // Langium `accept()` shapes `sitesIn` looks for don't match a thrown
+  // `Error`, so this only satisfies the orphan check, not the other three
+  // invariants — appropriate, since this is a defensive backstop the IR
+  // validator is meant to make unreachable, not a validator call site).
+  out.push(path.join("src", "generator", "_expr", "target.ts"));
   return out;
 }
 
