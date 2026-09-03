@@ -28,6 +28,7 @@ import {
   aggregatesNeedConcurrency,
 } from "../../ir/util/aggregate-flags.js";
 import { apiResourceBindings } from "../../ir/util/api-resource-binding.js";
+import { deriveContextOperations, staticSubpathRoutes } from "../../ir/util/api-surface.js";
 import { durableEventTypes } from "../../ir/util/channels.js";
 import { directParentOf } from "../../ir/util/containment-parent.js";
 import { aggregateHasFileField } from "../../ir/util/file-field.js";
@@ -63,7 +64,11 @@ import type {
 } from "./adapters/by-layer-layout.js";
 import { emitJavaResourceFiles, javaResourceClassName } from "./adapters/resource-clients.js";
 import { inlineRunBypassesByRetrieval, promotedCapabilities } from "./capability-filter.js";
-import { renderApiExceptionAdvice, renderJavaController } from "./emit/api.js";
+import {
+  renderApiExceptionAdvice,
+  renderJavaController,
+  renderStaticSubpathMethodFilter,
+} from "./emit/api.js";
 import {
   contextsHaveAudit,
   renderAuditRecordEntity,
@@ -492,6 +497,19 @@ function emitProjectFromContexts(
       validationMessages.length > 0,
     ),
   );
+  // F18 — a wrong verb on a static sub-path (`DELETE /api/customers/by_email`)
+  // is swallowed by the sibling `{id}` route and answered 422 by its converter.
+  // The guard runs before handler mapping and answers the honest 405 + `Allow`.
+  // Emitted only when the model HAS such a path, so a system with no declared
+  // find keeps its file set byte-identical.
+  const staticSubpaths = staticSubpathRoutes(contexts.flatMap(deriveContextOperations));
+  if (Object.keys(staticSubpaths).length > 0) {
+    place(
+      "StaticSubpathMethodFilter.java",
+      "api-common",
+      renderStaticSubpathMethodFilter(basePkg, staticSubpaths),
+    );
+  }
   // Observability catalog — always-on, like dotnet's request log +
   // Hono's pino lines (the obs e2e suites assert this envelope).
   place("CatalogLog.java", "config", renderCatalogLogger(basePkg));

@@ -91,3 +91,48 @@ describe("walker primitive — For (list comprehension)", () => {
     expect(tsx).not.toContain("length === 0");
   });
 });
+
+// ---------------------------------------------------------------------------
+// F2-CFE-3 — `For` as the DIRECT body of a `QueryView { data: }` lambda.  The
+// pack template drops that body into `{query.data && ( … )}`, an EXPRESSION
+// slot, while `renderForEach` used to return the children-position-only `{…}`
+// form: the emitted page parsed the brace as an OBJECT LITERAL and never
+// compiled.  Wrapping a `Stack` around the `For` happened to hide it, which is
+// why no shipped example caught it.
+// ---------------------------------------------------------------------------
+
+describe("For directly inside a QueryView data lambda", () => {
+  const SRC = `
+    system Demo {
+      subdomain Sd { context C { aggregate Item with crudish { name: string } repository Items for Item { } } }
+      api A from Sd
+      ui Web {
+        api Sd: A
+        page P1 { route: "/p1" body: QueryView { of: Item.all, data: rows => For { each: rows, r => Text { r.name } } } }
+      }
+      storage st { type: postgres }
+      resource rs { for: C, kind: state, use: st }
+      deployable api { platform: node, contexts: [C], dataSources: [rs], serves: A, port: 8080 }
+      deployable web { platform: react, targets: api, ui: Web { Sd: api }, port: 3001 }
+    }
+  `;
+
+  it("emits a page that actually parses as TSX", async () => {
+    const files = await generateSystemFiles(SRC);
+    const tsx = files.get("web/src/pages/p1.tsx")!;
+    // The `.map` sits in the QueryView's expression slot behind a fragment.
+    expect(tsx).toContain("<>{itemAll.data.items.map(");
+    // And the whole module is syntactically valid TSX — the assertion the
+    // string checks above exist to protect.  (`{…}` here parsed as an object
+    // literal with an invalid property: "',' expected.")
+    const ts = await import("typescript");
+    const sf = ts.default.createSourceFile(
+      "p1.tsx",
+      tsx,
+      ts.default.ScriptTarget.Latest,
+      true,
+      ts.default.ScriptKind.TSX,
+    );
+    expect(sf.parseDiagnostics.map((d) => d.messageText)).toEqual([]);
+  });
+});

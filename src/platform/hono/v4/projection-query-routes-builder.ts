@@ -596,7 +596,7 @@ function emitQueryProjectionRoute(
   }
   // alias → { mapVar, idRow } — the loaded-map var and the source-row expression
   // that yields this alias's key (the join's `on <idRef>`, rendered off `r`).
-  const aliasMap = new Map<string, { mapVar: string; idRow: string }>();
+  const aliasMap = new Map<string, JoinAlias>();
   // RAW-TABLE source on the mikro adapter (completed after an
   // owner review): a WORKFLOW source reads its saga-state Row, a PROJECTION
   // source the folded read-model Row.  `em.find` hands back ENTITIES whose
@@ -674,6 +674,9 @@ function emitQueryProjectionRoute(
       aliasMap.set(join.alias, {
         mapVar: aux.mapVar,
         idRow: renderTsExpr(join.idRef, { thisName: "r" }),
+        // One PER-ROW binding of the looked-up aggregate, so the presence test
+        // and the read share a single `Map.get` (the .NET twin's `out var __j0`).
+        bindVar: `__j${aliasMap.size}`,
       });
   }
   if ((p.query!.selects?.length ?? 0) === 0) {
@@ -688,10 +691,44 @@ function emitQueryProjectionRoute(
         const t = rowFieldType.get(s.field);
         // DOMAIN values (a hydrated aggregate, or a joined one) — so this is
         // the aggregate's own `toWire` renderer, not the column table below.
-        return `      ${s.field}: ${t ? wireProjectionValue(rendered, t, ctx, false) : rendered}`;
+        const wrapped = t ? wireProjectionValue(rendered, t, ctx, false) : rendered;
+        // A `join <Agg> as c on <idRef>` bulk-loads THROUGH the joined
+        // aggregate's repository, so that load carries the joined aggregate's
+        // own capability filters: a soft-deleted target, an out-of-tenant
+        // target, or an ordinary dangling reference is simply ABSENT from the
+        // map.  The read used to be `<map>.get(<id>)!.<field>` — a TypeError
+        // ("Cannot read properties of undefined") -> 500, from data the model
+        // permits, on a read that is not even about the missing row
+        // (G2667-D3, node arm).
+        //
+        // LEFT JOIN, matching the .NET arm's ruling: the SOURCE row survives
+        // and the joined field carries the absent value.  Dropping the row
+        // instead would let a FOREIGN aggregate's filters change this
+        // projection's row count while the source aggregate's own list still
+        // shows the row — one silent failure traded for another.  The wire
+        // wrap sits INSIDE the guard, so `.toFixed(4)` / the canonical-instant
+        // trim never run on an absent row.
+        const bind = joinBindFor(s.expr, aliasMap);
+        const value = bind ? `${bind} === undefined ? null : ${wrapped}` : wrapped;
+        return `      ${s.field}: ${value}`;
       })
       .join(",\n");
-    out.push(`    const projected = rows.map((r) => ({\n${projectedFields},\n    }));`);
+    // Per-row join binds, hoisted ahead of the object literal (block-bodied
+    // arrow) — one `Map.get` per alias per row, shared by every field that
+    // reads through it.  No joins → the byte-identical expression body.
+    const binds = [...aliasMap.values()].map(
+      (a) => `      const ${a.bindVar} = ${a.mapVar}.get(${a.idRow} as string);`,
+    );
+    if (binds.length === 0) {
+      out.push(`    const projected = rows.map((r) => ({\n${projectedFields},\n    }));`);
+    } else {
+      out.push(`    const projected = rows.map((r) => {`);
+      out.push(...binds);
+      out.push(`      return {`);
+      for (const line of projectedFields.split(",\n")) out.push(`  ${line},`);
+      out.push(`      };`);
+      out.push(`    });`);
+    }
   }
   out.push(`    return httpCtx.json(projected as z.infer<typeof ${T}Response>, 200);`);
   out.push(`  },`);
@@ -1029,20 +1066,38 @@ function groupKeyWireExpr(inner: TypeIR, expr: string): string {
   }
 }
 
+/** One join alias's per-row binding: the loaded-by-id map, the source-row
+ *  expression yielding this alias's key, and the per-row const the emitted
+ *  handler binds the lookup to. */
+interface JoinAlias {
+  mapVar: string;
+  idRow: string;
+  bindVar: string;
+}
+
 /** Render a `select` expression against the source row `r` and the join alias
  *  maps.  A member access on a join alias (`c.name`, where `c` is a `join
- *  Customer as c on <idRef>`) rewrites to `<mapVar>.get(<idRow> as string)!.name`
- *  — the loaded-by-id aggregate for that row.  Source-candidate reads (`o.id`,
- *  bare `lineCount`) lower to `this`/row refs and render off `r` unchanged. */
-function renderProjectionSelect(
-  expr: ExprIR,
-  aliasMap: Map<string, { mapVar: string; idRow: string }>,
-): string {
+ *  Customer as c on <idRef>`) rewrites to `<bindVar>.<name>` — the per-row
+ *  binding of the loaded-by-id aggregate, whose PRESENCE the caller guards
+ *  (`joinBindFor`).  Source-candidate reads (`o.id`, bare `lineCount`) lower to
+ *  `this`/row refs and render off `r` unchanged. */
+function renderProjectionSelect(expr: ExprIR, aliasMap: Map<string, JoinAlias>): string {
   if (expr.kind === "member" && expr.receiver.kind === "ref") {
     const alias = aliasMap.get(expr.receiver.name);
-    if (alias) return `${alias.mapVar}.get(${alias.idRow} as string)!.${expr.member}`;
+    if (alias) return `${alias.bindVar}.${expr.member}`;
   }
   return renderTsExpr(expr, { thisName: "r" });
+}
+
+/** The per-row bind var a `select` expression reads THROUGH, or null when it
+ *  reads the source row only.  A joined read needs a presence guard because the
+ *  join's bulk load runs through the joined aggregate's repository and so
+ *  carries its capability filters — the target can be legitimately absent. */
+function joinBindFor(expr: ExprIR, aliasMap: Map<string, JoinAlias>): string | null {
+  if (expr.kind === "member" && expr.receiver.kind === "ref") {
+    return aliasMap.get(expr.receiver.name)?.bindVar ?? null;
+  }
+  return null;
 }
 
 /** Pick the id-source expression for an auxiliary's bulk load.

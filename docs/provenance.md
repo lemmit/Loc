@@ -333,8 +333,20 @@ KeyValueRow("Total",
 ```
 
 Note `data.total.value` — the figure is the carrier's value half; the
-disclosure reads the lineage half off the same field.  The React generator
-renders it as the native disclosure over `data.total.lineage`:
+disclosure reads the lineage half off the same field.
+
+**A hand-written body may read the field bare.**  `Text { o.total }` and
+`Text { o.total.value }` render identically: the body walker appends the
+carrier hop itself when a member read lands on a `provenanced` field, so the
+field's DECLARED type (`total: int`) keeps meaning what it says and only the
+author who wants the lineage has to spell a hop.  Without that, a page body
+written by hand — rather than emitted by the scaffold macro, which spells
+`.value` — would put the whole `{ value, lineage }` object into a text slot:
+a `tsc` error on the JSX frontends, a stringified record on Feliz/Flutter.
+The explicit `.value` / `.lineage` spellings are left alone (no
+`.value.value`).
+
+The React generator renders the disclosure over `data.total.lineage`:
 
 ```tsx
 <Text>{orderById.data.total.value}</Text>

@@ -162,6 +162,36 @@ describe("validator fault isolation — the fuzz gate never lets a throw escape"
       errors.join("\n"),
     ).toBe(true);
   });
+
+  it("keeps the other `criteria` diagnostics when a criterion body failed to parse", async () => {
+    // The `derived` twin of the same bug class, at the sibling site the
+    // original fix missed: `Criterion.body` is non-optional in the AST types,
+    // but parse recovery completes the rule with it undefined, and streaming
+    // that threw inside `checkOneCriterion` — aborting the whole `criteria`
+    // family, which also owns `checkCriterionUseSites`.  So a half-typed
+    // criterion silently swallowed every criterion arity error in the file.
+    const { errors } = await parseString(`
+      context Shop {
+        criterion InRegion(region: string) of Order = this.region == region
+        criterion Broken of Order =
+        aggregate Order {
+          region: string
+          filter InRegion()
+        }
+      }
+    `);
+    // The load-bearing assertion: the use-site arity diagnostic — reported by
+    // the SAME `criteria` family, after the per-criterion loop — still
+    // surfaces.  "No crash" alone would pass even if the guard swallowed it.
+    expect(
+      errors.some((e) => /criterion 'InRegion' expects 1 argument/.test(e)),
+      errors.join("\n"),
+    ).toBe(true);
+    expect(
+      errors.filter((e) => /crashed and was skipped/.test(e)),
+      errors.join("\n"),
+    ).toEqual([]);
+  });
 });
 
 describe("runChecked — the per-theme guard", () => {
