@@ -16,7 +16,7 @@ export default function ProductNew() {
     defaultValues: { sku: "", price: { amount: 0, currency: "" } },
   });
   return (
-    <Stack data-testid="products-new-page">
+    <Stack gap="md" data-testid="products-new-page">
       <Breadcrumbs>
         <Anchor component={RouterLink} to="/">{t("page.New.anchor.n0mxf2", "Home")}</Anchor>
         <Anchor component={RouterLink} to="/products">{t("page.New.anchor.kdfstp", "Products")}</Anchor>
@@ -56,7 +56,7 @@ export default function ProductNew() {
               </Stack>
             </Fieldset>
     
-            <Group justify="flex-end" mt="sm">
+            <Group justify="flex-end" gap="xs" mt="md">
               <Button type="submit" loading={ create.isPending } data-testid="products-new-submit">Create</Button>
             </Group>
           </Stack>

@@ -1,6 +1,6 @@
 // Auto-generated.
 import { Routes, Route, Link as RouterLink, useLocation, Outlet } from "react-router";
-import { AppShell, Burger, Divider, Group, Title, NavLink, Anchor, Alert, Button, Stack } from "@mantine/core";
+import { AppShell, Burger, Group, Title, NavLink, Anchor, Alert, Button, Stack } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import React from "react";
 import { t } from "./i18n";
@@ -107,11 +107,11 @@ function AppShellLayout() {
       {/* Skip link (WCAG 2.4.1 Bypass Blocks) — first focusable element,
           visually hidden until focused, jumps to the <main> landmark. */}
       <a href="#main-content" className="loom-skip-link">{t("chrome.skipToContent", "Skip to content")}</a>
-      <style>{`.loom-skip-link{position:absolute;left:-9999px;top:0;z-index:1000;padding:8px 16px;background:var(--mantine-color-body);color:var(--mantine-color-text);border:1px solid var(--mantine-color-default-border);border-radius:4px}.loom-skip-link:focus{left:8px;top:8px}`}</style>
+      <style>{`.loom-skip-link{position:absolute;left:-9999px;top:0;z-index:1000;padding:8px 16px;background:var(--mantine-color-body);color:var(--mantine-color-text);border:1px solid var(--mantine-color-default-border);border-radius:4px}.loom-skip-link:focus{left:8px;top:8px}.loom-nav-section{font-size:0.75rem;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--mantine-color-dimmed);margin:8px 0 4px}.loom-breadcrumbs>*:not(:last-child)::after{content:"/";margin-inline-start:8px;opacity:.5}`}</style>
     <AppShell
       header={{ height: 56 }}
       navbar={{ width: 240, breakpoint: "sm", collapsed: { mobile: !opened } }}
-      padding="md"
+      padding={{ base: "md", lg: "lg" }}
     >
       <AppShell.Header>
         <Group h="100%" px="md" justify="space-between">
@@ -134,16 +134,16 @@ function AppShellLayout() {
       </AppShell.Header>
       <AppShell.Navbar p="md" aria-label={t("chrome.primaryNav", "Primary navigation")}>
         <Stack gap={4} data-testid="nav-sidebar">
-          <Divider my="xs" label="Aggregates" labelPosition="left" />
+          <div className="loom-nav-section">Aggregates</div>
           <NavLink component={RouterLink} to="/products" label="Products" active={isActive("/products")} data-testid="nav-products" />
           <NavLink component={RouterLink} to="/orders" label="Orders" active={isActive("/orders")} data-testid="nav-orders" />
           <NavLink component={RouterLink} to="/customers" label="Customers" active={isActive("/customers")} data-testid="nav-customers" />
-          <Divider my="xs" label="Workflows" labelPosition="left" />
+          <div className="loom-nav-section">Workflows</div>
           <NavLink component={RouterLink} to="/workflows" label="All workflows" active={isActive("/workflows", { exact: true })} data-testid="nav-workflows" />
           <NavLink component={RouterLink} to="/workflows/place_order" label="Place Order" active={isActive("/workflows/place_order")} data-testid="nav-workflow-place_order" />
         </Stack>
       </AppShell.Navbar>
-      <AppShell.Main id="main-content">
+      <AppShell.Main id="main-content" style={{ minWidth: 0 }}>
         <AppErrorBoundary>
           <Outlet />
         </AppErrorBoundary>

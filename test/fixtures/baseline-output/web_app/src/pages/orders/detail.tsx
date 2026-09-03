@@ -59,7 +59,7 @@ function AddLineForm({ mut, onClose }: { mut: ReturnType<typeof useAddLineOrder>
           )}
         />
 
-        <Group justify="flex-end" mt="sm">
+        <Group justify="flex-end" gap="xs" mt="md">
           <Button variant="default" onClick={onClose}>{t("chrome.cancel", "Cancel")}</Button>
           <Button type="submit" loading={mut.isPending} data-testid="orders-op-addLine-submit">Add Line</Button>
         </Group>
@@ -99,7 +99,7 @@ function ConfirmForm({ mut, onClose }: { mut: ReturnType<typeof useConfirmOrder>
     >
       <Stack>
         <Text c="dimmed">{t("pack.mantine.noParameters.usdpad", "This operation has no parameters.")}</Text>
-        <Group justify="flex-end" mt="sm">
+        <Group justify="flex-end" gap="xs" mt="md">
           <Button variant="default" onClick={onClose}>{t("chrome.cancel", "Cancel")}</Button>
           <Button type="submit" loading={mut.isPending} data-testid="orders-op-confirm-submit">Confirm</Button>
         </Group>
@@ -150,7 +150,7 @@ function UpdateForm({ mut, onClose }: { mut: ReturnType<typeof useUpdateOrder>; 
 
         <TextInput label="Placed At" {...register("placedAt")} data-testid="orders-op-update-input-placedAt" type="datetime-local" error={errors.placedAt?.message} />
 
-        <Group justify="flex-end" mt="sm">
+        <Group justify="flex-end" gap="xs" mt="md">
           <Button variant="default" onClick={onClose}>{t("chrome.cancel", "Cancel")}</Button>
           <Button type="submit" loading={mut.isPending} data-testid="orders-op-update-submit">Update</Button>
         </Group>
@@ -166,7 +166,7 @@ export default function OrderDetail() {
   const confirm = useConfirmOrder(id ?? "");
   const update = useUpdateOrder(id ?? "");
   return (
-    <Stack data-testid="orders-detail">
+    <Stack gap="md" data-testid="orders-detail">
       <Breadcrumbs>
         <Anchor component={RouterLink} to="/">{t("page.Detail.anchor.n0mxf2", "Home")}</Anchor>
         <Anchor component={RouterLink} to="/orders">{t("page.Detail.anchor.xf3i18", "Orders")}</Anchor>
@@ -188,9 +188,9 @@ export default function OrderDetail() {
           <Alert color="yellow" variant="light">{t("page.Detail.alert.fobqop", "No order matches that id.")}</Alert>
         ) }
         { orderById.data && (
-          <Stack>
+          <Stack gap="md">
             <Card withBorder padding="md">
-              <Stack>
+              <Stack gap="md">
                 <KeyValueRow label={t("page.Detail.keyValue.0ysfxy", "Customer Id")} data-testid="orders-detail-customerId"><Text>{orderById.data.customerId}</Text></KeyValueRow>
                 <KeyValueRow label={t("page.Detail.keyValue.03pd73", "Status")} data-testid="orders-detail-status"><Badge tt="none">{ orderById.data.status }</Badge></KeyValueRow>
                 <KeyValueRow label={t("page.Detail.keyValue.cl05q5", "Placed At")} data-testid="orders-detail-placedAt"><DateTimeValue iso={ orderById.data.placedAt } /></KeyValueRow>
@@ -198,9 +198,9 @@ export default function OrderDetail() {
               </Stack>
             </Card>
             <Card withBorder padding="md" data-testid="orders-detail-lines">
-              <Stack>
+              <Stack gap="md">
                 <Title order={4}>{t("page.Detail.heading.2bghr0", "Lines")}</Title>
-                <Table striped highlightOnHover>
+                <div className="loom-table-scroll" style={{ width: "100%", overflowX: "auto" }}><Table striped highlightOnHover>
                   <Table.Thead>
                     <Table.Tr>
                       <Table.Th>{t("page.Detail.columnHeader.fp4ch5", "Product Id")}</Table.Th>
@@ -215,10 +215,10 @@ export default function OrderDetail() {
                       </Table.Tr>
                     )) }
                   </Table.Tbody>
-                </Table>
+                </Table></div>
               </Stack>
             </Card>
-            <Group>
+            <Group gap="xs">
               <Button variant="filled" onClick={() => openAddLineModal(addLine)} data-testid="orders-op-addLine">{t("page.Detail.button.uhabr2", "Add Line")}</Button>
     
               <Button variant="light" onClick={() => openConfirmModal(confirm)} data-testid="orders-op-confirm">{t("page.Detail.button.8tbqwf", "Confirm")}</Button>

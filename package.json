@@ -37,6 +37,7 @@
     "test:dapper-corpus": "LOOM_DOTNET_BUILD=1 vitest run test/e2e/corpus-dotnet-dapper-build.test.ts",
     "test:elixir-corpus": "LOOM_ELIXIR_BUILD=1 vitest run test/e2e/corpus-elixir-build.test.ts",
     "test:tsc-react": "LOOM_REACT_BUILD=1 vitest run test/e2e/generated-react-build.test.ts",
+    "test:pack-spacing-dom": "LOOM_PACK_SPACING_DOM=1 vitest run test/e2e/pack-spacing-dom.test.ts",
     "test:react-e2e": "LOOM_REACT_E2E=1 vitest run test/e2e/generated-react-e2e.test.ts",
     "test:tsc-react-extern": "LOOM_REACT_BUILD=1 vitest run test/e2e/extern-component-build.test.ts",
     "test:vue-build": "LOOM_VUE_BUILD=1 vitest run test/e2e/generated-vue-build.test.ts",

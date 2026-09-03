@@ -13,12 +13,12 @@ export default function CustomerList() {
   const [pageNum, setPageNum] = useState<number>(1);
   const customerAll = useAllCustomers({ page: pageNum, pageSize: 10, sort: sortKey, dir: sortDir });
   return (
-    <Stack data-testid="customers-list">
+    <Stack gap="md" data-testid="customers-list">
       <Breadcrumbs>
         <Anchor component={RouterLink} to="/">{t("page.List.anchor.n0mxf2", "Home")}</Anchor>
         <Text>{t("page.List.text.vweyym", "Customers")}</Text>
       </Breadcrumbs>
-      <Group justify="space-between" role="toolbar" aria-label="Actions">
+      <Group justify="space-between" align="center" gap="md" role="toolbar" aria-label="Actions">
         <Title order={2}>{t("page.List.heading.vweyym", "Customers")}</Title>
         <Button onClick={() => navigate("/customers/new")} data-testid="customers-list-create">{t("page.List.button.cq54sn", "New customer")}</Button>
       </Group>
@@ -38,7 +38,7 @@ export default function CustomerList() {
         ) }
         { customerAll.data && customerAll.data.items.length > 0 && (
           <Paper p="md">
-            <><Table striped highlightOnHover stickyHeader>
+            <><div className="loom-table-scroll" style={{ width: "100%", overflowX: "auto" }}><Table striped highlightOnHover stickyHeader>
               <Table.Thead>
                 <Table.Tr>
                   <Table.Th><button type="button" style={{ background: "none", border: "none", padding: 0, font: "inherit", cursor: "pointer", userSelect: "none" }} onClick={() => { if (sortKey === "id") { setSortDir(sortDir === "asc" ? "desc" : "asc"); } else { setSortKey("id"); setSortDir("asc"); } }}>{t("page.List.columnHeader.o4495s", "ID")}{sortKey === "id" ? (sortDir === "asc" ? " ↑" : " ↓") : ""}</button></Table.Th>
@@ -59,7 +59,7 @@ export default function CustomerList() {
                   </Table.Tr>
                 )) }
               </Table.Tbody>
-            </Table>
+            </Table></div>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "0.5rem", marginTop: "0.75rem" }} data-testid="pager"><button type="button" disabled={pageNum <= 1} onClick={() => setPageNum(pageNum - 1)}>{t("chrome.prev", "Prev")}</button><span>{t("chrome.pageOf", "Page {page} of {pages}", { page: pageNum, pages: Math.max(1, customerAll.data.totalPages) })}</span><button type="button" disabled={pageNum >= Math.max(1, customerAll.data.totalPages)} onClick={() => setPageNum(pageNum + 1)}>{t("chrome.next", "Next")}</button></div></>
           </Paper>
         ) }

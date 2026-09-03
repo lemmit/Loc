@@ -53,7 +53,7 @@ function UpdateForm({ mut, onClose }: { mut: ReturnType<typeof useUpdateCustomer
           )}
         />
 
-        <Group justify="flex-end" mt="sm">
+        <Group justify="flex-end" gap="xs" mt="md">
           <Button variant="default" onClick={onClose}>{t("chrome.cancel", "Cancel")}</Button>
           <Button type="submit" loading={mut.isPending} data-testid="customers-op-update-submit">Update</Button>
         </Group>
@@ -67,7 +67,7 @@ export default function CustomerDetail() {
   const customerById = useCustomerById(id);
   const update = useUpdateCustomer(id ?? "");
   return (
-    <Stack data-testid="customers-detail">
+    <Stack gap="md" data-testid="customers-detail">
       <Breadcrumbs>
         <Anchor component={RouterLink} to="/">{t("page.Detail.anchor.n0mxf2", "Home")}</Anchor>
         <Anchor component={RouterLink} to="/customers">{t("page.Detail.anchor.vweyym", "Customers")}</Anchor>
@@ -89,16 +89,16 @@ export default function CustomerDetail() {
           <Alert color="yellow" variant="light">{t("page.Detail.alert.lf0b2h", "No customer matches that id.")}</Alert>
         ) }
         { customerById.data && (
-          <Stack>
+          <Stack gap="md">
             <Card withBorder padding="md">
-              <Stack>
+              <Stack gap="md">
                 <KeyValueRow label={t("page.Detail.keyValue.7s11ax", "Username")} data-testid="customers-detail-username"><Text>{customerById.data.username}</Text></KeyValueRow>
                 <KeyValueRow label={t("page.Detail.keyValue.inbfc7", "Email")} data-testid="customers-detail-email"><Text>{customerById.data.email}</Text></KeyValueRow>
                 <KeyValueRow label={t("page.Detail.keyValue.3mcq4c", "Age")} data-testid="customers-detail-age"><Text>{customerById.data.age}</Text></KeyValueRow>
                 <KeyValueRow label={t("page.Detail.keyValue.q0zd4n", "Version")} data-testid="customers-detail-version"><Text>{customerById.data.version}</Text></KeyValueRow>
               </Stack>
             </Card>
-            <Group>
+            <Group gap="xs">
               <Button variant="filled" onClick={() => openUpdateModal(update)} data-testid="customers-op-update">{t("page.Detail.button.uk4kus", "Update")}</Button>
     
             </Group>
