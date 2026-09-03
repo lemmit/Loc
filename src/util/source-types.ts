@@ -129,6 +129,20 @@ export function registerSourceType(descriptor: SourceTypeDescriptor): void {
   REGISTRY.set(descriptor.name, descriptor);
 }
 
+/** Drop a plugin-registered sourceType, restoring the built-in of the same
+ *  name if there was one.  Exists for tests: `vitest.config.ts` runs the unit
+ *  project with `isolate: false`, so one module graph is shared across every
+ *  file in a worker and a `registerSourceType` from a plugin-discovery test
+ *  otherwise leaks into whatever runs next in that worker — which is how a
+ *  fixture named `clickhouseCloud` reached `test/util/source-types.test.ts`'s
+ *  exact-contents assertions and failed them, but only for the file→worker
+ *  assignments where the two collide.  Mirrors `_resetRegistryForTests` in
+ *  `src/macros/registry.ts`. */
+export function _unregisterSourceTypeForTests(name: string): void {
+  REGISTRY.delete(name);
+  seedBuiltins();
+}
+
 /** Look up a sourceType descriptor by name (= `StorageKind`). */
 export function sourceTypeFor(name: string): SourceTypeDescriptor | undefined {
   return REGISTRY.get(name);
