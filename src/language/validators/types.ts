@@ -431,6 +431,16 @@ export function checkSingleBinaryOperands(chain: BinaryChain, accept: Validation
       lt = T.prim(rAnchor);
     }
     const info = { node: chain, property: "rest" as const, index: i };
+    if (op === "??") {
+      // Nullish coalescing takes ANY operand pair — it is sugar for
+      // `lhs == null ? rhs : lhs` (lowered in `lowerCoalesceChain`), so there
+      // is no operand rule to enforce beyond the join the type-system already
+      // computes.  Strip the optional off the left as the operator does, so a
+      // later fold-step (`a ?? b ?? c`) sees the bare type.
+      lt = ternaryJoin(lt.kind === "optional" ? lt.inner : lt, rt) ?? rt;
+      leftExprForPromotion = undefined;
+      continue;
+    }
     if (op === "&&" || op === "||") {
       const lBool = lt.kind === "primitive" && lt.name === "bool";
       const rBool = rt.kind === "primitive" && rt.name === "bool";

@@ -147,8 +147,9 @@ export function walkExprChildren(e: ExprIR, v: ExprChildVisitor): void {
  * Visit the immediate child *expressions* of an operation-body statement — one
  * level only.  Almost every `StmtIR` kind carries only expression children (a
  * nested lambda block is reached by descending into the child expression, not
- * here); the exception is `variant-match`, whose arm/else bodies nest further
- * statements — those are delivered through the optional `nestedStmt` channel.
+ * here); the exceptions are `variant-match` (arm / else bodies) and `if`
+ * (then / else bodies), which nest further statements — those are delivered
+ * through the optional `nestedStmt` channel.
  * Exhaustive + `never`-checked.
  */
 export function walkStmtChildren(
@@ -178,6 +179,11 @@ export function walkStmtChildren(
     case "variant-match":
       visit(s.subject);
       for (const a of s.arms) for (const st of a.body) nestedStmt?.(st);
+      for (const st of s.elseBody ?? []) nestedStmt?.(st);
+      break;
+    case "if":
+      visit(s.cond);
+      for (const st of s.thenBody) nestedStmt?.(st);
       for (const st of s.elseBody ?? []) nestedStmt?.(st);
       break;
     default: {
@@ -268,6 +274,35 @@ export function walkStmtExprsDeep(s: StmtIR, visit: (e: ExprIR) => void): void {
     (c) => walkExprDeep(c, visit),
     (n) => walkStmtExprsDeep(n, visit),
   );
+}
+
+/**
+ * Visit `s` and every operation-body statement nested inside it.
+ *
+ * Descends BOTH nesting channels: the branch bodies an `if` / `variant-match`
+ * carries, and the block bodies of the lambdas its expressions carry (`onClick:
+ * e => { … }` in a page body).  The statement-level twin of
+ * {@link walkStmtExprsDeep} — needed by any predicate asking "does this body
+ * contain a statement of kind X anywhere", where a hand-rolled recursion is
+ * exactly the drifting copy this module exists to prevent.
+ */
+export function walkStmtDeep(s: StmtIR, visit: (s: StmtIR) => void): void {
+  visit(s);
+  walkStmtChildren(
+    s,
+    (c) => walkExprStmtsDeep(c, visit),
+    (n) => walkStmtDeep(n, visit),
+  );
+}
+
+/** Visit every operation-body statement reachable from an EXPRESSION — i.e.
+ *  the block bodies of the lambdas it carries, at any depth. */
+export function walkExprStmtsDeep(e: ExprIR | undefined, visit: (s: StmtIR) => void): void {
+  if (!e) return;
+  walkExprChildren(e, {
+    expr: (c) => walkExprStmtsDeep(c, visit),
+    stmt: (s) => walkStmtDeep(s, visit),
+  });
 }
 
 /** Visit every expression reachable from a workflow-body statement, descending

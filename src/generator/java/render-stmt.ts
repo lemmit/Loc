@@ -1,6 +1,6 @@
 import type { ExprIR, PathIR, ProvSite, StmtIR } from "../../ir/types/loom-ir.js";
 import { escapeJavaIdent } from "../../util/naming.js";
-import { collectLeaves, provTempNames, wrapProvCapture } from "../_stmt/leaves.js";
+import { collectLeaves, indentNested, provTempNames, wrapProvCapture } from "../_stmt/leaves.js";
 import { renderStmtChunksWith, renderStmtsWith, type StmtTarget } from "../_stmt/target.js";
 import { collectJavaExprImports, type JavaRenderContext, renderJavaExpr } from "./render-expr.js";
 
@@ -162,6 +162,14 @@ function javaStmtTarget(ctx: JavaRenderContext, traceCtx: JavaTraceCtx): StmtTar
     },
 
     expression: (s) => `${INDENT}${renderJavaExpr(s.expr, ctx)};`,
+
+    // `if (<cond>) { … } else { … }` — the branch bodies arrive rendered at
+    // this table's own INDENT, so they shift one level here.
+    if: (s, _ix, thenSrc, elseSrc) => {
+      const head = `${INDENT}if (${renderJavaExpr(s.cond, ctx)}) {\n${indentNested(thenSrc, "    ")}\n${INDENT}}`;
+      if (elseSrc === undefined) return head;
+      return `${head} else {\n${indentNested(elseSrc, "    ")}\n${INDENT}}`;
+    },
 
     return: (s) => {
       // Exception-less tagged return → the domain union's variant record

@@ -649,6 +649,12 @@ function foldImpurity(stmt: StmtIR): string | undefined {
       return "contains a 'return'";
     case "variant-match":
       return "contains an effect-form 'match'";
+    case "if":
+      // A conditional fold is not replayable the way the four pure kinds are:
+      // the projection emitters render a straight-line fold, so a branch would
+      // be dropped silently.  Fail closed, like every other non-allowlisted
+      // kind.
+      return "contains an 'if' branch";
   }
 }
 

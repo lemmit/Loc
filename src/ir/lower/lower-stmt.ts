@@ -2,6 +2,7 @@ import type { LValue, Statement } from "../../language/generated/ast.js";
 import {
   isAssignOrCallStmt,
   isEmitStmt,
+  isIfStmt,
   isLetStmt,
   isMatchStmt,
   isPreconditionStmt,
@@ -118,6 +119,27 @@ function lowerStatementInner(stmt: Statement, env: Env): { stmt: StmtIR; envAfte
         subjectType,
         arms,
         ...(stmt.elseBody.length > 0 ? { elseBody: lowerStatements(stmt.elseBody, env) } : {}),
+      },
+      envAfter: env,
+    };
+  }
+  if (isIfStmt(stmt)) {
+    // Plain boolean conditional.  Both branches are their own scope — a `let`
+    // inside one does not leak out (`lowerStatements` already discards the
+    // post-block env), so `envAfter` is the env we came in with.  An `else if`
+    // chain lowers to a single-statement else-body holding the nested `if`, so
+    // every consumer sees one shape instead of a third branch field.
+    const elseBody = stmt.elseIf
+      ? [lowerStatement(stmt.elseIf, env).stmt]
+      : stmt.elseBody.length > 0
+        ? lowerStatements(stmt.elseBody, env)
+        : undefined;
+    return {
+      stmt: {
+        kind: "if",
+        cond: lowerExpr(stmt.cond, env),
+        thenBody: lowerStatements(stmt.thenBody, env),
+        ...(elseBody ? { elseBody } : {}),
       },
       envAfter: env,
     };

@@ -983,6 +983,56 @@ system P {
   deployable api { platform: node contexts: [Orders] dataSources: [st] ui: WebApp port: 3000 }
 }`,
 
+  // An `if` STATEMENT in an operation body, on a context an elixir deployable
+  // emits.  The four spine backends render it; Phoenix would silently drop an
+  // assigning branch (its bodies thread a REBOUND `record`, and an Elixir `if`
+  // block's bindings do not escape the block).
+  "loom.elixir-if-stmt-unsupported": `
+system P {
+  subdomain D { context C {
+    aggregate Order with crudish {
+      customerId: string
+      count: int
+      operation bump(n: int) {
+        if n > 0 {
+          count := 1
+        } else {
+          count := 2
+        }
+      }
+    }
+  } }
+  storage pg { type: postgres }
+  resource st { for: C, kind: state, use: pg }
+  deployable api { platform: elixir contexts: [C] dataSources: [st] port: 4000 }
+}`,
+
+  // The same statement in a PAGE action.  A page body is an expression tree —
+  // a condition is a VALUE there — and no frontend emitter has a
+  // statement-position conditional.
+  "loom.if-stmt-page-body-unsupported": `
+system P {
+  subdomain D { context C {
+    aggregate Order with crudish { customerId: string }
+  } }
+  ui WebApp {
+    page Home {
+      route: "/"
+      state { n: int = 0 }
+      action bump() {
+        if n == 0 {
+          n := 1
+        }
+      }
+      body: Button { "Go", onClick: bump }
+    }
+  }
+  storage pg { type: postgres }
+  resource st { for: C, kind: state, use: pg }
+  deployable api { platform: node contexts: [C] dataSources: [st] port: 3000 }
+  deployable app { platform: react targets: api ui: WebApp port: 3001 }
+}`,
+
   // A `match await` in a COMPONENT action, on a Flutter-hosted ui: the Flutter
   // component emitter filters such a component out entirely (no widget, every
   // call site an empty `SizedBox.shrink()`), so the gate makes the drop honest.

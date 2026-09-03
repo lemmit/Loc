@@ -139,3 +139,18 @@ export interface ProvCaptureLines {
 export function wrapProvCapture(base: string, l: ProvCaptureLines): string {
   return [l.snapshot, base, l.lineage, l.colocated, l.sink].join("\n");
 }
+
+/** Shift an already-rendered statement block one nesting level deeper.
+ *
+ *  The `if` spine renders a branch body with the SAME leaf table as its parent
+ *  (each table closes over its own base indent rather than taking one), so the
+ *  branch arrives at the parent's indent and the leaf shifts it here.  Blank
+ *  lines stay blank — trailing whitespace on an empty line is noise in every
+ *  target language. */
+export function indentNested(block: string, unit: string): string {
+  if (block === "") return block;
+  return block
+    .split("\n")
+    .map((l) => (l.length > 0 ? unit + l : l))
+    .join("\n");
+}

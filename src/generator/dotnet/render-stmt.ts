@@ -1,6 +1,6 @@
 import type { ExprIR, MessageIR, PathIR, ProvSite, StmtIR } from "../../ir/types/loom-ir.js";
 import { escapeCsharpIdent, upperFirst } from "../../util/naming.js";
-import { collectLeaves, provTempNames, wrapProvCapture } from "../_stmt/leaves.js";
+import { collectLeaves, indentNested, provTempNames, wrapProvCapture } from "../_stmt/leaves.js";
 import { renderStmtChunksWith, renderStmtsWith, type StmtTarget } from "../_stmt/target.js";
 import type { CsRenderContext } from "./render-expr.js";
 import { collectCsExprUsings, renderCsExpr } from "./render-expr.js";
@@ -164,6 +164,14 @@ function csStmtTarget(ctx: CsRenderContext, traceCtx: TraceCtx): StmtTarget {
     },
 
     expression: (s) => `${INDENT}${renderCsExpr(s.expr, ctx)};`,
+
+    // `if (<cond>) { … } else { … }` — the branch bodies arrive rendered at
+    // this table's own INDENT, so they shift one level here.
+    if: (s, _ix, thenSrc, elseSrc) => {
+      const head = `${INDENT}if (${renderCsExpr(s.cond, ctx)}) {\n${indentNested(thenSrc, "    ")}\n${INDENT}}`;
+      if (elseSrc === undefined) return head;
+      return `${head} else {\n${indentNested(elseSrc, "    ")}\n${INDENT}}`;
+    },
 
     return: (s) => {
       // Exception-less operation return (exception-less.md): a tagged return

@@ -18,9 +18,11 @@ import type { StmtIR } from "../../ir/types/loom-ir.js";
 // error here (exhaustive switch) AND in every target (the interface), exactly
 // like adding an `ExprIR.kind`.
 //
-// NOTE: `StmtIR` is FLAT for backend bodies — no kind nests a statement list
-// (`variant-match` does, but it is frontend-only and never reaches a backend),
-// so unlike `renderWorkflowStmts` this spine has no recursion to own.
+// NOTE: `if` is the ONE backend-body kind that nests a statement list
+// (`variant-match` nests too, but it is frontend-only and never reaches a
+// backend), so — like `renderWorkflowStmts` and its `for-each` / `if-let` — the
+// spine owns that one recursion, and the temp-name counters run across the
+// whole body so a nested branch never re-uses an enclosing scope's temp name.
 //
 // NOTE: the *indent* is deliberately NOT part of the contract.  Three backends
 // hold it as a module constant and Python threads it per call; either way it is
@@ -95,6 +97,15 @@ export interface StmtTarget {
   call(s: ByKind<"call">, ix: StmtIndex): string;
   expression(s: ByKind<"expression">, ix: StmtIndex): string;
   return(s: ByKind<"return">, ix: StmtIndex): string;
+  /** `if <cond> { … } else { … }` — the ONE nesting statement a backend body
+   *  can carry.  `renderedThen` / `renderedElse` are the branch bodies already
+   *  rendered BY THE SPINE with this same target, so they arrive at the
+   *  target's own base indent; the leaf wraps them in its conditional syntax
+   *  and shifts them one level with `indentNested` (see `_stmt/leaves.ts`) —
+   *  the spine cannot do the shift itself because each leaf table closes over
+   *  its indent rather than taking one (see the note above).  `renderedElse`
+   *  is undefined when the source had no `else`. */
+  if(s: ByKind<"if">, ix: StmtIndex, renderedThen: string, renderedElse?: string): string;
 }
 
 /** Render a statement body to the pre-joined whole — exactly
@@ -113,23 +124,50 @@ export function renderStmtsWith(stmts: readonly StmtIR[], target: StmtTarget): s
  * 1:1 against `stmts`).
  */
 export function renderStmtChunksWith(stmts: readonly StmtIR[], target: StmtTarget): string[] {
-  let pre = 0;
-  let prov = 0;
-  return stmts.map((s, i) => {
+  return renderStmtChunks(stmts, target, { pos: 0, pre: 0, prov: 0 });
+}
+
+/**
+ * The temp-name counters, carried across the WHOLE body including the branch
+ * bodies an `if` nests.
+ *
+ * Flat bodies are unaffected: `pos` advances once per statement, so the
+ * positional model still hands statement `i` the index `i` — byte-identical to
+ * the pre-`if` spine.  What it adds is UNIQUENESS ACROSS NESTING: without a
+ * shared counter a nested branch would restart at 0 and a traced body could
+ * declare `__pre_0_ok` twice in scopes C# and Java reject (CS0136 — a nested
+ * block may not shadow an enclosing local).
+ */
+interface StmtCounter {
+  /** Statement position, counting nested branch statements too. */
+  pos: number;
+  /** `"per-kind"`: number of `precondition`s seen so far. */
+  pre: number;
+  /** `"per-kind"`: number of provenanced writes seen so far. */
+  prov: number;
+}
+
+function renderStmtChunks(
+  stmts: readonly StmtIR[],
+  target: StmtTarget,
+  counter: StmtCounter,
+): string[] {
+  return stmts.map((s) => {
     // Order matters for `"per-kind"`: `pre` is evaluated before `prov`, and a
     // statement bumps at most one of the two — one single pass.
+    const pos = counter.pos++;
     const ix: StmtIndex =
       target.indexing === "positional"
-        ? { pre: i, prov: i }
+        ? { pre: pos, prov: pos }
         : {
-            pre: s.kind === "precondition" ? pre++ : 0,
-            prov: (s.kind === "assign" || s.kind === "add") && s.prov ? prov++ : 0,
+            pre: s.kind === "precondition" ? counter.pre++ : 0,
+            prov: (s.kind === "assign" || s.kind === "add") && s.prov ? counter.prov++ : 0,
           };
-    return renderStmt(s, target, ix);
+    return renderStmt(s, target, ix, counter);
   });
 }
 
-function renderStmt(s: StmtIR, target: StmtTarget, ix: StmtIndex): string {
+function renderStmt(s: StmtIR, target: StmtTarget, ix: StmtIndex, counter: StmtCounter): string {
   switch (s.kind) {
     case "precondition":
       return target.precondition(s, ix);
@@ -151,6 +189,13 @@ function renderStmt(s: StmtIR, target: StmtTarget, ix: StmtIndex): string {
       return target.expression(s, ix);
     case "return":
       return target.return(s, ix);
+    case "if":
+      return target.if(
+        s,
+        ix,
+        renderStmtChunks(s.thenBody, target, counter).join("\n"),
+        s.elseBody ? renderStmtChunks(s.elseBody, target, counter).join("\n") : undefined,
+      );
     case "variant-match":
       // Frontend-only effect statement (`match await op() { … }`,
       // async-actions-and-effects.md Stage 2) — gated to page/component action

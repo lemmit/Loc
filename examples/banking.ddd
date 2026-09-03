@@ -69,9 +69,18 @@ context Banking {
       emit MoneyWithdrawn { account: id, amount: amount, at: now() }
     }
 
+    // A zero-balance account has nothing left to protect, so freezing it
+    // closes it outright.  The corpus's hand-written witness for the `if`
+    // statement and the `??` operator (clause census).
     operation freeze(reason: string) {
       precondition status == Open
-      status := Frozen
+      if balance.amount > 0 {
+        status := Frozen
+      } else {
+        status := Closed
+        // `??` keeps an already-recorded close time rather than overwriting it.
+        closedAt := closedAt ?? now()
+      }
       emit AccountFrozen { account: id, reason: reason, at: now() }
     }
 

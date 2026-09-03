@@ -3335,6 +3335,24 @@ export type StmtIR =
       origin?: OriginRef;
     }
   /**
+   * `if <cond> { … } else { … }` — the plain boolean conditional.  The one
+   * NESTING statement a backend body can contain (`variant-match` nests too
+   * but is frontend-only), so the shared `_stmt/target.ts` spine recurses into
+   * the two branches and hands each backend the rendered blocks, exactly as
+   * `renderWorkflowStmts` does for `for-each` / `if-let`.
+   *
+   * `else if` chains lower to a single-statement `elseBody` holding the next
+   * `if` — there is no separate else-if node, so every consumer sees one
+   * shape.  `elseBody` is absent (not empty) when the source had no `else`.
+   */
+  | {
+      kind: "if";
+      cond: ExprIR;
+      thenBody: StmtIR[];
+      elseBody?: StmtIR[];
+      origin?: OriginRef;
+    }
+  /**
    * `return <expr>` — an operation's designed-in outcome
    * (exception-less.md).  `value` produces the operation's declared
    * `or`-union return; the route translator maps an `error`-variant result
@@ -4256,6 +4274,12 @@ function stmtUsesMoney(s: StmtIR): boolean {
       return (
         exprUsesMoney(s.subject) ||
         s.arms.some((a) => a.body.some(stmtUsesMoney)) ||
+        (s.elseBody ?? []).some(stmtUsesMoney)
+      );
+    case "if":
+      return (
+        exprUsesMoney(s.cond) ||
+        s.thenBody.some(stmtUsesMoney) ||
         (s.elseBody ?? []).some(stmtUsesMoney)
       );
   }

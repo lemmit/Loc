@@ -1245,6 +1245,20 @@ export function renderReturningStmt(
       throw new Error(
         "variant-match statement is frontend-only; it must not reach the vanilla Elixir backend",
       );
+    case "if":
+      // The `if` STATEMENT is a node/.NET/java/python form today.  This body
+      // threads its result through a REBOUND `record`, and an Elixir `if`
+      // block's bindings do not escape the block — so a branch that assigns
+      // would compile and silently do nothing.  Rendering it correctly means
+      // making the branch value-producing (`record = if … do … record else
+      // record end`) across every vanilla body renderer, which is its own
+      // slice; until then it is refused up front by
+      // `loom.elixir-if-stmt-unsupported` (ir/validate/checks/if-stmt-checks.ts)
+      // and this arm is the defensive fail-fast.
+      throw new Error(
+        "platform: elixir — an `if` statement reached the vanilla operation emitter; it is " +
+          "refused at validation (loom.elixir-if-stmt-unsupported).",
+      );
   }
 }
 

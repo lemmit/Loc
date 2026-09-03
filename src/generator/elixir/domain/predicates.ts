@@ -34,6 +34,12 @@ export function stmtUsesCurrentUser(s: StmtIR): boolean {
         s.arms.some((a) => a.body.some(stmtUsesCurrentUser)) ||
         (s.elseBody ?? []).some(stmtUsesCurrentUser)
       );
+    case "if":
+      return (
+        exprUsesCurrentUser(s.cond) ||
+        s.thenBody.some(stmtUsesCurrentUser) ||
+        (s.elseBody ?? []).some(stmtUsesCurrentUser)
+      );
   }
 }
 
@@ -83,6 +89,12 @@ export function stmtUsesParam(s: StmtIR, name: string): boolean {
       return (
         exprUsesParam(s.subject, name) ||
         s.arms.some((a) => a.body.some((st) => stmtUsesParam(st, name))) ||
+        (s.elseBody ?? []).some((st) => stmtUsesParam(st, name))
+      );
+    case "if":
+      return (
+        exprUsesParam(s.cond, name) ||
+        s.thenBody.some((st) => stmtUsesParam(st, name)) ||
         (s.elseBody ?? []).some((st) => stmtUsesParam(st, name))
       );
   }

@@ -102,6 +102,11 @@ const DOMAIN_WORD_FLOOR = [
   "immutable",
   "instance",
   "internal",
+  // `key` was a HARD keyword until M-FT.11 — minted by `Channel`'s `key:`
+  // partition-field clause, it stole a field name as ordinary as `title`
+  // (`key: string` on any lookup / config aggregate failed to parse, and the
+  // error landed on the PREVIOUS line).
+  "key",
   "kind",
   "literal",
   "managed",

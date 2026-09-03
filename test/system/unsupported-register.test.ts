@@ -180,8 +180,18 @@ const REGISTER_FILE = path.join(srcRoot, "diagnostics", "unsupported-register.ts
  *  exposure only.  Draining it is M-T3.8 phases 2-4 -- route `sensitivity`
  *  through the same response-boundary seam `mask unless` already uses on all
  *  five backends -- which deletes the row, the check module, and lowers this
- *  back to 46. */
-const MAX_OPEN_GAPS = 47;
+ *  back to 46.
+ *
+ *  RAISED 47 -> 48 by M-FT.11 (`loom.elixir-if-stmt-unsupported`), the slice
+ *  that added the `if` statement.  A raise taken deliberately, because the
+ *  alternative was worse than a gap: elixir's body renderers thread their
+ *  result through a REBOUND `record`, and an Elixir `if` block's bindings do
+ *  not escape the block, so the naive rendering compiles clean under
+ *  `--warnings-as-errors` and then silently does nothing.  The statement ships
+ *  on the other four backends; refusing it on the fifth is the honest half.
+ *  Draining it is M-T6.59 (value-producing branches in every vanilla body
+ *  renderer), which deletes the row and lowers this back to 47. */
+const MAX_OPEN_GAPS = 48;
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {

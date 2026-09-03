@@ -48,6 +48,14 @@ const ALL_KIND_STMTS: StmtIR[] = [
   { kind: "call", target: "function", name: "helper", args: [] },
   { kind: "expression", expr: thisProp("counter") },
   { kind: "return", value: litInt("5") },
+  // The one NESTING kind (M-FT.11): its branch lines stay inside its own chunk,
+  // so the join-equivalence has to hold across a multi-line, recursive arm too.
+  {
+    kind: "if",
+    cond: thisProp("ready"),
+    thenBody: [{ kind: "return", value: litInt("6") }],
+    elseBody: [{ kind: "expression", expr: thisProp("counter") }],
+  },
 ];
 
 describe("renderTsStatementChunks — join-equivalence with renderTsStatements", () => {

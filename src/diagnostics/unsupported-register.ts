@@ -185,6 +185,21 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
     mission: "M-T6.34",
   },
   {
+    code: "loom.elixir-if-stmt-unsupported",
+    kind: "gap",
+    site: "src/ir/validate/checks/if-stmt-checks.ts:74",
+    what:
+      "the `if` STATEMENT in a domain body an elixir deployable emits — every Phoenix body renderer " +
+      "threads its result through a rebound `record`, and an Elixir `if` block's bindings do not " +
+      "escape the block, so an assigning branch would compile and silently do nothing.  Closing it " +
+      "means making each branch value-producing (`record = if … do … record else record end`) in " +
+      "every vanilla body renderer; the other four backends render the statement today.  " +
+      "raised by the M-FT.11 field-test slice, which shipped the statement on the four spine " +
+      "backends and gated elixir rather than half-render it",
+    mission: "M-T6.59",
+    verified: true,
+  },
+  {
     code: "loom.feliz-async-effect-unsupported",
     kind: "gap",
     site: "src/ir/validate/checks/store-checks.ts:451",
@@ -253,6 +268,18 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
       "`paged`/`envelope` generic carriers ship on all five backends " +
       "(SUPPORTED_PAGED_BACKENDS) — latent seam for a NEW backend",
     mission: "M-T5.3",
+  },
+  {
+    code: "loom.if-stmt-page-body-unsupported",
+    kind: "scope",
+    site: "src/ir/validate/checks/if-stmt-checks.ts:109",
+    what:
+      "the `if` STATEMENT in a `ui` page / component / store body, on EVERY frontend.  A page body " +
+      "is an expression tree — a condition is a VALUE there (`cond ? a : b`, `match`) — and no " +
+      "frontend emitter (JS walker / Feliz update / Flutter notifier / HEEx handler) has a " +
+      "statement-position conditional.  A declared limit of the page surface, not a per-target gap: " +
+      "it would be lifted by a decision to give page bodies statement-form control flow",
+    verified: true,
   },
   {
     code: "loom.java-reserved-identifier-unsupported",
