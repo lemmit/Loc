@@ -24,6 +24,16 @@ import { generateTypeScript } from "../platform/hono/v4/emit.js";
 import { BACKEND_PINS as HONO_V4_PINS } from "../platform/hono/v4/pins.js";
 import { generateSystemsFromLoom } from "../system/index.js";
 import { captureSnapshots } from "../system/loomsnap.js";
+import {
+  buildManifest,
+  carriedOverEntries,
+  MANIFEST_REL_PATH,
+  type ManifestEntry,
+  type OutputManifest,
+  parseManifest,
+  planPrune,
+  serializeManifest,
+} from "../system/manifest.js";
 import { fsMigrationArtifactIndex, MigrationBaselineError } from "../system/migration-artifacts.js";
 import {
   MigrationDestructiveError,
@@ -442,6 +452,9 @@ interface RunResult {
   /** Files preserved on regen because they are scaffold-once and already
    * existed on disk (user-owned extern impls, etc.). */
   preservedScaffold?: number;
+  /** Stale files deleted on regen: listed in the previous `.loom/manifest.json`
+   * but no longer emitted.  See `src/system/manifest.ts`. */
+  removed?: number;
 }
 
 type GenerateTarget = "ts" | "dotnet" | "system";
@@ -588,6 +601,47 @@ async function runGenerate(
   let skippedByIgnore = 0;
   let preservedScaffold = 0;
   const resolvedOut = path.resolve(outDir);
+  // The manifest the LAST run wrote (`.loom/manifest.json`) — the only
+  // authority for what this generator owns on disk, and therefore for what it
+  // may delete when it stops emitting a path.  Missing/unreadable ⇒ null ⇒
+  // this run prunes nothing and simply re-establishes the manifest.
+  const previousManifest = readOutputManifest(outDir);
+  // The manifest the NEXT run diffs against, computed BEFORE the write loop
+  // and then handed to that loop as an ordinary emitted file.  Everything the
+  // writer already guarantees therefore applies to it for free: `--dry-run`
+  // lists it (so the preview still predicts exactly the set a real run
+  // writes), and an unchanged manifest is not rewritten (so a no-op regen
+  // still touches no mtime — the reload signal watchers depend on).  Both are
+  // gated by `test/cli/regeneration.test.ts`, and special-casing the manifest
+  // broke both; nothing here may reintroduce a bespoke write path for it.
+  //
+  // `.loomignore`d paths are excluded from the entries: the run did not write
+  // them, so it must not claim ownership of them.  The manifest lists itself,
+  // which keeps it out of its own successor's prune set (belt to
+  // `isProtectedFromPrune`'s braces).
+  const manifestEntries: ManifestEntry[] = [{ path: MANIFEST_REL_PATH }];
+  for (const relPath of [...files.keys()].sort()) {
+    const normalised = relPath.split(path.sep).join("/");
+    if (ig.ignores(normalised)) continue;
+    manifestEntries.push(
+      isScaffoldOnce(files.get(relPath)!)
+        ? { path: normalised, scaffoldOnce: true }
+        : { path: normalised },
+    );
+  }
+  // Paths a past run emitted and this one does not, but that the generator
+  // still owns — the protected families, chiefly the earlier migrations no
+  // backend re-emits.  Carried over so the manifest does not churn; see
+  // `carriedOverEntries`.
+  manifestEntries.push(
+    ...carriedOverEntries(
+      previousManifest,
+      manifestEntries.map((e) => e.path),
+      (p) => fs.existsSync(path.join(outDir, p)),
+    ),
+  );
+  files.set(MANIFEST_REL_PATH, serializeManifest(buildManifest(manifestEntries)));
+
   const sortedPaths = [...files.keys()].sort();
   for (const relPath of sortedPaths) {
     const content = files.get(relPath)!;
@@ -653,13 +707,95 @@ async function runGenerate(
     fs.writeFileSync(full, content, "utf8");
     written++;
   }
+  // ── Prune (finding G1) ────────────────────────────────────────────────
+  // Regeneration used to only ever ADD: rename an operation and the old
+  // handler stayed behind, calling a method the aggregate no longer has, so
+  // the generated project stopped compiling.  A path is deleted only when the
+  // PREVIOUS manifest lists it (⇒ a past run of this generator wrote it) and
+  // this run does not emit it.  `planPrune` additionally spares scaffold-once
+  // files, `.loomignore`d paths, and the protected families (migration files,
+  // `.loom/snapshots/`) — see `src/system/manifest.ts` for why each is on the
+  // list.  Anything with no manifest entry — every hand-written file — is
+  // structurally out of reach.
+  //
+  // Runs AFTER the write loop, so the new manifest is already on disk.  A run
+  // killed between the two therefore leaves a stale file that no manifest
+  // lists any more — it survives forever instead of being deleted.  That is
+  // the direction to fail in: this code's only irreversible act is a delete.
+  const prune = planPrune(
+    previousManifest,
+    manifestEntries.map((e) => e.path),
+    {
+      isIgnored: (p) => ig.ignores(p),
+      exists: (p) => fs.existsSync(path.join(outDir, p)),
+    },
+  );
+  let removed = 0;
+  for (const relPath of prune.remove) {
+    // A manifest is a file on disk and can be hand-edited; re-apply the same
+    // containment check the write loop uses so a doctored entry can never
+    // make a regen delete outside the output tree.
+    if (escapesOutDir(resolvedOut, relPath)) {
+      console.error(
+        `Refusing to remove '${relPath}': path escapes the output directory ${outDir}.`,
+      );
+      continue;
+    }
+    const full = path.join(outDir, relPath);
+    if (options.dryRun) {
+      console.log(`  remove (stale)      ${relPath}`);
+      removed++;
+      continue;
+    }
+    try {
+      fs.rmSync(full);
+    } catch (err) {
+      console.error(`Could not remove stale file '${relPath}': ${(err as Error).message}`);
+      continue;
+    }
+    console.log(`  removed             ${relPath}`);
+    removed++;
+    pruneEmptyDirs(resolvedOut, path.dirname(full));
+  }
+
   const verb = options.dryRun ? "Would write" : "Wrote";
   const parts: string[] = [`${verb} ${written} file(s) in ${outDir}`];
   if (unchanged > 0) parts.push(`unchanged: ${unchanged}`);
   if (preservedScaffold > 0) parts.push(`preserved (scaffold-once): ${preservedScaffold}`);
   if (skippedByIgnore > 0) parts.push(`skipped (.loomignore): ${skippedByIgnore}`);
+  if (removed > 0) parts.push(`${options.dryRun ? "would remove" : "removed"} (stale): ${removed}`);
   console.log(parts.join(", "));
-  return { hadError: false, written, unchanged, skippedByIgnore, preservedScaffold };
+  return { hadError: false, written, unchanged, skippedByIgnore, preservedScaffold, removed };
+}
+
+/** Read `.loom/manifest.json` from a previous run.  Any failure — absent,
+ *  unreadable, truncated, or a newer schema version — degrades to `null`,
+ *  i.e. "prune nothing this run". */
+function readOutputManifest(outDir: string): OutputManifest | null {
+  const file = path.join(outDir, MANIFEST_REL_PATH);
+  let text: string;
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch {
+    return null;
+  }
+  return parseManifest(text);
+}
+
+/** After deleting a stale file, walk its parent chain up to (but never
+ *  including) the output dir and drop directories the deletion emptied — a
+ *  renamed page should not leave an empty `pages/` husk behind.  `rmdirSync`
+ *  fails on a non-empty directory, which is exactly the stop condition. */
+function pruneEmptyDirs(resolvedOut: string, startDir: string): void {
+  let dir = path.resolve(startDir);
+  while (dir.startsWith(resolvedOut + path.sep)) {
+    try {
+      fs.rmdirSync(dir);
+    } catch {
+      return; // non-empty (or gone) — stop climbing
+    }
+    dir = path.dirname(dir);
+  }
 }
 
 /** Resolve the current git commit (short) for the snapshot envelope, or
