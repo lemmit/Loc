@@ -46,7 +46,7 @@ import type {
   VirtualFile,
 } from "./build/protocol";
 import { inlineSourcemapArtifacts, overlaySourcemapArtifacts } from "./build/strip-sourcemap";
-import { correspondenceAt, sourceSpanFor } from "./build/correspondence";
+import { type Band, correspondenceAt, sourceBands, sourceSpanFor } from "./build/correspondence";
 import { diffGenerated, type OutputDiff } from "./build/output-diff";
 import type { BundleOk } from "./bundle/protocol";
 import {
@@ -138,6 +138,9 @@ const capLog = (lines: LogLine[]): LogLine[] =>
 
 /** Shared "no generated files yet" identity — see the `files` derivation. */
 const EMPTY_FILES: VirtualFile[] = [];
+// Same module-level-constant discipline as EMPTY_FILES: a fresh `[]` per
+// render would defeat the `ctx` memo for every consumer.
+const EMPTY_BANDS: readonly Band[] = [];
 
 /** Per-deployable summary derived from the generated file tree.
  *  The playground only knows how to bundle + boot Hono backends and
@@ -1787,6 +1790,11 @@ export default function App(): JSX.Element {
     return correspondenceAt(sourceMap, sources.activePath, correspondenceLine, sourceRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sourceMap, correspondenceLine, sources.activePath, editorSourceTick]);
+  const correspondenceBands = useMemo(() => {
+    if (!sourceMap || !colourMap) return EMPTY_BANDS;
+    return sourceBands(sourceMap, sources.activePath, sourceRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sourceMap, colourMap, sources.activePath, editorSourceTick]);
   const reverseSpan = useMemo(() => {
     if (!sourceMap || !reverseHover) return null;
     return sourceSpanFor(
@@ -2304,6 +2312,7 @@ export default function App(): JSX.Element {
       correspondence,
       reverseSpan,
       colourMap,
+      sourceBands: correspondenceBands,
       reqMethod,
       reqPath,
       reqBody,
@@ -2392,6 +2401,7 @@ export default function App(): JSX.Element {
       correspondence,
       reverseSpan,
       colourMap,
+      correspondenceBands,
       reqMethod,
       reqPath,
       reqBody,

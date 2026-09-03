@@ -26,7 +26,7 @@ import type {
   SnapshotResult,
   VirtualFile,
 } from "../build/protocol";
-import type { Correspondence, SourceSpan } from "../build/correspondence";
+import type { Band, Correspondence, SourceSpan } from "../build/correspondence";
 import type { OutputDiff } from "../build/output-diff";
 import type { BundleFail, BundleOk } from "../bundle/protocol";
 import type { LoomExample } from "../examples";
@@ -418,6 +418,10 @@ export interface LayoutCtx {
   /** The godbolt colour-mapping toggle. */
   colourMap: boolean;
   setColourMap: (v: boolean) => void;
+  /** One band per declaration in the active `.ddd`, for the colour overlay.
+   *  Empty unless `colourMap` is on — the bands are derived from the live
+   *  editor text, which only App can see. */
+  sourceBands: readonly Band[];
 
   // Playground auth stub (Phase 7) — identity injected into dispatched
   // requests via the `x-loom-dev-claims` header.  Persisted by App.tsx.

@@ -1,5 +1,7 @@
-import { Suspense, useEffect } from "react";
+import { Suspense, useEffect, useMemo } from "react";
 import { Box, Center, Loader } from "@mantine/core";
+import { constructBand } from "../build/correspondence";
+import type { SourceHighlight } from "../editor/correspondence-decorations";
 import { PlainEditor } from "../editor/PlainEditor";
 import { LazyLoomEditor, preloadDesktopEditor } from "./lazy-panels";
 import { SourceFilesTree } from "./SourceFilesTree";
@@ -54,6 +56,30 @@ export function EditorPane({ ctx, border = "none" }: Props): JSX.Element | null 
   useEffect(() => {
     if (isDesktop) preloadDesktopEditor();
   }, [isDesktop]);
+
+  // Correspondence tinting for the SOURCE editor (M-T8.20 slice 3): the
+  // standing colour-map bands, plus the transient flash of the `.ddd` span a
+  // hovered generated line came from.  The flash is appended last so it wins
+  // over the band it sits inside.
+  const { colourMap, sourceBands: bands, reverseSpan } = ctx;
+  const sourceHighlights = useMemo<SourceHighlight[]>(() => {
+    const out: SourceHighlight[] = colourMap
+      ? bands.map((b) => ({
+          startLine: b.startLine,
+          endLine: b.endLine,
+          band: constructBand(b.construct),
+          kind: "band" as const,
+        }))
+      : [];
+    if (reverseSpan?.startLine !== undefined && reverseSpan.endLine !== undefined) {
+      out.push({
+        startLine: reverseSpan.startLine,
+        endLine: reverseSpan.endLine,
+        kind: "flash",
+      });
+    }
+    return out;
+  }, [colourMap, bands, reverseSpan]);
 
   // Desktop wants the full editor and therefore the language client; mobile
   // has neither, and `lspClient` is `null` there by construction (App.tsx
@@ -111,6 +137,15 @@ export function EditorPane({ ctx, border = "none" }: Props): JSX.Element | null 
             onChange={(v) => onSourceChange(v, "editor")}
             onDiagnosticsChange={onDiagnosticsChange}
             activePath={activeSourcePath}
+            // Sticky on leave: the correspondence has to survive the mouse
+            // travelling to the Explorer or the open generated file, which is
+            // the whole point of it (godbolt keeps its mapping while you read
+            // the output pane).  The editor still reports `null` honestly;
+            // this is where the decision to ignore it lives.
+            onHoverLine={(line) => {
+              if (line !== null) ctx.setCorrespondenceLine(line);
+            }}
+            highlights={sourceHighlights}
           />
         </Suspense>
       ) : (

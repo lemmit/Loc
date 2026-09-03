@@ -18,7 +18,8 @@ import { EditorPane } from "./EditorPane";
 import { PreviewPane } from "./PreviewPane";
 import { DevToolsDock } from "./DevToolsDock";
 import { ExplorerTree, type RowMark } from "../preview/ExplorerTree";
-import { constructHue } from "../build/correspondence";
+import { constructBand, constructHue, generatedBands } from "../build/correspondence";
+import type { ViewerHighlight } from "../editor/correspondence-decorations";
 import { LazyFileViewer } from "./lazy-panels";
 import { SourceFilesTree } from "./SourceFilesTree";
 import { PaneErrorBoundary } from "../PaneErrorBoundary";
@@ -126,6 +127,35 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
   // Which row the generated Explorer view highlights as active.
   const generatedSelection =
     secondaryDoc?.source === "generated" ? secondaryDoc.path : null;
+
+  // Correspondence tinting for the OPEN generated file: the standing colour
+  // map (every construct's regions in this file) plus the "hit" lines the
+  // declaration under the editor cursor produced.
+  const openPath = secondaryDoc?.source === "generated" ? secondaryDoc.path : null;
+  const viewerHighlights = useMemo<ViewerHighlight[]>(() => {
+    if (!openPath) return [];
+    const out: ViewerHighlight[] = [];
+    if (ctx.colourMap && ctx.sourceMap) {
+      for (const band of generatedBands(ctx.sourceMap, openPath)) {
+        out.push({
+          startLine: band.startLine,
+          endLine: band.endLine,
+          band: constructBand(band.construct),
+          kind: "band",
+        });
+      }
+    }
+    const match = correspondence?.files.find((f) => f.file === openPath);
+    for (const span of match?.highlights ?? []) {
+      out.push({
+        startLine: span.startLine,
+        endLine: span.endLine,
+        band: constructBand(span.construct ?? correspondence?.construct ?? ""),
+        kind: "hit",
+      });
+    }
+    return out;
+  }, [openPath, ctx.colourMap, ctx.sourceMap, correspondence]);
 
   const leftRef = usePanelRef();
   const rightRef = usePanelRef();
@@ -404,7 +434,17 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
                   {secondaryDoc && (
                     <Box style={{ flex: 1, minHeight: 0, display: centerView === "secondary" ? "flex" : "none" }}>
                       <Suspense fallback={<Box p="md"><Text size="sm" c="dimmed">Loading viewer…</Text></Box>}>
-                        <LazyFileViewer key={secondaryDoc.path} path={secondaryDoc.path} content={secondaryDoc.content} />
+                        <LazyFileViewer
+                          key={secondaryDoc.path}
+                          path={secondaryDoc.path}
+                          content={secondaryDoc.content}
+                          highlights={viewerHighlights}
+                          onHoverLine={(line) =>
+                            ctx.setReverseHover(
+                              line === null ? null : { file: secondaryDoc.path, line },
+                            )
+                          }
+                        />
                       </Suspense>
                     </Box>
                   )}

@@ -331,17 +331,32 @@ function regionsFor(map: SourceMap, file: string): WireRegion[] | undefined {
  *  sharing a hue is obviously a collision rather than a claim. */
 const BAND_HUES = [200, 25, 145, 320, 55, 265, 175, 0];
 
-/** A stable colour for a construct id — the same declaration takes the same
- *  hue in the source editor and in every generated file it produced, which is
- *  the entire point of the mapping.  Deterministic (a content hash, not an
- *  enumeration order) so it survives a regenerate that reorders files. */
-export function constructHue(construct: string): number {
+/** How many distinct band colours exist — the CSS side generates one class
+ *  per band, so it needs the count without importing the table. */
+export const BAND_HUE_COUNT = BAND_HUES.length;
+
+/** The hue of band `index`. */
+export function hueOfBand(index: number): number {
+  return BAND_HUES[index % BAND_HUES.length]!;
+}
+
+/** A stable band index for a construct id — the same declaration takes the
+ *  same colour in the source editor and in every generated file it produced,
+ *  which is the entire point of the mapping.  Deterministic (a content hash,
+ *  not an enumeration order) so it survives a regenerate that reorders
+ *  files. */
+export function constructBand(construct: string): number {
   let h = 0x811c9dc5;
   for (let i = 0; i < construct.length; i++) {
     h ^= construct.charCodeAt(i);
     h = Math.imul(h, 0x01000193);
   }
-  return BAND_HUES[(h >>> 0) % BAND_HUES.length]!;
+  return (h >>> 0) % BAND_HUES.length;
+}
+
+/** The hue a construct takes — `hueOfBand(constructBand(...))`. */
+export function constructHue(construct: string): number {
+  return hueOfBand(constructBand(construct));
 }
 
 /** `hsl()` fill for a construct's band, at the given alpha. */
