@@ -1,10 +1,11 @@
 // Auto-generated.
 import { provideHttpClient, withFetch } from "@angular/common/http";
-import { type ApplicationConfig, provideZoneChangeDetection } from "@angular/core";
+import { type ApplicationConfig, ErrorHandler, provideZoneChangeDetection } from "@angular/core";
 import { provideAnimationsAsync } from "@angular/platform-browser/animations/async";
 import { provideRouter } from "@angular/router";
 import { QueryClient, provideTanStackQuery } from "@tanstack/angular-query-experimental";
 import { routes } from "./app.routes";
+import { LoomErrorHandler } from "./error-handler";
 
 // App-wide providers: the router table, a fetch-backed HttpClient the api
 // query/mutation layer wraps, Material's async animations, and the TanStack
@@ -17,5 +18,8 @@ export const appConfig: ApplicationConfig = {
     provideHttpClient(withFetch()),
     provideAnimationsAsync(),
     provideTanStackQuery(new QueryClient()),
+    // Root render-time error handler (M-T1.8) — Angular's default one only
+    // logs, leaving a torn-down view and a blank page.
+    { provide: ErrorHandler, useExisting: LoomErrorHandler },
   ],
 };

@@ -80,6 +80,14 @@ function renderInitLiteral(e: ExprIR): string | undefined {
     // int / decimal / bool already carry their JS-literal text.
     return e.value;
   }
+  // An ENUM VALUE (`s: Status = Status.draft`) lowers to a `ref` with
+  // `refKind: "enum-value"`, which is exactly the shape `walker-core` renders
+  // as a bare string literal (an enum is a string union on the wire).  Without
+  // this arm it fell through to `undefined` and the field silently mounted at
+  // the type ZERO — a value that is not in the enum at all.  React and Svelte
+  // never had the bug: their page shells render the init through the real
+  // expression emitter, not through a literal-only reader.
+  if (e.kind === "ref" && e.refKind === "enum-value") return JSON.stringify(e.name);
   if (e.kind === "list") {
     const els = e.elements.map(renderInitLiteral);
     return els.every((x): x is string => x !== undefined) ? `[${els.join(", ")}]` : undefined;

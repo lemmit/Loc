@@ -3,8 +3,9 @@
 // outlet.  Plain styled elements (no component library), so the component
 // registers only router directives.  Nav labels/links are baked at
 // generation time.
-import { Component{{#if navUsesSession}}, inject{{/if}} } from "@angular/core";
+import { Component, inject } from "@angular/core";
 import { RouterLink,{{#if hasNav}} RouterLinkActive,{{/if}} RouterOutlet } from "@angular/router";
+import { LoomErrorHandler } from "./error-handler";
 {{#if authUi}}import { AuthGateComponent } from "./auth/auth-gate.component";
 {{/if}}{{#if navUsesSession}}import { SessionService } from "./auth/session.service";
 {{/if}}{{#if hasRealtimeHandlers}}import { RealtimeHandlersComponent } from "./realtime-handlers.component";
@@ -20,7 +21,7 @@ import { RouterLink,{{#if hasNav}} RouterLinkActive,{{/if}} RouterOutlet } from 
 {{/if}}{{#if hasRealtimeHandlers}}    RealtimeHandlersComponent,
 {{/if}}  ],
   template: `
-    <a href="#main-content" class="loom-skip-link">{{{skipToContentText}}}</a>
+{{{errorBanner}}}    <a href="#main-content" class="loom-skip-link">{{{skipToContentText}}}</a>
 {{#if hasRealtimeHandlers}}    <app-realtime-handlers />
 {{/if}}    <div class="loom-shell">
       <aside class="loom-sidebar" data-testid="nav-sidebar">

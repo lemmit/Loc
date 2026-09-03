@@ -159,6 +159,12 @@ export function generateAngularForContexts(
   // Interactive-table sort helper (M-T1.1) — re-exposed as a component member
   // by any page rendering a sortable Table; emitted unconditionally.
   out.set("src/lib/table-sort.ts", buildTableSortHelper());
+  // Code-point length validators (F2-XB-2) — Angular is the only frontend
+  // deriving NATIVE validators from a `SingleFieldPattern`, and its built-in
+  // `Validators.minLength`/`maxLength` count UTF-16 code units where Loom (and
+  // every other target, via the shared zod schema) counts code points.  Emitted
+  // unconditionally, imported only by the components that carry a length
+  // constraint.
 
   // --- Pages — bodies walk through the SHARED markup walker with
   // `angularTarget`; the angularMaterial pack templates own the markup
@@ -499,6 +505,14 @@ export function generateAngularForContexts(
   // interpolation resolves against the instance).  Empty (`{}`) — byte-identical
   // to the pre-i18n shell — when neither applies.
   const appClassMembers: string[] = [];
+  // Root render-time error handler (M-T1.8).  Angular has no component-level
+  // boundary and its DEFAULT `ErrorHandler` only logs, so a component that
+  // threw while rendering left a torn-down view and a blank page — the exact
+  // failure React's `src/ErrorBoundary.tsx` has covered since it shipped.
+  // `LoomErrorHandler` records the error in a signal; the shell renders it as
+  // the banner spliced in at `errorBanner` below.  Unconditional: an app that
+  // cannot fail is not a thing.
+  appClassMembers.push("  readonly errors = inject(LoomErrorHandler);");
   if (navUsesSession) {
     appClassMembers.push("  readonly session = inject(SessionService);");
     appClassMembers.push(
@@ -506,6 +520,14 @@ export function generateAngularForContexts(
     );
   }
   if (i18nEnabled) appClassMembers.push("  protected readonly t = t;");
+  // The IN-SHELL heading key (`chrome.somethingWentWrong`, no full stop), not
+  // React's `rootErrorTitle`: this banner renders inside the app shell, where
+  // that key already lives.  `rootErrorTitle` belongs to a STANDALONE root
+  // module mounted outside the shell — React's `src/ErrorBoundary.tsx` and,
+  // structurally, Svelte's root `+layout.svelte` — and spells the same idea
+  // with a full stop.  Using it here would leave "Something went wrong" in the
+  // shell bound to the wrong key (pack-chrome-i18n.test.ts catches exactly that).
+  const errorTitleText = angularChromeText("somethingWentWrong", i18nEnabled);
   const appClass =
     appClassMembers.length > 0
       ? `export class AppComponent {\n${appClassMembers.join("\n")}\n}`
@@ -522,10 +544,20 @@ export function generateAngularForContexts(
       i18nEnabled,
       skipToContentText,
       primaryNavAria,
+      // The fallback the root ErrorHandler's signal drives.  Built here rather
+      // than per-pack because it is chrome, not theme: all three Angular packs
+      // splice the same `{{{errorBanner}}}` as their template's first node.
+      errorBanner: renderAngularErrorBanner(errorTitleText),
       appClass,
     }),
   );
   out.set("src/app/app.config.ts", pack.render("app-config", {}));
+  // Root render-time error handler (M-T1.8) — the Angular twin of React's
+  // `src/ErrorBoundary.tsx`.  Angular has no component-level boundary, and its
+  // DEFAULT ErrorHandler only logs, so a throwing component left a blank page.
+  // Emitted unconditionally; `app.config.ts` provides it as the app's
+  // `ErrorHandler` and the app shell renders its `lastError` as a banner.
+  out.set("src/app/error-handler.ts", pack.render("error-handler", {}));
 
   // --- Frontend auth (`auth: ui`) ------------------------------------
   // The session service owns the /auth/me probe + sign-in/out redirects (and
@@ -678,6 +710,27 @@ import { RouterLink } from "@angular/router";
 })
 export class NotFoundComponent {}
 `;
+
+/** The root error-handler FALLBACK, spliced into every Angular pack's app
+ *  shell as its first template node.
+ *
+ *  Chrome, not theme — all three packs render the identical banner — so it is
+ *  built once here rather than copied into three `app-shell.hbs` files.  Bound
+ *  to `LoomErrorHandler.lastError`, an Angular signal, so the banner appears
+ *  the moment an uncaught render error reaches the app's `ErrorHandler` and
+ *  disappears when the user dismisses it. */
+function renderAngularErrorBanner(errorTitleText: string): string {
+  return [
+    "    @if (errors.lastError(); as err) {",
+    '      <div role="alert" data-testid="root-error" style="padding:16px;font-family:system-ui,sans-serif">',
+    `        <h2 style="white-space:pre-wrap;color:#b91c1c">${errorTitleText}</h2>`,
+    '        <pre style="white-space:pre-wrap;color:#b91c1c">{{ err.message }}</pre>',
+    '        <button type="button" (click)="errors.reset()">Dismiss</button>',
+    "      </div>",
+    "    }",
+    "",
+  ].join("\n");
+}
 
 /** True when an emitted Angular source renders the chart component — the
  *  signal that `loom-chart.component.ts` has to be written alongside it.  The

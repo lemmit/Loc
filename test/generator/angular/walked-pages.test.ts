@@ -691,8 +691,10 @@ async function inputPage(): Promise<string> {
 describe("angular generator — standalone state-bound inputs", () => {
   it("binds each input to its state signal (read () / write .set())", async () => {
     const page = await inputPage();
+    // `Field` carries the derived a11y id (M-T1.12) — the other input
+    // primitives keep their own templates and are unchanged.
     expect(page).toContain(
-      '<input matInput [value]="name()" (input)="name.set($any($event.target).value)" />',
+      '<input matInput id="loom-field-name" [value]="name()" (input)="name.set($any($event.target).value)" />',
     );
     expect(page).toContain(
       '<input matInput type="number" [value]="count()" (input)="count.set(+$any($event.target).value)" />',

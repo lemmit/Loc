@@ -383,7 +383,19 @@ export function generateSvelteForContexts(
       toggleNavAria: shellChromeAttr("aria-label", "toggleNavigation", i18nEnabled),
     }),
   );
-  out.set("src/routes/+layout.svelte", pack.render("root-layout", { hasRealtimeHandlers, authUi }));
+  out.set(
+    "src/routes/+layout.svelte",
+    pack.render("root-layout", {
+      hasRealtimeHandlers,
+      authUi,
+      // Root render-time error boundary (M-T1.8) — its heading is pack chrome,
+      // keyed `chrome.rootErrorTitle` exactly like React's `src/ErrorBoundary.tsx`
+      // (Svelte shares JSX's single-brace interpolation, so the same token
+      // renders); raw string when i18n is off, so that output is unchanged.
+      i18nEnabled,
+      errorTitleText: shellChromeText("rootErrorTitle", i18nEnabled),
+    }),
+  );
   out.set("src/routes/+layout.ts", SVELTE_LAYOUT_TS);
 
   // Project shell.

@@ -4,9 +4,10 @@
 // PrimeNG's `p-toolbar` and the sidebar is plain styled markup keyed by the
 // same nav testids the other Angular shells use.  Nav labels/links are baked
 // at generation time.
-import { Component{{#if navUsesSession}}, inject{{/if}} } from "@angular/core";
+import { Component, inject } from "@angular/core";
 import { ToolbarModule } from "primeng/toolbar";
 import { RouterLink,{{#if hasNav}} RouterLinkActive,{{/if}} RouterOutlet } from "@angular/router";
+import { LoomErrorHandler } from "./error-handler";
 {{#if authUi}}import { AuthGateComponent } from "./auth/auth-gate.component";
 {{/if}}{{#if navUsesSession}}import { SessionService } from "./auth/session.service";
 {{/if}}{{#if hasRealtimeHandlers}}import { RealtimeHandlersComponent } from "./realtime-handlers.component";
@@ -23,7 +24,7 @@ import { RouterLink,{{#if hasNav}} RouterLinkActive,{{/if}} RouterOutlet } from 
 {{/if}}{{#if hasRealtimeHandlers}}    RealtimeHandlersComponent,
 {{/if}}  ],
   template: `
-    <a href="#main-content" class="loom-skip-link">{{{skipToContentText}}}</a>
+{{{errorBanner}}}    <a href="#main-content" class="loom-skip-link">{{{skipToContentText}}}</a>
 {{#if hasRealtimeHandlers}}    <app-realtime-handlers />
 {{/if}}    <p-toolbar styleClass="loom-toolbar">
       <ng-template pTemplate="start">

@@ -9,6 +9,15 @@
 // this surfaced: the children a caller passed a component never appeared,
 // while the same body under a `Stack` worked.
 //
+// The call site passes NO children (`Panel("Hi")`).  It used to pass one, but
+// that is not what these assertions are about — they read the emitted PANEL
+// COMPONENT and check its `Slot { }` reached the output, which is a property of
+// the component BODY, not of the call.  Passing a child there also made the
+// fixture trip `loom.component-children-unsupported` on the Angular arm (that
+// frontend drops call-site children — `ngComponentOutlet` has no
+// content-projection channel), which is a different defect from the one this
+// file pins.
+//
 // The two packs that emit a PROGRAMMING LANGUAGE rather than markup take the
 // children unjoined (`contentChildren`) and join them their own way, because
 // the walker's `\n`-joined block is a syntax hazard in both: an F#
@@ -44,7 +53,7 @@ system CardSlot {
     }
     page Home {
       route: "/"
-      body: Stack { Panel("Hi", Text { "passed-in" }) }
+      body: Stack { Panel("Hi") }
     }
   }
   api OpsApi from S

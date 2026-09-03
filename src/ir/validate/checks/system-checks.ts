@@ -51,12 +51,14 @@ import {
 import { isMacroEmitted } from "../../types/origin.js";
 import { backendServesRealtime } from "../../util/channels.js";
 import { bodyUsesChart } from "../../util/chart.js";
+import { componentChildrenHosts } from "../../util/component-children.js";
 import { dataGridHosts } from "../../util/data-grid.js";
 import { aggregateFileField } from "../../util/file-field.js";
 import {
   firstUnlowerableForAdapter,
   isFindPredicateAdapter,
 } from "../../util/find-predicate-capability.js";
+import { FORM_LOCAL_FRAMEWORKS, formLocalCollisionHosts } from "../../util/form-locals.js";
 import { heexComponentHostStateUses } from "../../util/heex-component-host-state.js";
 import { nonRootFilterFields, rootBaseOf } from "../../util/inheritance.js";
 import { readableProjectionNames } from "../../util/projection-read.js";
@@ -602,6 +604,102 @@ export function validateHeexComponentHostState(sys: SystemIR, diags: LoomDiagnos
             dName: d.name,
           }),
           source: `${ui.name}/${component}`,
+        });
+      }
+    }
+  }
+}
+
+/** A user component invoked WITH CHILDREN on the Angular frontend.
+ *
+ *  HONEST GAP.  Angular has no PascalCase component tag, so a user component
+ *  is invoked through `<ng-container [ngComponentOutlet]="X" …>`, and
+ *  `ngComponentOutlet` cannot project content from a template
+ *  (`ngComponentOutletContent` takes pre-built DOM nodes — TS-side only).  So
+ *  the extra positional argument that every JSX-family frontend renders as
+ *  children was DROPPED, silently: the child markup appeared nowhere in the
+ *  emitted project, and `renderUserComponent`'s doc comment admitting the drop
+ *  was the only trace anywhere.
+ *
+ *  Angular-scoped on purpose — react / vue / svelte render the children into
+ *  the component's `Slot { }` correctly, and feliz / flutter / heex were not
+ *  probed, so naming them would be an unverified refusal.
+ *
+ *  Ratchet: a WALKED component already carries a kebab selector
+ *  (`components-emit.ts`) and its `Slot { }` already emits `<ng-content>`
+ *  (`angular-target.renderChildrenSlot`), so the call site can switch from the
+ *  outlet to `<app-x …>children</app-x>` with the class in the page's
+ *  standalone `imports: []`.  That PR narrows this gate to `extern` components
+ *  (no Loom-known selector) or deletes it. */
+export function validateComponentChildrenSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  for (const d of sys.deployables) {
+    for (const { ui, fw } of mountedUis(sys, d)) {
+      if (fw !== "angular") continue;
+      for (const hit of componentChildrenHosts(ui)) {
+        diags.push({
+          // WARNING, not error, and the choice is deliberate.  #2734 made the
+          // same drop VISIBLE at the call site (a degradation comment in the
+          // emitted Angular) rather than blocking, and the two remedies are
+          // complementary rather than rival: the comment documents the loss in
+          // the output, this diagnostic tells the author at compile time, and
+          // between them nothing about the drop is silent any more.  Raising
+          // this to `error` would additionally REFUSE a model that has always
+          // generated — a breaking change, and one that would make #2734's
+          // comment path unreachable — so the non-blocking half of the pair is
+          // the one that belongs here.
+          severity: "warning",
+          code: "loom.component-children-unsupported",
+          message: diagMessage("loom.component-children-unsupported", {
+            what: hit.what,
+            component: hit.component,
+            dName: d.name,
+          }),
+          source: `${ui.name}/${hit.what}`,
+        });
+      }
+    }
+  }
+}
+
+/** Two forms on one page whose generated page-local bindings collide.
+ *
+ *  HONEST GAP, not a design rule.  Every JS frontend splices a form's mutation
+ *  hook + form handle in as page-scope consts named by the design pack's
+ *  `form-of-decls` / `form-op-decls` templates, and react / svelte / vue name
+ *  them BARE (`create`, `form`, `register`, `handleSubmit`) — so a second form
+ *  on the same page redeclares them.  React and Svelte then fail to build
+ *  (TS2300 / a Svelte compile error), which is loud; VUE dedupes the decl
+ *  strings and compiles, so the second form silently submits the FIRST form's
+ *  mutation with the first form's schema — a `CreateForm { of: Note }` that
+ *  posts an `Item`.  Angular already scopes the locals by aggregate and only
+ *  collides when two forms share an aggregate (+ op).
+ *
+ *  The rule per framework lives in `ir/util/form-locals.ts`, alongside the note
+ *  on which shapes were probed CLEAN and must not be flagged (`CreateForm` +
+ *  `OperationForm`; two `OperationForm`s over different ops).
+ *
+ *  Ratchet: the fix is Angular's aggregate prefix generalised to a per-FORM
+ *  prefix, threaded through the ~68 pack templates that hardcode these names.
+ *  The PR that lands it deletes this gate and its register row. */
+export function validateFormLocalCollisions(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  for (const d of sys.deployables) {
+    for (const { ui, fw } of mountedUis(sys, d)) {
+      if (!FORM_LOCAL_FRAMEWORKS.has(fw)) continue;
+      for (const hit of formLocalCollisionHosts(ui)) {
+        diags.push({
+          severity: "error",
+          code: "loom.page-form-locals-unsupported",
+          message: diagMessage("loom.page-form-locals-unsupported", {
+            what: hit.what,
+            dName: d.name,
+            fw,
+            labels: hit.labels.join(" and "),
+            hint:
+              fw === "vue"
+                ? "On vue this does NOT fail the build — the duplicate declarations are deduped, so the second form silently submits the first form's mutation and schema."
+                : "The duplicate declarations are a compile error in the generated project.",
+          }),
+          source: `${ui.name}/${hit.what}`,
         });
       }
     }
