@@ -399,7 +399,9 @@ function renderLiteral(lit: string, value: string): string {
       return `Decimal.new(${JSON.stringify(value)})`;
     case "string":
     case "datetime":
-      return JSON.stringify(value);
+      // Through the shared escaping funnel — the literal is `.ddd` text spliced
+      // into a generated `.exs`, where a raw `#{` interpolates at test compile.
+      return elixirString(value);
     case "bool":
       return value;
     case "null":

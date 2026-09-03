@@ -189,10 +189,23 @@ export function canPromoteAstLitTo(
  *  side of a binary expression is typed as long / decimal / money,
  *  that type is the "anchor" a bare numeric literal on the other
  *  side promotes against.  int isn't an anchor — every IntLit
- *  already types as int. */
-export function literalPromotionAnchor(t: DddType): "long" | "decimal" | "money" | null {
+ *  already types as int.
+ *
+ *  `money` anchors only the operators money is CLOSED under — `+`, `-`
+ *  and the comparisons.  Scaling (`*`, `/`) is money × SCALAR by
+ *  definition (`moneyArithmetic` in type-system.ts: money × money and
+ *  money ÷ money are both rejected), so promoting the scalar literal to
+ *  money there manufactures the very `money × money` the type-system
+ *  refuses — and the refusal then printed the hint that says the form is
+ *  allowed.  `derived half: money = price / 2` is legal source; it must
+ *  reach `arithmeticResult` as `money ÷ int`, not `money ÷ money`. */
+export function literalPromotionAnchor(
+  t: DddType,
+  op: string,
+): "long" | "decimal" | "money" | null {
   if (t.kind !== "primitive") return null;
-  if (t.name === "long" || t.name === "decimal" || t.name === "money") return t.name;
+  if (t.name === "money") return op === "*" || op === "/" ? null : "money";
+  if (t.name === "long" || t.name === "decimal") return t.name;
   return null;
 }
 

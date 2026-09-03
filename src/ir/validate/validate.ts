@@ -20,6 +20,7 @@ import {
   validateWorkflowInstanceReadGates,
 } from "./checks/query-checks.js";
 import { validateReservedSurfaces } from "./checks/reserved-surfaces.js";
+import { validateSensitiveWireSupport } from "./checks/sensitivity-checks.js";
 import { validateStores } from "./checks/store-checks.js";
 import {
   validateCurrentUserScope,
@@ -316,6 +317,10 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
   // ends up with two physical tables — and an explicit `schema:` on the binding
   // is silently dropped.
   validateSelfProvisioningSchemaSupport(loom, diags);
+  // `sensitive(...)` redacts the DEBUG surface (the synthesized `inspect`) and
+  // nothing else — the response DTO serves the value in cleartext.  Say so at
+  // the declaration until the wire masking lands (M-T3.8 phases 2-4).
+  validateSensitiveWireSupport(loom, diags);
   // Explicit transport bindings (unfoldable-api-derivation.md, Layer 4): every
   // `route ... -> Context.Handler` target must resolve.  Whole-model (routes are
   // system-level, their targets cross-context).
