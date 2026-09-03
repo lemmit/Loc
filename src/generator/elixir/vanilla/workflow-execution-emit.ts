@@ -1552,8 +1552,11 @@ function renderWorkflowModule(
   const failureReporter = `
   # Terminal log for a FAILED run.  Without it a workflow that errored logged
   # \`workflow_started\` and then nothing, so "started but never finished" was
-  # indistinguishable from "still running" in the log stream.  Public for the
-  # same clause-domain reason \`commit_result/1\` is (see its comment).
+  # indistinguishable from "still running" in the log stream.
+  #
+  # \`def\`, not \`defp\`: Elixir 1.18 narrows a PRIVATE function's parameter to
+  # the inferred argument type, so a workflow whose body cannot fail would have
+  # its \`{:error, _}\` clause flagged "never matches" under -Werror.
   def report_result({:error, reason} = result) do
     ${renderPhoenixLogCall("workflowFailed", [
       { name: "workflow", valueExpr: JSON.stringify(wf.name) },

@@ -45,7 +45,7 @@ describe("React canonical-destroy → useDelete hook", () => {
     const mod = files.get("web/src/api/widget.ts");
     expect(mod, "widget.ts api module should be emitted").toBeDefined();
     expect(mod).toContain("export function useDeleteWidget()");
-    expect(mod).toContain("await api.delete(`/widgets/${id}`);");
+    expect(mod).toContain("await api.delete(`/widgets/${seg(id)}`);");
   });
 
   it("adds the api.delete helper to the shared client", async () => {
