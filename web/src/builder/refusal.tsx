@@ -1,6 +1,12 @@
 import { useState } from "react";
 import { Box, Button, Code, Group, Text } from "@mantine/core";
 import { lineDiff } from "./edit-engine";
+// The wording + shapes live in a React-free module so headless tests can
+// import them without `react` — see refusal-text.ts.
+import { REFUSAL_MESSAGE, type RefusalDetail, refusalMessage } from "./refusal-text";
+
+export { REFUSAL_MESSAGE, REFUSAL_WHY, refusalMessage } from "./refusal-text";
+export type { RefusalDetail } from "./refusal-text";
 
 // ---------------------------------------------------------------------------
 // The visible half of the builder write-back guard.
@@ -22,28 +28,6 @@ import { lineDiff } from "./edit-engine";
 // Deliberately not a toast — the playground has no notification provider, and
 // the refusal belongs next to the control the user just used.
 // ---------------------------------------------------------------------------
-
-export const REFUSAL_MESSAGE = "Apply produced invalid source — not written";
-
-/** Why a write was refused, in words the line can show. */
-export const REFUSAL_WHY = {
-  /** The helper returned null — nothing to splice (the target wasn't found,
-   *  or the edit had no legal placement). */
-  noEdit: "the edit could not be produced — nothing was written",
-  /** The candidate exists but the parser rejects it. */
-  noParse: "the rewrite would not parse — not written",
-} as const;
-
-export interface RefusalDetail {
-  /** The construct / action the user was editing — "aggregate Order",
-   *  "field total", "+ Repository". */
-  what: string;
-  why: string;
-  /** The source at the time of the refusal and the rejected candidate, when
-   *  there was one — drives *Show candidate*. */
-  before?: string;
-  candidate?: string;
-}
 
 export interface Refusal {
   /** True from a refused write until the next successful one. */
@@ -69,13 +53,6 @@ export function useRefusal(): Refusal {
     setDetail(null);
   };
   return { refused, detail, refuse, clear };
-}
-
-/** The message a refusal renders — exported so tests can pin the wording
- *  without a DOM. */
-export function refusalMessage(detail: RefusalDetail | null): string {
-  if (!detail) return REFUSAL_MESSAGE;
-  return `${detail.what}: ${detail.why}`;
 }
 
 /** The refusal line itself. Renders nothing when there's nothing to say. */
