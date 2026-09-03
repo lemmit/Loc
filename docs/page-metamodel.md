@@ -534,9 +534,9 @@ tabulated allowed/rejected in
 ### `match await` and the effect marker
 
 A **remote, mutating** command called bare in an action body has an invisible
-async boundary, so the validator asks for the effect marker —
-`loom.missing-effect-marker` — pointing at the `match await` form that handles
-the returned union:
+async boundary, so the validator rejects it — `loom.missing-effect-marker`,
+raised at severity **error** (`src/ir/validate/checks/ui-checks.ts`) — pointing
+at the `match await` form that handles the returned union:
 
 ```ddd
 page OrderDetail(id: Order id) {
