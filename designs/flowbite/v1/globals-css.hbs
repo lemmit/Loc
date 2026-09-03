@@ -60,10 +60,3 @@ body {
 .loom-icon-sm svg { width: 0.875em; height: 0.875em; }
 .loom-icon-lg svg { width: 1.5em; height: 1.5em; }
 .text-destructive { color: hsl(var(--destructive)); }
-/* Breadcrumb separators — the crumbs are plain links/text, so the "/" between
-   them is CSS (the cross-pack breadcrumb rule in docs/design-packs.md). */
-.loom-breadcrumbs > *:not(:last-child)::after {
-  content: "/";
-  margin-inline-start: 8px;
-  opacity: 0.5;
-}
