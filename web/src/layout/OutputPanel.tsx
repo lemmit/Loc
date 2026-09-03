@@ -5,6 +5,7 @@ import { formatBytes, modeLabel, type LayoutCtx } from "./ctx";
 import { LOG_LEVELS, type LogLine, type StructuredLogPayload } from "../util/log-line";
 import { clearDiagnostics, isCrashReason, readDiagnostics, type DiagSnapshot } from "../util/diagnostics";
 import { CrashReportButtons } from "../CrashReportButtons";
+import { nextStepMid, PANE, STAGE, STREAM } from "./vocabulary";
 
 // The playground used to scatter read-only status across sibling dock
 // tabs — LSP diagnostics, generator output, bundle errors — so a red dot
@@ -27,14 +28,16 @@ export type OutputStream =
 type DotColour = "red" | "yellow" | "green" | "gray" | null;
 
 const STREAMS: { value: OutputStream; label: string }[] = [
-  { value: "problems", label: "Problems" },
-  { value: "generator", label: "Generator" },
-  { value: "bundler", label: "Bundler" },
-  { value: "conflicts", label: "Conflicts" },
-  { value: "backend", label: "Backend logs" },
-  { value: "app", label: "App logs" },
-  { value: "tests", label: "Tests" },
-  { value: "diag", label: "Diagnostics" },
+  { value: "problems", label: STREAM.problems },
+  { value: "generator", label: STREAM.generator },
+  { value: "bundler", label: STREAM.bundler },
+  { value: "conflicts", label: STREAM.conflicts },
+  // The stream id stays `backend` (persisted + test ids); the label is
+  // the dock tab's name — one concept, one word (audit M7).
+  { value: "backend", label: STREAM.runtimeLogs },
+  { value: "app", label: STREAM.appLogs },
+  { value: "tests", label: STREAM.tests },
+  { value: "diag", label: STREAM.diagnostics },
 ];
 
 // Per-stream status dot.  Drives both the Select's option/trigger dots
@@ -151,7 +154,7 @@ export function OutputPanel({ ctx, stream, setStream }: Props): JSX.Element {
         {stream === "backend" && (
           <FilterableLogView
             lines={ctx.backendLog}
-            empty="No backend logs yet — boot the backend and hit an endpoint."
+            empty={`No runtime logs yet — ${nextStepMid("boot", ctx.isDesktop)}, then call an endpoint from the ${PANE.runtime} tab.`}
             testid="output-backend-log"
           />
         )}
@@ -508,9 +511,7 @@ function GeneratorBody({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   if (generateResult == null) {
     return (
       <Text c="dimmed" size="sm" p="sm">
-        {ctx.isDesktop
-          ? "Not generated yet — click Generate to build the project from your source."
-          : "Not generated yet — tap Run to build the project from your source."}
+        Not generated yet — {nextStepMid("generate", ctx.isDesktop)} to build the project from your source.
       </Text>
     );
   }
@@ -620,9 +621,7 @@ function BundlerBody({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   if (honoBundleResult == null && reactBundleResult == null) {
     return (
       <Text c="dimmed" size="sm" p="sm">
-        {ctx.isDesktop
-          ? "No bundle yet — click Bundle (after Generate) to compile the backend and frontend."
-          : "No bundle yet — tap Run to generate and bundle."}
+        No bundle yet — {nextStepMid("bundle", ctx.isDesktop)} to compile the backend and frontend.
       </Text>
     );
   }
@@ -665,7 +664,7 @@ function BundlerBody({ ctx }: { ctx: LayoutCtx }): JSX.Element {
           <Text size="sm" mb="xs" data-testid="bundle-network-hint">
             The bundler could not download a dependency — this usually means the npm registry is
             unreachable (offline, a blocked network, or an ad/privacy blocker). Check your connection
-            and {ctx.isDesktop ? "click Bundle" : "tap Run"} again.
+            and {ctx.isDesktop ? `click ${STAGE.bundle}` : nextStepMid("bundle", false)} again.
           </Text>
         )}
         {honoFailed && (
@@ -712,7 +711,7 @@ function TestsLog({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   if (results.length === 0) {
     return (
       <Text c="dimmed" size="sm" p="sm">
-        No test output yet — run tests from the Tests tab.
+        No test output yet — run tests from the {PANE.tests} tab.
       </Text>
     );
   }

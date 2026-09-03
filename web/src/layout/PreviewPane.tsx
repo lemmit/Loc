@@ -1,6 +1,7 @@
 import { Box, Text } from "@mantine/core";
 import { Preview } from "../preview/Preview";
 import { formatUnsupportedDeployables, type LayoutCtx } from "./ctx";
+import { nextStepMid, STAGE } from "./vocabulary";
 
 interface Props {
   ctx: LayoutCtx;
@@ -26,7 +27,7 @@ export function PreviewPane({ ctx }: Props): JSX.Element {
   // Mobile has one "Run" button that spans Generate → Bundle → Boot;
   // desktop exposes the three steps separately.  Name the control the
   // user can actually see.
-  const runVerb = isDesktop ? "click Generate" : "tap Run";
+  const runVerb = nextStepMid("generate", isDesktop);
 
   // When the only deployables in the generated output are runtimes
   // the browser can't host (.NET, Phoenix LiveView), explain why
@@ -91,13 +92,9 @@ export function PreviewPane({ ctx }: Props): JSX.Element {
                       : reactBundleStatus.kind === "fail"
                         ? "The bundle failed, so there is nothing to preview. Open Output → Bundler for the error."
                         : reactBundleStatus.kind === "pending"
-                          ? isDesktop
-                            ? "Click Bundle to compile the frontend and backend (~10 s on first run), then Boot."
-                            : "Tap Run to bundle and start the app (~10 s on first run)."
+                          ? `${nextStepMid("bundle", isDesktop)} to compile the frontend and backend (~10 s on first run)${isDesktop ? `, then ${STAGE.boot}` : ""}.`
                           : !ddl
-                            ? isDesktop
-                              ? "Bundled. Click Boot in the Runtime tab to start the in-browser backend and database."
-                              : "Bundled. Tap Run to start the in-browser backend and database."
+                            ? `Bundled. ${isDesktop ? `Click ${STAGE.boot}` : nextStepMid("boot", false)} to start the in-browser backend and database.`
                             : "Loading…"}
           </Text>
         </Box>

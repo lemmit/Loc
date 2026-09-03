@@ -12,6 +12,7 @@ import { agentDot, ChatBody } from "./ChatPanel";
 import { OutputPanel, outputAggregateDot } from "./OutputPanel";
 import { PaneErrorBoundary } from "../PaneErrorBoundary";
 import type { LayoutCtx, MobileCodeView, MobileTab } from "./ctx";
+import { PANE } from "./vocabulary";
 
 // The visual Builder (craft.js + a main-thread Langium parse) and the
 // Model graph (React Flow) are heavy — lazily loaded so neither lands in
@@ -87,10 +88,10 @@ export function MobileShell({ ctx }: Props): JSX.Element {
             value={codeView === "generated" ? "" : codeView}
             onChange={(v) => setCodeView(v as MobileCodeView)}
             data={[
-              { value: "source", label: <span data-testid="mobile-doc-tab-source">Source</span> },
-              { value: "builder", label: <span data-testid="mobile-doc-tab-builder">Builder</span> },
-              { value: "model", label: <span data-testid="mobile-doc-tab-model">Model</span> },
-              { value: "requirements", label: <span data-testid="mobile-doc-tab-requirements">Reqs</span> },
+              { value: "source", label: <span data-testid="mobile-doc-tab-source">{PANE.source}</span> },
+              { value: "builder", label: <span data-testid="mobile-doc-tab-builder">{PANE.builder}</span> },
+              { value: "model", label: <span data-testid="mobile-doc-tab-model">{PANE.model}</span> },
+              { value: "requirements", label: <span data-testid="mobile-doc-tab-requirements">{PANE.requirements}</span> },
             ]}
           />
           <Button
@@ -99,7 +100,7 @@ export function MobileShell({ ctx }: Props): JSX.Element {
             onClick={() => setCodeView("generated")}
             data-testid="mobile-doc-tab-generated"
           >
-            Generated
+            {PANE.generated}
           </Button>
         </Group>
         {/* Editor stays mounted (display toggle) so Monaco keeps its model +
@@ -177,8 +178,8 @@ export function MobileShell({ ctx }: Props): JSX.Element {
         <AuthConfigPanel ctx={ctx} />
       </Tabs.Panel>
       <Tabs.List grow>
-        <Tabs.Tab value="code" data-testid="mobile-tab-code">Code</Tabs.Tab>
-        <Tabs.Tab value="preview" data-testid="mobile-tab-preview">Preview</Tabs.Tab>
+        <Tabs.Tab value="code" data-testid="mobile-tab-code">{PANE.code}</Tabs.Tab>
+        <Tabs.Tab value="preview" data-testid="mobile-tab-preview">{PANE.preview}</Tabs.Tab>
         <Tabs.Tab value="output" data-testid="mobile-tab-output">
           {/* Dot when any stream (problems / generator / bundler / tests)
               is flagged — the user shouldn't need to open the panel to
@@ -189,25 +190,25 @@ export function MobileShell({ ctx }: Props): JSX.Element {
             disabled={outputDot === null}
             offset={-2}
           >
-            <Box>Output</Box>
+            <Box>{PANE.output}</Box>
           </Indicator>
         </Tabs.Tab>
-        <Tabs.Tab value="backend" data-testid="mobile-tab-backend">Runtime</Tabs.Tab>
-        <Tabs.Tab value="tests" data-testid="mobile-tab-tests">Tests</Tabs.Tab>
+        <Tabs.Tab value="backend" data-testid="mobile-tab-backend">{PANE.runtime}</Tabs.Tab>
+        <Tabs.Tab value="tests" data-testid="mobile-tab-tests">{PANE.tests}</Tabs.Tab>
         <Tabs.Tab value="migrations" data-testid="mobile-tab-migrations">
           {/* Red on any breaking/destructive change, yellow on non-breaking
               schema/wire deltas — mirrors the desktop dock's Migrations dot. */}
           <Indicator size={6} color={migrDot ?? "red"} disabled={migrDot === null} offset={-2}>
-            <Box>Migrate</Box>
+            <Box>{PANE.migrations}</Box>
           </Indicator>
         </Tabs.Tab>
-        <Tabs.Tab value="history" data-testid="mobile-tab-history">History</Tabs.Tab>
+        <Tabs.Tab value="history" data-testid="mobile-tab-history">{PANE.history}</Tabs.Tab>
         <Tabs.Tab value="agent" data-testid="mobile-tab-agent">
           <Indicator size={6} color={agtDot ?? "green"} disabled={agtDot === null} offset={-2}>
-            <Box>Agent</Box>
+            <Box>{PANE.agent}</Box>
           </Indicator>
         </Tabs.Tab>
-        <Tabs.Tab value="auth" data-testid="mobile-tab-auth">Auth</Tabs.Tab>
+        <Tabs.Tab value="auth" data-testid="mobile-tab-auth">{PANE.auth}</Tabs.Tab>
       </Tabs.List>
     </Tabs>
   );

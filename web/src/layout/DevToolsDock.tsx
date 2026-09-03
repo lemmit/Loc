@@ -7,6 +7,7 @@ import { HistoryBody } from "./HistoryPanel";
 import { MigrationsBody, migrationsDot } from "./MigrationsPanel";
 import { OutputPanel, outputAggregateDot } from "./OutputPanel";
 import { type DockTab, type LayoutCtx } from "./ctx";
+import { PANE } from "./vocabulary";
 
 // `DockTab` (the consolidated bottom-dock tab ids) is defined in ctx.ts so
 // LayoutCtx can carry the active-tab state; re-exported here so existing
@@ -30,13 +31,13 @@ export function DevToolsDock({ ctx, tab, setTab }: Props): JSX.Element {
   const backendDot: DotColour = ddl ? "green" : null;
 
   const tabs: { id: DockTab; label: string; dot: DotColour }[] = [
-    { id: "output", label: "Output", dot: outputAggregateDot(ctx) },
-    { id: "agent", label: "Agent", dot: agentDot(ctx) },
-    { id: "backend", label: "Runtime", dot: backendDot },
-    { id: "tests", label: "Tests", dot: null },
-    { id: "migrations", label: "Migrations", dot: migrationsDot(ctx) },
-    { id: "history", label: "History", dot: null },
-    { id: "auth", label: "Auth", dot: authStubDot(ctx) },
+    { id: "output", label: PANE.output, dot: outputAggregateDot(ctx) },
+    { id: "agent", label: PANE.agent, dot: agentDot(ctx) },
+    { id: "backend", label: PANE.runtime, dot: backendDot },
+    { id: "tests", label: PANE.tests, dot: null },
+    { id: "migrations", label: PANE.migrations, dot: migrationsDot(ctx) },
+    { id: "history", label: PANE.history, dot: null },
+    { id: "auth", label: PANE.auth, dot: authStubDot(ctx) },
   ];
 
   return (

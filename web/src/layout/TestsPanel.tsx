@@ -13,6 +13,7 @@ import {
   Text,
 } from "@mantine/core";
 import type { LayoutCtx } from "./ctx";
+import { nextStep, nextStepMid, PANE } from "./vocabulary";
 import { TsTransformClient } from "../testing/transform-client";
 import { findApiTestFile, loadApiTests } from "../testing/run-api-tests";
 import { findUiTestFile, loadUiSuite, uiSuiteFiles } from "../testing/run-ui-tests";
@@ -242,7 +243,7 @@ export function TestsBody({
     void guard(busyKey, async () => {
       const port = getActiveDriverPort();
       if (!port) {
-        throw new Error("Preview isn't booted — Bundle + Boot first.");
+        throw new Error(`${PANE.preview} isn't booted — ${nextStep("boot", ctx.isDesktop)} first.`);
       }
       if (engine) await engine.wipe();
       const page = new RemotePage(
@@ -262,11 +263,11 @@ export function TestsBody({
         {ctx.generateSuccess ? (
           <>
             This system declares no <Code>test</Code> blocks. Add a <Code>test</Code> to an
-            aggregate or a <Code>test e2e</Code> to the system, then {ctx.isDesktop ? "Generate" : "Run"}{" "}
+            aggregate or a <Code>test e2e</Code> to the system, then {nextStepMid("generate", ctx.isDesktop)}{" "}
             to run them here.
           </>
         ) : (
-          <>Nothing generated yet — {ctx.isDesktop ? "click Generate" : "tap Run"} to discover the tests this system declares.</>
+          <>Nothing generated yet — {nextStepMid("generate", ctx.isDesktop)} to discover the tests this system declares.</>
         )}
       </Text>
     );
@@ -331,7 +332,7 @@ export function TestsBody({
             <Suite
               testid="api"
               label="API tests"
-              hint={!ddl ? "Boot the backend to run" : undefined}
+              hint={!ddl ? `${nextStep("boot", ctx.isDesktop)} to run` : undefined}
               cases={apiCases.map((c) => c.name)}
               group="api"
               results={results}
@@ -348,7 +349,7 @@ export function TestsBody({
             <Suite
               testid="ui"
               label="UI tests"
-              hint={!ddl ? "Boot the backend to run" : undefined}
+              hint={!ddl ? `${nextStep("boot", ctx.isDesktop)} to run` : undefined}
               cases={uiCases.map((c) => c.name)}
               group="ui"
               results={results}
