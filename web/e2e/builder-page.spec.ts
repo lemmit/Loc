@@ -3,7 +3,7 @@
 // edit round-trips through the `.ddd` source (the builder re-seeds from the
 // rewritten source). Pure client-side — no network.
 
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import { readEditorSource, expect, test, type Locator, type Page } from "@playwright/test";
 import { selectExample, waitForPlaygroundReady } from "./_helpers";
 
 // Set the editor document in one shot via the editor's automation seam
@@ -111,8 +111,10 @@ test("builder Apply syncs the edit into the Monaco source tab + LSP", async ({ p
   // edit, even though it never went through the editor's own change path.  Read
   // the whole model directly (Monaco virtualises `.view-lines`).
   await page.getByTestId("doc-tab-source").click();
-  const model = () => page.evaluate(() => (window as unknown as { __loomGetSource: () => string }).__loomGetSource());
-  await expect.poll(model).toContain("EDITEDZZZ");
+  // `readEditorSource` waits for the automation seam — the editor remounts
+  // on the view switch and a bare `page.evaluate` can beat its registration
+  // (seen once in a full-lane run: `__loomGetSource is not a function`).
+  await expect.poll(() => readEditorSource(page)).toContain("EDITEDZZZ");
   // LSP re-validated the synced source (no errors introduced).
   await expect(page.getByText(/^0 errors$/)).toBeVisible();
 });
