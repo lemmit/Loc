@@ -2,9 +2,9 @@
           <Typography variant="subtitle2">{{label}}</Typography>
           { {{path}}Fields.map((field, index) => (
             <Stack key={field.id} direction="row" spacing={1} alignItems="flex-end">
-{{#each rowFields}}              <TextField label="{{label}}" {...register(`{{../path}}.${index}.{{path}}`{{#if valueAsNumber}}, { valueAsNumber: true }{{/if}})} data-testid={`{{../testId}}-${index}-{{path}}`} />
+{{#each rowFields}}              <TextField label="{{label}}" InputLabelProps=\{{ shrink: true }} {...register(`{{../path}}.${index}.{{path}}`{{#if valueAsNumber}}, { valueAsNumber: true }{{/if}})} data-testid={`{{../testId}}-${index}-{{path}}`} />
 {{/each}}              <Button color="error" size="small" onClick={() => remove{{arrayPascal}}(index)}>{{{chrome "removeItem"}}}</Button>
             </Stack>
           )) }
           <Button size="small" onClick={() => append{{arrayPascal}}({{{defaultRowJson}}})}>{{{chrome "addItem" item=elementLabel}}}</Button>
-        </Stack>{{else}}<TextField label="{{label}}" {...register("{{path}}")} data-testid="{{testId}}" {{{chromeAttr "placeholder" "arrayUnsupported"}}} disabled error={!!( {{errorExpr}} )} helperText={ {{errorExpr}} } />{{/if}}
+        </Stack>{{else}}<TextField label="{{label}}" InputLabelProps=\{{ shrink: true }} {...register("{{path}}")} data-testid="{{testId}}" {{{chromeAttr "placeholder" "arrayUnsupported"}}} disabled error={!!( {{errorExpr}} )} helperText={ {{errorExpr}} } />{{/if}}

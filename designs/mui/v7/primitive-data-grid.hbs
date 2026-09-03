@@ -11,7 +11,7 @@
           <FormControlLabel
             key={col.id}
             control={<Checkbox size="small" checked={col.getIsVisible()} onChange={col.getToggleVisibilityHandler()} />}
-            label={String(col.columnDef.header ?? col.id)}
+            label={{expr visibilityLabel}}
           />
         ))}
       </FormGroup>

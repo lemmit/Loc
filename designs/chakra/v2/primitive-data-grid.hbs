@@ -12,7 +12,7 @@
             isChecked={col.getIsVisible()}
             onChange={() => col.toggleVisibility()}
           >
-            {String(col.columnDef.header ?? col.id)}
+            {{expr visibilityLabel}}
           </Checkbox>
         ))}
       </HStack>

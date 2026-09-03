@@ -9,7 +9,7 @@
           <Checkbox
             key={col.id}
             size="xs"
-            label={String(col.columnDef.header ?? col.id)}
+            label={{expr visibilityLabel}}
             checked={col.getIsVisible()}
             onChange={col.getToggleVisibilityHandler()}
           />

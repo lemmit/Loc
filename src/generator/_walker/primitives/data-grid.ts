@@ -73,6 +73,33 @@ const GRID_COLUMN_HEADER = "String(h.column.columnDef.header ?? h.id)";
  *  the sentence that pack spelled by hand. */
 const FELIZ_COLUMN_HEADER = "loomText (h?column?columnDef?header)";
 
+/** The column-visibility toggle's LABEL, for the `columnVisibility: true`
+ *  checkbox list — one expression for every pack, the same way the per-column
+ *  ARIA above is one expression.
+ *
+ *  Not `String(col.columnDef.header ?? col.id)`, which every pack had spelled
+ *  by hand: a TanStack `header` is `string | (ctx) => rendered`, and the
+ *  SELECTION column's header is the second form — so `String()` serialised the
+ *  compiled checkbox JSX and shipped it as a checkbox label in all fifteen
+ *  packs (a grid with `selection:` + `columnVisibility:` is the trigger).  A
+ *  render function is not a label, so only a string header is used and anything
+ *  else falls back to the column id.
+ *
+ *  `instanceof Function` rather than `typeof … === "string"` for two reasons:
+ *  it needs no string literal, so the expression survives being spliced into a
+ *  double-quoted Vue attribute (`:label="…"`), and `String(…)` swallows the
+ *  union so no narrowing is required. */
+const GRID_VISIBILITY_LABEL =
+  "String(col.columnDef.header instanceof Function ? col.id : (col.columnDef.header ?? col.id))";
+
+/** The same guard for the Angular packs.  Angular template expressions have no
+ *  `instanceof` (nor `typeof`) — the parser's only unary operators are `+`,
+ *  `-` and `!` — so the function test goes through `.call`, which every
+ *  function has and no string does, with `$any()` to get past the template
+ *  type-checker on the `string | template` union. */
+const NG_VISIBILITY_LABEL =
+  "String($any(col.columnDef.header)?.call ? col.id : (col.columnDef.header ?? col.id))";
+
 export function emitDataGrid(
   call: ExprIR & { kind: "call" },
   ctx: WalkContext,
@@ -209,6 +236,12 @@ export function emitDataGrid(
           filterByAria: localizedChromeIcuAria(ctx, "filterBy", [
             { name: "column", expr: GRID_COLUMN_HEADER },
           ]),
+          // The visibility toggles' labels — the one per-column string that is
+          // NOT chrome (it is the author's own column header), and the one the
+          // packs had each spelled by hand.  Angular gets the same guard in its
+          // own template dialect; see the two constants.
+          visibilityLabel:
+            ctx.target.framework === "angular" ? NG_VISIBILITY_LABEL : GRID_VISIBILITY_LABEL,
           // …and as VALUES, for the procedural pack (Feliz reaches the same
           // header through Fable's dynamic access, so it passes its own hole).
           sortByAriaValue: localizedChromeIcuExpr(ctx, "sortBy", [

@@ -12,7 +12,7 @@
               checked={col.getIsVisible()}
               onChange={col.getToggleVisibilityHandler()}
             />
-            {String(col.columnDef.header ?? col.id)}
+            {{expr visibilityLabel}}
           </label>
         ))}
       </div>

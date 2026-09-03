@@ -17,7 +17,7 @@
         @for (col of table.getAllLeafColumns(); track col.id) {
           <label class="loom-grid-visibility-item">
             <input type="checkbox" [checked]="col.getIsVisible()" (change)="col.toggleVisibility()" />
-            \{{ String(col.columnDef.header ?? col.id) }}
+            \{{ {{{visibilityLabel}}} }}
           </label>
         }
       </div>

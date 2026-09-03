@@ -14,7 +14,7 @@
           >
             <Checkbox.HiddenInput />
             <Checkbox.Control />
-            <Checkbox.Label>{String(col.columnDef.header ?? col.id)}</Checkbox.Label>
+            <Checkbox.Label>{{expr visibilityLabel}}</Checkbox.Label>
           </Checkbox.Root>
         ))}
       </HStack>
