@@ -152,8 +152,10 @@ frontends have an extern hatch.
 wrapper). Both `find allRows(): Order[] ignoring *` and `ignoring tenantScoped` still emit
 `where (e.tenantId = :#{@currentUserAccessor.user()?.tenantId()})`. node/python/elixir drop the
 conjunct; dotnet emits `IgnoreQueryFilters`. Contradicts the comment at
-`src/generator/java/capability-filter.ts:26-29`, which claims parity with node. **A tenancy
-bypass that silently does not bypass is a security-shaped divergence, not a cosmetic one.**
+`src/generator/java/capability-filter.ts:26-29`, which claims parity with node. The
+fail-direction is safe — Java over-restricts rather than leaking — but the same `.ddd` returns
+a different row set on Java than on the other four backends, and an operator reading the docs
+would conclude the bypass took effect.
 
 **F19. Java renders a guarded invariant on the wire without its guard.** `buildChecks`
 (`src/generator/java/emit/validator.ts:366-395`) calls `renderJavaExpr(inv.expr, …)` with no

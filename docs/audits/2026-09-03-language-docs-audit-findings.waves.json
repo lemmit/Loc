@@ -1,0 +1,290 @@
+{
+  "source": "docs/audits/2026-09-03-language-docs-audit-findings.md",
+  "plan": "docs/audits/2026-09-03-language-docs-audit-findings.waves.md",
+  "drawnAgainst": "651388d",
+  "drawnOn": "2026-09-03",
+  "protocol": {
+    "reVerifyFirst": "Every packet re-checks its findings on fresh main before writing code; a finding already fixed closes the row with a note and no PR.",
+    "claim": "Draft PR naming the packet id before implementing, listing the findings claimed and the file trees touched.",
+    "disjointTrees": "Two packets in the same wave never name the same file. fileTrees is the contract.",
+    "hotFile": "src/diagnostics/messages.ts — only one packet per wave may mint a loom.* code there.",
+    "proof": "Any packet adding a validator or test must show it FAILS when the fix is reverted, and say so in the PR body. Revert the mutation with a file copy, never `git checkout -- <path>`.",
+    "emitterPackets": "A packet changing an emitter must compile the generated project for that backend locally. See the loom-test-suites skill for Docker recipes and loom-ci-gates for the workflow/label mapping."
+  },
+  "waves": [
+    {
+      "wave": 1,
+      "theme": "The generated project must compile",
+      "concurrency": 4,
+      "packets": [
+        {
+          "id": "W1.1",
+          "name": "optional-receiver-lowering",
+          "findings": ["F2"],
+          "size": "M",
+          "confidence": "proven",
+          "P": 0,
+          "mintsCode": false,
+          "fileTrees": ["src/ir/lower/lower-expr.ts", "src/generator/dotnet/render-expr.ts", "test/ir/**"],
+          "title": "The guarded-optional form the validator itself recommends emits code that compiles on 1 of 5 backends",
+          "done": "`x != null ? x.trim() : …` lowers through the host idiom on all five; the .NET ToUpper/ToUpperInvariant inconsistency settled in the same PR."
+        },
+        {
+          "id": "W1.2",
+          "name": "react-flutter-page-shell",
+          "findings": ["F3", "F9"],
+          "size": "M",
+          "confidence": "proven",
+          "P": 0,
+          "mintsCode": false,
+          "fileTrees": ["src/generator/react/**", "src/generator/flutter/**"],
+          "title": "toast() emits an undefined symbol on React, and a derived reading a store field emits an unbound identifier on React and Flutter",
+          "done": "Generated web project type-checks. Svelte's src/lib/toast.svelte.ts is the reference implementation to mirror."
+        },
+        {
+          "id": "W1.3",
+          "name": "python-client-elixir-fn",
+          "findings": ["F7", "F8"],
+          "size": "S",
+          "confidence": "proven",
+          "P": 0,
+          "mintsCode": false,
+          "fileTrees": ["src/generator/python/api-client.ts", "src/generator/elixir/vanilla/function-emit.ts"],
+          "title": "Two isolated single-backend emitter bugs that produce non-importable python and non-compiling elixir",
+          "done": "`File?` through an api resource imports FileRef and renders one `| None`; the elixir block function's head keeps the parameter its body reads. Both generated projects compile."
+        },
+        {
+          "id": "W1.4",
+          "name": "lowerer-and-system-crashes",
+          "findings": ["F5", "F6"],
+          "size": "M",
+          "confidence": "proven",
+          "P": 0,
+          "mintsCode": false,
+          "fileTrees": ["src/ir/lower/lower.ts", "src/system/expect-stmt.ts", "src/system/ui-e2e-render.ts"],
+          "title": "Two valid inputs that throw instead of diagnosing: a bare abstract seed and a ui-e2e expect over a create result",
+          "done": "Neither throws. F5 is an ordering fix — loom.seed-abstract-aggregate must fire before lowerSeed dereferences fields. F6: the matcher survives the path, or a loom.* gate rejects the shape."
+        }
+      ]
+    },
+    {
+      "wave": 2,
+      "theme": "The walker stops failing open",
+      "concurrency": 3,
+      "sharedDeliverable": "An invariant asserting the walker never declines to render a declared element without a diagnostic. First packet to finish proposes where it lives; the others adopt it.",
+      "packets": [
+        {
+          "id": "W2.1",
+          "name": "walkable-match-body",
+          "findings": ["F10"],
+          "size": "M",
+          "confidence": "proven",
+          "P": 1,
+          "mintsCode": false,
+          "fileTrees": ["src/generator/_walker/walker-core.ts", "src/generator/react/**", "src/generator/svelte/**"],
+          "title": "A page whose body is a bare match is dropped entirely on React and Svelte, while Vue renders it",
+          "done": "The predicate admits variant-match. Vue is the control — assert it is unchanged. Mutation-prove on React and Svelte."
+        },
+        {
+          "id": "W2.2",
+          "name": "element-position-walk",
+          "findings": ["F12"],
+          "size": "S",
+          "confidence": "proven",
+          "P": 1,
+          "mintsCode": false,
+          "fileTrees": ["src/generator/_walker/primitives/text.ts"],
+          "title": "A method call in a KeyValueRow value slot silently degrades to a comment",
+          "done": "Element-position walk gains the method-call arm; other primitives on the same path checked."
+        },
+        {
+          "id": "W2.3",
+          "name": "walker-honest-gates",
+          "findings": ["F11", "F17"],
+          "size": "M",
+          "confidence": "proven",
+          "P": 1,
+          "mintsCode": true,
+          "fileTrees": ["src/ir/validate/checks/ui-checks.ts", "src/diagnostics/messages.ts"],
+          "title": "DestroyForm over a record binding, and Flutter's missing extern-component hatch, both vanish with no diagnostic",
+          "done": "Both refuse honestly rather than degrading. The only Wave-2 packet permitted to touch messages.ts."
+        }
+      ]
+    },
+    {
+      "wave": 3,
+      "theme": "Ungated shapes get honest gates",
+      "concurrency": 2,
+      "packets": [
+        {
+          "id": "W3.1",
+          "name": "statement-scope-gates",
+          "findings": ["F1", "F4"],
+          "size": "M",
+          "confidence": "proven",
+          "P": 0,
+          "mintsCode": true,
+          "designFork": true,
+          "fileTrees": ["src/ir/validate/checks/**", "src/diagnostics/messages.ts", "test/**"],
+          "title": "variant-match off a page crashes all five backends; for/if let off a workflow emits `this.<unknown>()` — neither is gated",
+          "done": "Both raise a loom.* code. RESOLVE THE FORK FIRST: gate (default — both are frontend/workflow-only by design per the source comments, S-sized) vs lower (L-sized, a language-feature-developer mission — split it out rather than widening this packet)."
+        },
+        {
+          "id": "W3.2",
+          "name": "single-system-gate",
+          "findings": ["F36"],
+          "size": "S",
+          "confidence": "proven",
+          "P": 2,
+          "mintsCode": true,
+          "fileTrees": ["src/language/validators/composition.ts"],
+          "title": "Two system blocks with no top-level members pass validation",
+          "done": "A direct 'exactly one system' check rather than the current fold-triggered one."
+        }
+      ]
+    },
+    {
+      "wave": 4,
+      "theme": "The catalog gate reaches the IR leaves — the leverage wave",
+      "concurrency": 2,
+      "note": "W4.2 stacks on W4.1's branch rather than waiting for merge. This wave retires eleven findings as a class and could reasonably run first.",
+      "packets": [
+        {
+          "id": "W4.1",
+          "name": "catalog-gate-extension",
+          "findings": ["F25", "F26", "F30"],
+          "size": "M",
+          "confidence": "proven",
+          "P": 3,
+          "mintsCode": true,
+          "fileTrees": ["test/system/diagnostic-catalog.test.ts", "src/ir/validate/checks/**", "src/language/validators/statements.ts", "src/diagnostics/messages.ts"],
+          "title": "The catalog gate does not walk the IR check leaves, which is how a live code with no catalog entry and a check with no code at all both survive",
+          "done": "The extended gate FAILS on today's main before the fixes land — that proof is the point of the packet. Then: mint loom.function-block-impure, give the when-gate check a code, stop loom.projection-event-unkeyed interpolating undefined."
+        },
+        {
+          "id": "W4.2",
+          "name": "stale-message-text",
+          "findings": ["F27", "F28", "F29", "F31", "F32", "F33", "F34", "F35"],
+          "size": "M",
+          "confidence": "proven",
+          "P": 3,
+          "mintsCode": false,
+          "stacksOn": "W4.1",
+          "fileTrees": ["src/diagnostics/messages.ts", "src/util/intrinsics.ts", "src/ir/lower/lower-expr.ts", "src/language/ddd.langium", "src/ir/types/loom-ir.ts", "src/generator/_obs/log-events.ts"],
+          "title": "Messages that contradict their own gate, comments naming codes that do not exist, one unreachable gate, one orphan catalog entry",
+          "done": "Every edit carries the grep that proves the claim it replaces. F29 needs a decision: delete the dead gate or add the missing family."
+        }
+      ]
+    },
+    {
+      "wave": 5,
+      "theme": "Cross-backend divergence — debt, not breakage",
+      "concurrency": 4,
+      "note": "The docs now describe each of these honestly, so this wave is schedulable rather than urgent. W5.1 first.",
+      "packets": [
+        {
+          "id": "W5.1",
+          "name": "java-filter-and-invariant",
+          "findings": ["F18", "F19"],
+          "size": "M",
+          "confidence": "proven",
+          "P": 1,
+          "mintsCode": false,
+          "fileTrees": ["src/generator/java/emit/repository.ts", "src/generator/java/emit/validator.ts", "src/generator/java/capability-filter.ts"],
+          "title": "Java ignores `ignoring` for principal filters, and renders a guarded invariant on the wire without its guard",
+          "done": "jpqlWhere honours bypassAll/bypassCaps; the wire validator emits the `!(guard) ||` implication the other backends emit. Fail-direction of F18 is safe (over-restriction), which is why this is not Wave 1."
+        },
+        {
+          "id": "W5.2",
+          "name": "elixir-enforcement",
+          "findings": ["F14", "F15", "F24"],
+          "size": "M",
+          "confidence": "proven",
+          "P": 1,
+          "mintsCode": false,
+          "fileTrees": ["src/generator/elixir/vanilla/changeset-invariant-emit.ts", "src/generator/elixir/vanilla/changeset-emit.ts"],
+          "title": "Phoenix drops a part-level check, a guarded single-field invariant, and a private-operation call",
+          "done": "Each either enforces or raises. F24's comment-only degrade is not an acceptable resting state."
+        },
+        {
+          "id": "W5.3",
+          "name": "elixir-wire-and-heex",
+          "findings": ["F16", "F20", "F22", "F23"],
+          "size": "M",
+          "confidence": "proven",
+          "P": 2,
+          "mintsCode": false,
+          "fileTrees": ["src/generator/elixir/vanilla/wire-serialize.ts", "src/generator/elixir/heex-primitives.ts"],
+          "title": "Phoenix omits a derived-reading-derived from the wire; HEEx Image/Icon ignore the positional spelling; the HEEx WorkflowForm emits a placeholder",
+          "done": "Wire parity restored. F20 (value object as a :map column) may be a DECISION rather than a defect — establish which before touching the migration emitter; chapter 3 already carries it as an honest gap."
+        },
+        {
+          "id": "W5.4",
+          "name": "envelope-parity",
+          "findings": ["F21"],
+          "size": "S",
+          "confidence": "proven",
+          "P": 2,
+          "mintsCode": false,
+          "scopingOnly": true,
+          "fileTrees": [],
+          "title": "`envelope` means something different on each of the five backends",
+          "done": "NOT a fix packet. Hand to the parity-auditor skill for the who-emits-what matrix and a decision on intended semantics, then file the fix as a mission. Do not let an agent guess."
+        }
+      ]
+    },
+    {
+      "wave": 6,
+      "theme": "A missing feature, not a defect",
+      "concurrency": 1,
+      "packets": [
+        {
+          "id": "W6.1",
+          "name": "workflow-handle-entrypoints",
+          "findings": ["F13"],
+          "size": "L",
+          "confidence": "proven",
+          "P": 1,
+          "mintsCode": false,
+          "route": "language-feature-developer",
+          "fileTrees": ["src/generator/**", "src/ir/lower/lower-workflow.ts"],
+          "title": "handle and named create are lowered, pinned by a test, and promised by a diagnostic — but no backend emits an entry point",
+          "done": "Either entry points on all five backends, or the declaration is gated and loom.duplicate-handler's message corrected. Needs a design pass and sign-off — route to the skill, not into a wave."
+        }
+      ]
+    },
+    {
+      "wave": 7,
+      "theme": "Doc drift — no dependency, run any time",
+      "concurrency": 2,
+      "packets": [
+        {
+          "id": "W7.1",
+          "name": "per-feature-doc-drift",
+          "findings": ["F37", "F38", "F39", "F40", "F41", "F42", "F43", "F44", "F45", "F46"],
+          "size": "M",
+          "confidence": "proven",
+          "P": 4,
+          "mintsCode": false,
+          "route": "status-refresh",
+          "docsOnly": true,
+          "fileTrees": ["docs/capabilities.md", "docs/inheritance.md", "docs/auth.md", "docs/tenancy.md", "docs/actions.md", "docs/observability.md", "docs/resources.md", "docs/macro-api.md", "docs/scaffold-macros.md", "CLAUDE.md"],
+          "title": "Ten per-feature docs that contradict the code, found in passing by the language-docs audit",
+          "done": "Every claim re-derived from code, as in the audit that found them. Strictly docs-only."
+        },
+        {
+          "id": "W7.2",
+          "name": "docs-heading-slugger",
+          "findings": ["F47"],
+          "size": "S",
+          "confidence": "proven",
+          "P": 4,
+          "mintsCode": false,
+          "fileTrees": ["docs/build.mjs"],
+          "title": "Headings render without ids, so every in-page anchor link in every chapter is dead on the published site",
+          "done": "One marked slugger extension. Worth more than it was last week — the audit just added a lot of cross-links."
+        }
+      ]
+    }
+  ]
+}
