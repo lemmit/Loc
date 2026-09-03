@@ -34,6 +34,12 @@ describe("typescript generator — paged finds (P3b)", () => {
     expect(repo).toContain(
       'const sortColumns: Record<string, AnyPgColumn> = { "id": schema.warehouses.id, "code": schema.warehouses.code, "region": schema.warehouses.region };',
     );
+    // `Object.hasOwn`, never a bare index — the lookup key is caller-supplied,
+    // so a plain index reaches the prototype chain (see the route-side comment
+    // in the sibling test).  Defence for every caller that is not the route.
+    expect(repo).toContain(
+      "const sortColumn = Object.hasOwn(sortColumns, sort) ? sortColumns[sort]! : schema.warehouses.id;",
+    );
     expect(repo).toContain('const orderBy = dir === "desc" ? desc(sortColumn) : asc(sortColumn);');
     // count() for the total, with the same where-clause as the page query.
     expect(repo).toContain(
@@ -72,13 +78,21 @@ describe("typescript generator — paged finds (P3b)", () => {
       'export const WarehousePaged = z.object({ items: z.array(WarehouseResponse), page: z.number().int(), pageSize: z.number().int(), total: z.number().int(), totalPages: z.number().int() }).openapi("WarehousePaged");',
     );
     // Query schema gains 1-based page + pageSize with defaults 1 / 20, plus the
-    // server-side sort controls (M-T2.6): `sort`/`dir` are accepted as plain
-    // strings (the scaffold list sends an empty initial sortKey, which an enum
-    // would reject) and whitelisted server-side by the repo's `sortColumns`
-    // map (`sortColumns[sort] ?? id`).
+    // server-side sort controls (M-T2.6).  `sort` is a DECLARED enum of the
+    // whitelist the repository's `sortColumns` map is built from, plus the
+    // empty string the scaffold list's initial (unsorted) state sends — so the
+    // published contract names the accepted keys, and an out-of-whitelist key
+    // is refused at the boundary instead of silently re-ordered by `id`.
+    //
+    // It was a bare `z.string()` on the reasoning that the repository
+    // whitelisted the column anyway; it did not.  `sortColumns[sort] ?? id` is
+    // a BARE INDEX into an object literal, so it reached `Object.prototype`
+    // (`??` guards null/undefined, and an inherited member is neither):
+    // `?sort=__proto__` threw at query-build time — an uncaught 500 from a
+    // spec-conformant query string.
     expect(routes).toContain("page: z.coerce.number().int().min(1).max(1000000).default(1),");
     expect(routes).toContain("pageSize: z.coerce.number().int().min(1).max(500).default(20),");
-    expect(routes).toContain('sort: z.string().default("id"),');
+    expect(routes).toContain('sort: z.enum(["id", "code", "region", ""]).default("id"),');
     expect(routes).toContain('dir: z.string().default("asc"),');
     // Handler passes the controls through and maps page items via toWire.
     expect(routes).toContain(

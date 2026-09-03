@@ -81,6 +81,26 @@ async function rawUpload(path: string, form: FormData): Promise<unknown> {
   return body;
 }
 
+/**
+ * One URL PATH SEGMENT, percent-encoded.
+ *
+ * Every generated call interpolates a caller-supplied value straight into the
+ * path -- `/customers/${seg(id)}`, `/orders/${seg(id)}/history` -- and the
+ * value is not always a UUID: an id type can be a `string` the user chose, and
+ * a find argument can be arbitrary text.  Unencoded, a `/` in it silently
+ * re-routes the request to a different endpoint, a `?` truncates the path into
+ * a query string, and a `#` drops everything after it before the request is
+ * even sent.  `encodeURIComponent` is the correct escape for a path segment
+ * (it encodes `/ ? # % & +` and spaces); a UUID passes through unchanged, so
+ * the common case is byte-identical on the wire.
+ *
+ * Deliberately NOT applied inside `request()`: by then the segments have
+ * already been concatenated into one string and are indistinguishable from the
+ * separators.  Encoding has to happen at the interpolation site, which is why
+ * this is exported.
+ */
+export const seg = (value: string | number): string => encodeURIComponent(String(value));
+
 // The wire shape a `File` field / FileUpload primitive round-trips (the
 // object-store reference the upload endpoint returns).
 export type FileRef = {

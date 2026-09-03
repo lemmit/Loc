@@ -9,6 +9,19 @@ const ENDPOINTS: Record<string, string> = {
   web_app: process.env.E2E_WEB_APP_BASE ?? "http://localhost:3001",
 };
 
+// The parsed JSON body of one generated call.  A generated assertion reads
+// DECLARED wire fields straight off it (`read.code`, `page.items[0].total`),
+// and this project has no DTO types to import — the wire schemas live inside
+// the backend project, which the suite deliberately does not depend on (it
+// talks HTTP to a RUNNING service, possibly a different backend than the one
+// the types would come from).  So the JSON boundary is typed once, here, with
+// a name that says what it is.  Typing it `unknown` instead made EVERY emitted
+// assertion a `TS18046: 'x' is of type 'unknown'` error — the emitted `e2e/`
+// project did not type-check for any system, which nothing noticed because
+// nothing compiled it.
+// biome-ignore lint/suspicious/noExplicitAny: the boundary of an untyped JSON wire; narrowing it would require importing the backend's DTOs, which is exactly the coupling this suite avoids.
+type __WireBody = any;
+
 // When the target system requires auth, every request must carry a principal
 // or the backend rejects it 401 before the assertion's real path
 // (create/validation/not-found) is ever reached.  The harness stays
@@ -29,7 +42,7 @@ function __authHeaders(): Record<string, string> {
   return headers;
 }
 
-async function __post(url: string, body: unknown): Promise<unknown> {
+async function __post(url: string, body: unknown): Promise<__WireBody> {
   const r = await fetch(url, {
     method: "POST",
     headers: { "content-type": "application/json", ...__authHeaders() },
@@ -47,7 +60,7 @@ async function __post(url: string, body: unknown): Promise<unknown> {
   }
 }
 
-async function __get(url: string): Promise<unknown> {
+async function __get(url: string): Promise<__WireBody> {
   const r = await fetch(url, { headers: __authHeaders() });
   const text = await r.text();
   if (!r.ok) throw new Error(`GET ${url} → ${r.status} ${r.statusText}${text ? ": " + text : ""}`);
@@ -58,7 +71,7 @@ async function __get(url: string): Promise<unknown> {
   }
 }
 
-async function __getQuery(url: string, params: Record<string, unknown>): Promise<unknown> {
+async function __getQuery(url: string, params: Record<string, unknown>): Promise<__WireBody> {
   const qs = new URLSearchParams();
   for (const [k, v] of Object.entries(params ?? {})) {
     if (v != null) qs.set(k, String(v));

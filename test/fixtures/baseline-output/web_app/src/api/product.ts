@@ -1,7 +1,7 @@
 // Auto-generated.  Do not edit by hand.
 import { z } from "zod";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "./client";
+import { api, seg } from "./client";
 
 export const MoneySchema = z.object({
   amount: z.number().min(0),
@@ -63,7 +63,7 @@ export function useProductById(id: string | undefined) {
     queryKey: ["products", id],
     enabled: !!id,
     queryFn: async () => {
-      const r = await api.get(`/products/${id}`);
+      const r = await api.get(`/products/${seg(id)}`);
       return ProductResponse.parse(r);
     },
   });
@@ -84,7 +84,7 @@ export function useDeleteProduct() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      await api.delete(`/products/${id}`);
+      await api.delete(`/products/${seg(id)}`);
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["products"] }),
   });
@@ -94,7 +94,7 @@ export function useUpdateProduct(id: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: UpdateProductRequest) => {
-      await api.post(`/products/${id}/update`, input);
+      await api.post(`/products/${seg(id)}/update`, input);
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["products", id] });

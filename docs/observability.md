@@ -88,6 +88,21 @@ The full list lives in `src/generator/_obs/log-events.ts`. Highlights:
 `aggregate_created`, `operation_invoked`, `event_dispatched`,
 `workflow_started`, `workflow_completed`.
 
+**Workflow failure** (error): `workflow_failed` — the terminal event of a run
+that did NOT reach `workflow_completed`, carrying `workflow` and `error`.  It
+is what makes `workflow_started` readable: without a terminal event on the
+failure path, "started but never finished" is indistinguishable from "still
+running", and any started/completed pairing leaks one row per failure.
+Emitted by node (from the workflow router's `onError`, naming the workflow off
+the request context), java (a `catch` on the child-frame try), python (an
+`except` around the route body) and elixir (the `{:error, _}` arm of the
+result, which is result-tuple shaped rather than exception shaped).  **.NET
+does not emit it yet** — its handler body is one assembled string whose
+non-transactional path would have to be re-indented to sit inside a `try`, and
+`--sourcemap` anchors that body's statement fragments by exact-text search, so
+the indent would silently drop them from the map.  The gap is recorded by a
+test in `test/generator/workflow-lifecycle-log.test.ts`.
+
 **Domain faults** (warn — recoverable):
 `domain_error`, `forbidden`, `not_found`.
 

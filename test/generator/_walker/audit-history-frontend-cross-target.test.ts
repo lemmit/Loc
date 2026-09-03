@@ -133,7 +133,7 @@ describe("api client — `history(id)` on the four JS-family frontends", () => {
     // The route is PATH-nested over a different table — not the `/<tag>/<find>
     // ?<param>=…` shape every `finds` arm builds.  That difference is the whole
     // reason `historyFind` sits beside `finds`.
-    expect(out).toMatch(/\/orders\/\$\{id\(?\)?\}\/history/);
+    expect(out).toMatch(/\/orders\/\$\{seg\(id\(?\)?\)\}\/history/);
   });
 
   it("names the hook through the walker's own formula, so the call site links", async () => {

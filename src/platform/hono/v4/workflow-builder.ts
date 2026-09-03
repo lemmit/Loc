@@ -260,8 +260,26 @@ export function buildWorkflowsFile(
   }
 
   body.push(`  app.onError((err, c) => {`);
+  body.push(`    const trace_id = c.get("requestId") ?? "";`);
+  // The TERMINAL half of the workflow narrative.  A command route logs
+  // `workflow_started` at entry, and every success path logs
+  // `workflow_completed` — but a run that threw logged NEITHER a terminal
+  // event nor anything else structured: the failure fell through to a bare
+  // `console.error(err)` on raw stderr, outside the pino/OTel pipeline every
+  // other line in this file rides.  So a failed workflow was invisible in the
+  // log stream except as an unexplained `workflow_started` with no partner,
+  // and a started/completed dashboard leaked one row per failure forever.
+  //
+  // The workflow name comes off the context (`c.set("workflow", …)` at the
+  // command route's entry — see `emitWorkflowRoute`) rather than being closed
+  // over here, because ONE `onError` serves every command + instance-read
+  // route in the file.  Absent on the instance reads, which are not workflow
+  // runs and correctly emit nothing.
+  body.push(`    const failedWorkflow = c.get("workflow");`);
   body.push(
-    `    const trace_id = (c as unknown as { get(k: "requestId"): string | undefined }).get("requestId") ?? "";`,
+    `    if (failedWorkflow !== undefined) {`,
+    `      ${renderHonoLogCall("workflowFailed", "workflow: failedWorkflow, error: err instanceof Error ? err.message : String(err)")}`,
+    `    }`,
   );
   // M-T5.20 — the workflow router's denial ladder resolves through the api's
   // `httpStatus` map, exactly like the aggregate router's. Defaults 422 / 403
@@ -342,7 +360,11 @@ export function buildWorkflowsFile(
   }
   body.push(
     // RS-28 — sanitized; the inner exception reaches the log, not the wire.
-    `    if (err instanceof ExternHandlerError) { console.error(err); return problem(500, "Internal Server Error", "internal"); }`,
+    // The aggregate router logs this arm through the catalog
+    // (`extern_handler_threw`); this one used to `console.error` the whole
+    // exception object to raw stderr instead — same fault class, two different
+    // log surfaces on the same backend.
+    `    if (err instanceof ExternHandlerError) { ${renderHonoLogCall("externHandlerThrew", "aggregate: err.aggName, op: err.opName, error: err.message")} return problem(500, "Internal Server Error", "internal"); }`,
   );
   body.push(
     // FRAMEWORK fault, not a domain one — hono raises `HTTPException` for the
@@ -351,7 +373,12 @@ export function buildWorkflowsFile(
     // generic 500 below, reporting a CLIENT fault as a server fault.
     `    if (err instanceof HTTPException) { ${renderHonoLogCall("clientError", "error: err.message, status: err.status")} return c.body(frameworkProblemBody(err.status, err.message, c.req.path), err.status, { "content-type": "application/problem+json", "x-request-id": trace_id }); }`,
   );
-  body.push(`    console.error(err);`);
+  // The unhandled tail — the same catalog event, at the same level, as the
+  // aggregate router's (`internal_error`), so both routers' 500s land in one
+  // stream with one schema rather than one structured line and one raw dump.
+  body.push(
+    `    ${renderHonoLogCall("internalError", "error: err instanceof Error ? err.message : String(err), status: 500")}`,
+  );
   body.push(`    return problem(500, "Internal Server Error", "internal");`);
   body.push(`  });`);
   body.push("");
@@ -745,6 +772,14 @@ function emitWorkflowRoute(
   // since the handler param is `httpCtx`, not the `c` the per-request renderer
   // hardcodes; the request-bound child logger still resolves via ALS.
   out.push(`    ${renderHonoStoreLogCall("workflowStarted", `workflow: "${wf.name}"`)}`);
+  // The name this run is announced under, parked on the request context so the
+  // file's single `onError` can close the narrative with `workflow_failed`
+  // whichever arm answers (see the `failedWorkflow` read there).  One
+  // `onError` serves every command + instance-read route in the file, so it
+  // cannot close over `wf` — and an instance READ is not a run, which is why
+  // only the command route sets this.  Typed by the emitted
+  // `ContextVariableMap` augmentation in `obs/log.ts`.
+  out.push(`    httpCtx.set("workflow", ${JSON.stringify(wf.name)});`);
   // Param-name → domain expression; precomputed so factory/repo/op-call
   // and emit references all resolve to the wire-converted body field.
   const paramExprs = new Map<string, string>();

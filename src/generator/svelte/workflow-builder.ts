@@ -50,7 +50,7 @@ export function buildWorkflowsApiModule(contexts: BoundedContextIR[]): string {
   lines.push(
     `import { ${anyInstances ? "createMutation, createQuery" : "createMutation"} } from "@tanstack/svelte-query";`,
   );
-  lines.push(`import { api } from "./client";`);
+  lines.push(`import { api, seg } from "./client";`);
   if (contexts.some(contextUsesMoney)) {
     lines.push(`import { moneySchema } from "../schemas";`);
   }
@@ -84,7 +84,7 @@ export function buildWorkflowsApiModule(contexts: BoundedContextIR[]): string {
     }
   }
 
-  return lines.join("\n");
+  return narrowSegImport(lines.join("\n"));
 }
 
 /** Read-only instance query hooks for an observable workflow
@@ -122,7 +122,7 @@ function emitInstanceHooks(wf: WorkflowIR): string[] {
   lines.push(`    queryKey: [...${key}, id()],`);
   lines.push(`    enabled: !!id(),`);
   lines.push(`    queryFn: async () => {`);
-  lines.push(`      const r = await api.get(\`/workflows/${slug}/instances/\${id()}\`);`);
+  lines.push(`      const r = await api.get(\`/workflows/${slug}/instances/\${seg(id())}\`);`);
   lines.push(`      return ${T}InstanceResponse.parse(r);`);
   lines.push(`    },`);
   lines.push(`  }));`);
@@ -222,4 +222,16 @@ function walkType(t: TypeIR, visit: (t: TypeIR) => void): void {
   visit(t);
   if (t.kind === "array") walkType(t.element, visit);
   else if (t.kind === "optional") walkType(t.inner, visit);
+}
+
+/** Drop the `seg` specifier when the module emitted no path interpolation —
+ *  a workflow module with no instance-by-id read, say.  Same deferred-import
+ *  shape the Hono route builder uses for `./problem-details`: emit the wide
+ *  import, then narrow it once the body is known.  Without this the generated
+ *  file carries an unused import, which `test:biome-gen` flags (and which the
+ *  generated projects' own Biome config would too). */
+function narrowSegImport(src: string): string {
+  return /\$\{seg\(/.test(src)
+    ? src
+    : src.replace('import { api, seg } from "./client";', 'import { api } from "./client";');
 }

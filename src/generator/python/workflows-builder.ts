@@ -573,6 +573,16 @@ function workflowRoute(
     // Workflow narrative — `workflow_started` at the route entry; shared catalog
     // identity (field `workflow`) across every backend.
     `    log("${LogEvents.workflowStarted.level}", "${LogEvents.workflowStarted.event}", workflow=${JSON.stringify(wf.name)})`,
+    // Everything from here to the 204 runs inside a `try`, so a run that
+    // raises can log its TERMINAL event (`workflow_failed`) before the
+    // exception continues to FastAPI's handler untouched.  Without it a failed
+    // workflow logged `workflow_started` and then nothing at all — "started but
+    // never finished" read exactly like "still running", and every
+    // started/completed pairing in a dashboard leaked one row per failure.
+    // The body is rendered AT the deeper indent (the chunk renderer takes its
+    // pad as an argument) rather than re-indented afterwards, so the chunk
+    // texts the source-map anchors on stay exactly the text in the file.
+    "    try:",
   ];
   // A `transactional(<level>)` workflow (or its state dataSource's
   // `isolationLevel:`) pins the request transaction's isolation before any
@@ -581,12 +591,12 @@ function workflowRoute(
   const isolation = sys ? resolveWorkflowIsolation(wf, ctx, sys) : wf.isolation;
   if (isolation) {
     out.push(
-      `    await session.connection(execution_options={"isolation_level": "${pyIsolationLevel(isolation)}"})`,
+      `        await session.connection(execution_options={"isolation_level": "${pyIsolationLevel(isolation)}"})`,
     );
   }
   // Wire params → domain locals (brand ids, build VOs) once up front.
   for (const p of wf.params) {
-    out.push(`    ${snake(p.name)} = ${pyWireToDomain(`body.${p.name}`, p.type, ctx)}`);
+    out.push(`        ${snake(p.name)} = ${pyWireToDomain(`body.${p.name}`, p.type, ctx)}`);
   }
   // Own-state (`field := value`) on an UNCORRELATED command workflow (M-T6.50):
   // there is no persisted saga row to write through (that's the dispatch-file
@@ -618,10 +628,10 @@ function workflowRoute(
   // service call adds no ports → byte-identical.
   const repos = mergeReadPortRepos(reposFor(wf), wf, ctx);
   for (const r of repos) {
-    out.push(`    ${snake(r.repoName)} = ${r.aggName}Repository(session, ${dispatcherExpr})`);
+    out.push(`        ${snake(r.repoName)} = ${r.aggName}Repository(session, ${dispatcherExpr})`);
   }
   const hasEmit = collectEmits(wf.statements).length > 0;
-  if (hasEmit) out.push("    workflow_events: list[DomainEvent] = []");
+  if (hasEmit) out.push("        workflow_events: list[DomainEvent] = []");
   // Chunked (one lines-array per top-level statement) rather than the
   // pre-flattened `renderWorkflowStmts` — byte-identical either way
   // (`renderWorkflowStmts` IS `chunks.flat()` by construction), but the
@@ -629,7 +639,9 @@ function workflowRoute(
   // that owns the recorder + this file's final content (source-map).
   // No re-indent transform sits between here and the final
   // file (unlike the .NET transactional path), so the chunk texts collected
-  // here are already the exact text that lands in `workflows_routes.py`.
+  // here are already the exact text that lands in `workflows_routes.py` —
+  // which is why the `try:` above passes its deeper pad IN rather than
+  // re-indenting the rendered lines afterwards.
   const stmtChunks = renderWorkflowStmtChunks(
     wf.statements,
     // Thread the read-port resolver so a `reading`-tier domain-service call in
@@ -641,7 +653,7 @@ function workflowRoute(
       ctx,
       collectUsedLetNames(wf.statements),
     ),
-    "    ",
+    "        ",
   );
   out.push(...stmtChunks.flat());
   if (opFragments) {
@@ -654,19 +666,26 @@ function workflowRoute(
     }
   }
   for (const save of wf.savesAtExit) {
-    out.push(`    await ${snake(save.repoName)}.save(${snake(save.name)})`);
+    out.push(`        await ${snake(save.repoName)}.save(${snake(save.name)})`);
   }
   if (hasEmit) {
-    out.push(`    dispatcher = ${dispatcherExpr}`);
-    out.push("    for ev in workflow_events:");
-    out.push("        await dispatcher.dispatch(ev)");
+    out.push(`        dispatcher = ${dispatcherExpr}`);
+    out.push("        for ev in workflow_events:");
+    out.push("            await dispatcher.dispatch(ev)");
   }
   // `workflow_completed` on the success tail — a raised guard / domain error
   // short-circuits before reaching here.
   out.push(
-    `    log("${LogEvents.workflowCompleted.level}", "${LogEvents.workflowCompleted.event}", workflow=${JSON.stringify(wf.name)})`,
+    `        log("${LogEvents.workflowCompleted.level}", "${LogEvents.workflowCompleted.event}", workflow=${JSON.stringify(wf.name)})`,
   );
-  out.push("    return Response(status_code=204)");
+  out.push("        return Response(status_code=204)");
+  // `raise` re-raises the ORIGINAL exception with its traceback intact, so the
+  // status FastAPI's handler picks is exactly what it was before.
+  out.push("    except Exception as exc:");
+  out.push(
+    `        log("${LogEvents.workflowFailed.level}", "${LogEvents.workflowFailed.event}", workflow=${JSON.stringify(wf.name)}, error=str(exc))`,
+  );
+  out.push("        raise");
   return out.join("\n");
 }
 

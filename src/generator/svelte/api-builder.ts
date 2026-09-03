@@ -59,7 +59,7 @@ export function buildSvelteApiModule(
   lines.push(
     `import { createMutation, createQuery, useQueryClient } from "@tanstack/svelte-query";`,
   );
-  lines.push(`import { api } from "./client";`);
+  lines.push(`import { api, seg } from "./client";`);
   if (aggregateUsesMoneyDeep(agg, ctx.valueObjects)) {
     lines.push(`import { moneySchema } from "../schemas";`);
   }
@@ -239,7 +239,7 @@ export function buildSvelteApiModule(
   lines.push(`    queryKey: ["${tag}", id()],`);
   lines.push(`    enabled: !!id(),`);
   lines.push(`    queryFn: async () => {`);
-  lines.push(`      const r = await api.get(\`/${tag}/\${id()}\`);`);
+  lines.push(`      const r = await api.get(\`/${tag}/\${seg(id())}\`);`);
   lines.push(`      return ${agg.name}Response.parse(r);`);
   lines.push(`    },`);
   lines.push(`  }));`);
@@ -263,7 +263,7 @@ export function buildSvelteApiModule(
     lines.push(`  const qc = useQueryClient();`);
     lines.push(`  return createMutation(() => ({`);
     lines.push(`    mutationFn: async (id: string) => {`);
-    lines.push(`      await api.delete(\`/${tag}/\${id}\`);`);
+    lines.push(`      await api.delete(\`/${tag}/\${seg(id)}\`);`);
     lines.push(`    },`);
     lines.push(`    onSuccess: () => qc.invalidateQueries({ queryKey: ${aggKey} }),`);
     lines.push(`  }));`);
@@ -282,10 +282,10 @@ export function buildSvelteApiModule(
       // Union-returning op: parse + RETURN the tagged success variant so the
       // awaiting action's `match` arm carries the payload (the error variant
       // never reaches 200 — it's a thrown non-2xx reified at the call site).
-      lines.push(`      const r = await api.post(\`/${tag}/\${id()}/${opSnake}\`, input);`);
+      lines.push(`      const r = await api.post(\`/${tag}/\${seg(id())}/${opSnake}\`, input);`);
       lines.push(`      return ${upperFirst(op.name)}${agg.name}Response.parse(r);`);
     } else {
-      lines.push(`      await api.post(\`/${tag}/\${id()}/${opSnake}\`, input);`);
+      lines.push(`      await api.post(\`/${tag}/\${seg(id())}/${opSnake}\`, input);`);
     }
     lines.push(`    },`);
     lines.push(`    onSuccess: () => {`);
@@ -340,7 +340,7 @@ export function buildSvelteApiModule(
     lines.push(`    queryKey: ["${tag}", id(), "history"],`);
     lines.push(`    enabled: !!id(),`);
     lines.push(`    queryFn: async () => {`);
-    lines.push(`      const r = await api.get(\`/${tag}/\${id()}/history\`);`);
+    lines.push(`      const r = await api.get(\`/${tag}/\${seg(id())}/history\`);`);
     lines.push(`      return ${AUDIT_ENTRY_LIST_TYPE}.parse(r);`);
     lines.push(`    },`);
     lines.push(`  }));`);
@@ -348,5 +348,17 @@ export function buildSvelteApiModule(
     lines.push("");
   }
 
-  return lines.join("\n");
+  return narrowSegImport(lines.join("\n"));
+}
+
+/** Drop the `seg` specifier when the module emitted no path interpolation —
+ *  a workflow module with no instance-by-id read, say.  Same deferred-import
+ *  shape the Hono route builder uses for `./problem-details`: emit the wide
+ *  import, then narrow it once the body is known.  Without this the generated
+ *  file carries an unused import, which `test:biome-gen` flags (and which the
+ *  generated projects' own Biome config would too). */
+function narrowSegImport(src: string): string {
+  return /\$\{seg\(/.test(src)
+    ? src
+    : src.replace('import { api, seg } from "./client";', 'import { api } from "./client";');
 }

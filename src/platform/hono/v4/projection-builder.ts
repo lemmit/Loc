@@ -536,9 +536,7 @@ function emitProjectionRoutes(
   // this one was serving a 404 as a 500 on node alone (java/python/dotnet/elixir
   // all answer 404), and adding the 403 arm meant adding the handler regardless.
   out.push(`  app.onError((err, c) => {`);
-  out.push(
-    `    const trace_id = (c as unknown as { get(k: "requestId"): string | undefined }).get("requestId") ?? "";`,
-  );
+  out.push(`    const trace_id = c.get("requestId") ?? "";`);
   out.push(
     `    const problem = (status: ${[...new Set(anyGate ? [forbiddenStatus, notFoundStatus, 500] : [notFoundStatus, 500])].sort((a, b) => a - b).join(" | ")}, title: string, detail: string) => c.body(JSON.stringify({ type: "about:blank", title, status, detail, instance: c.req.path }), status, { "content-type": "application/problem+json", "x-request-id": trace_id });`,
   );

@@ -102,6 +102,7 @@ import {
 import { opHasProvSite } from "../../../ir/util/prov-id.js";
 import { collectReachableTypes } from "../../../ir/util/reachable-types.js";
 import { aggregateIsEventSourced } from "../../../ir/util/resolve-datasource.js";
+import { sortableFields } from "../../../ir/util/sortable-fields.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { walkExpr } from "../../../ir/validate/checks/shared.js";
 import type {
@@ -723,14 +724,26 @@ export function buildRoutesFile(
         lines.push(`  ${p.name}: ${zodFor(p.type, "query")},`);
       }
       if (paged) {
-        // Server-side pagination + sort controls (M-T2.6).  `sort`/`dir` are
-        // plain strings (the client binds them to its sort state, which starts
-        // empty = unsorted); the repository whitelists the column server-side
-        // (`sortColumns[sort] ?? id`), so an enum boundary is unnecessary — and
-        // would reject the empty initial sort the scaffold list sends.
+        // Server-side pagination + sort controls (M-T2.6).  `sort` is a
+        // DECLARED enum of the server-side whitelist — `sortableFields(agg)`,
+        // the same list the repository builds its `sortColumns` map from — plus
+        // the empty string the scaffold list's initial (unsorted) state sends.
         //
-        // Both carry a DECLARED upper bound (`PAGED_MAX_PAGE` /
-        // `PAGED_MAX_PAGE_SIZE`).  With only `.min(1)` the published contract
+        // It used to be a bare `z.string()`, on the reasoning that "the
+        // repository whitelists the column server-side (`sortColumns[sort] ??
+        // id`), so an enum boundary is unnecessary".  Both halves of that were
+        // wrong.  A bare index into an object literal reaches
+        // `Object.prototype`, and `??` only guards null/undefined, so
+        // `?sort=constructor` bound a Function as an ORDER BY parameter and
+        // `?sort=__proto__` threw at query-build time — an uncaught 500 from a
+        // spec-CONFORMANT query string.  (The repository now uses `Object.hasOwn`
+        // as well; this enum is the outer, contract-level boundary — a typo'd
+        // sort key is answered, not silently re-ordered by `id`.)  Publishing the
+        // accepted keys also makes the OpenAPI contract honest: a fuzzer reads
+        // the enum instead of guessing, and the client learns its typo.
+        //
+        // `page` and `pageSize` both carry a DECLARED upper bound
+        // (`PAGED_MAX_PAGE` / `PAGED_MAX_PAGE_SIZE`).  With only `.min(1)` the published contract
         // permitted a `page × pageSize` product that overflows the SQL
         // `OFFSET` — a 500 the caller reached by obeying the spec
         // (schemathesis F4).  The bound is part of the contract, so the same
@@ -738,7 +751,7 @@ export function buildRoutesFile(
         lines.push(
           `  page: z.coerce.number().int().min(1).max(${PAGED_MAX_PAGE}).default(${PAGED_DEFAULT_PAGE}),`,
           `  pageSize: z.coerce.number().int().min(1).max(${PAGED_MAX_PAGE_SIZE}).default(${PAGED_DEFAULT_PAGE_SIZE}),`,
-          `  sort: z.string().default("id"),`,
+          `  sort: z.enum([${[...sortableFields(agg), ""].map((f) => JSON.stringify(f)).join(", ")}]).default("id"),`,
           `  dir: z.string().default("asc"),`,
         );
       }
@@ -1085,6 +1098,23 @@ export function buildRoutesFile(
     `      if (!found) throw new AggregateNotFoundError(\`${agg.name} \${id} not found\`);`,
   );
   lines.push(...maskUserBind(agg, "      "));
+  // The ETag half of optimistic concurrency (`versioned`).  The update route
+  // has always READ `If-Match` — but nothing ever SENT an entity-tag, so the
+  // conditional-write path was undiscoverable: a client had no value to echo,
+  // and `expectedVersion` always fell back to the version the SERVER had just
+  // loaded, which defeats the whole point (the race being guarded against is
+  // one that happens across the user's think time, between this read and that
+  // write).  Publishing it here closes the loop: read → hold the tag → send it
+  // back on `If-Match` → get a real 409 if someone else won the race.
+  //
+  // A response header only, deliberately not declared in the `responses`
+  // block: the OpenAPI documents are compared BACKEND-TO-BACKEND by the
+  // conformance spec-diff, so declaring it on node alone would read as a
+  // contract divergence.  Declaring it belongs with emitting it on the other
+  // four backends, in one change.
+  if (aggregateIsVersioned(agg)) {
+    lines.push(`      c.header("etag", versionETag(found.version));`);
+  }
   if (emitTrace) {
     // toWire isn't trivial — bind once so it's not run twice between
     // Object.keys and c.json.
@@ -1310,9 +1340,7 @@ export function buildRoutesFile(
   // the cast bridges the untyped get to a strongly-typed read without
   // leaking `any` into the user's surface.  Same pattern bridges the
   // bound child logger at every log call site below — see render-hono.
-  lines.push(
-    `    const trace_id = (c as unknown as { get(k: "requestId"): string | undefined }).get("requestId") ?? "";`,
-  );
+  lines.push(`    const trace_id = c.get("requestId") ?? "";`);
   // Each error class lands a structured log line at the catalog-defined
   // level (warn for client/domain faults; error for system faults) on
   // the per-request child logger, so the line auto-carries request_id.
@@ -1437,8 +1465,11 @@ export function buildRoutesFile(
   // expects (`ProblemDetails` < `frameworkProblemBody` < `newApp` <
   // `requireJsonContentType`).
   const problemNamed = ["ProblemDetails", "frameworkProblemBody", "newApp"];
-  if (/\brequireJsonContentType\(/.test(lines.join("\n")))
+  const assembledSoFar = lines.join("\n");
+  if (/\bparseIfMatch\(/.test(assembledSoFar)) problemNamed.push("parseIfMatch");
+  if (/\brequireJsonContentType\(/.test(assembledSoFar))
     problemNamed.push("requireJsonContentType");
+  if (/\bversionETag\(/.test(assembledSoFar)) problemNamed.push("versionETag");
   const assembled = lines
     .join("\n")
     .replace(
@@ -1709,10 +1740,14 @@ function emitOperationRoute(
       // (docs/old/plans/optimistic-concurrency-versioned.md /
       // updatePreconditions); absent header falls back to the version just
       // loaded, so an unaware client still gets a coherent guarded write.
+      //
+      // Parsed through the shared `parseIfMatch` rather than a bare
+      // `Number(ifMatch)`: an entity-tag is a QUOTED string, so a client
+      // sending back the ETag this API gave it (`If-Match: "3"`) yielded
+      // `Number('"3"') === NaN`, the guarded UPDATE matched no row, and the
+      // caller got a spurious 409 for doing exactly the right thing.
       out.push(`    const ifMatch = c.req.header("if-match");`);
-      out.push(
-        `    const expectedVersion = ifMatch !== undefined ? Number(ifMatch) : aggregate.version;`,
-      );
+      out.push(`    const expectedVersion = parseIfMatch(ifMatch, aggregate.version);`);
     }
     out.push(...requiresGateLines(op, "    ", ctx));
     out.push(...whenGateLine(agg, op, "    "));
@@ -1745,9 +1780,7 @@ function emitOperationRoute(
     out.push(`      const aggregate = await repoTx.getById(Ids.${agg.name}Id(id));`);
     if (isVersionedUpdate) {
       out.push(`      const ifMatch = c.req.header("if-match");`);
-      out.push(
-        `      const expectedVersion = ifMatch !== undefined ? Number(ifMatch) : aggregate.version;`,
-      );
+      out.push(`      const expectedVersion = parseIfMatch(ifMatch, aggregate.version);`);
     }
     out.push(...requiresGateLines(op, "      ", ctx));
     out.push(...whenGateLine(agg, op, "      "));

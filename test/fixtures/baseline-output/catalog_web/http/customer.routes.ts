@@ -1,6 +1,6 @@
 // Auto-generated.  Do not edit by hand.
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import { ProblemDetails, frameworkProblemBody, newApp, requireJsonContentType } from "./problem-details";
+import { ProblemDetails, frameworkProblemBody, newApp, parseIfMatch, requireJsonContentType, versionETag } from "./problem-details";
 import { HTTPException } from "hono/http-exception";
 import { recordDomainFault, recordDomainOperation } from "../obs/metrics";
 import { Customer } from "../domain/customer";
@@ -25,7 +25,7 @@ const UpdateCustomerRequest = z.object({
 const AllQuery = z.object({
   page: z.coerce.number().int().min(1).max(1000000).default(1),
   pageSize: z.coerce.number().int().min(1).max(500).default(20),
-  sort: z.string().default("id"),
+  sort: z.enum(["id", "username", "email", "age", ""]).default("id"),
   dir: z.string().default("asc"),
 }).openapi("AllQuery");
 const ByEmailQuery = z.object({
@@ -96,7 +96,7 @@ export function customerRoutes(repo: CustomerRepository): OpenAPIHono {
       const body = c.req.valid("json");
       const created = Customer.create({ username: body.username, email: body.email, age: body.age });
       await repo.save(created);
-      (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").info({ event: "aggregate_created", aggregate: "Customer", id: created.id as string });
+      c.get("log").info({ event: "aggregate_created", aggregate: "Customer", id: created.id as string });
       recordDomainOperation("Customer", "create");
       return c.json({ id: created.id as string }, 201);
     },
@@ -140,6 +140,7 @@ export function customerRoutes(repo: CustomerRepository): OpenAPIHono {
       const { id } = c.req.valid("param");
       const found = await repo.findById(Ids.CustomerId(id));
       if (!found) throw new AggregateNotFoundError(`Customer ${id} not found`);
+      c.header("etag", versionETag(found.version));
       return c.json(repo.toWire(found) as z.infer<typeof CustomerResponse>, 200);
     },
   );
@@ -196,11 +197,11 @@ export function customerRoutes(repo: CustomerRepository): OpenAPIHono {
       const { id } = c.req.valid("param");
       requireJsonContentType(c);
       const body = c.req.valid("json");
-      (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").info({ event: "operation_invoked", aggregate: "Customer", op: "update", id });
+      c.get("log").info({ event: "operation_invoked", aggregate: "Customer", op: "update", id });
       recordDomainOperation("Customer", "update");
       const aggregate = await repo.getById(Ids.CustomerId(id));
       const ifMatch = c.req.header("if-match");
-      const expectedVersion = ifMatch !== undefined ? Number(ifMatch) : aggregate.version;
+      const expectedVersion = parseIfMatch(ifMatch, aggregate.version);
       aggregate.update(body.username, body.email, body.age);
       await repo.save(aggregate, expectedVersion);
       return c.body(null, 204);
@@ -227,42 +228,42 @@ export function customerRoutes(repo: CustomerRepository): OpenAPIHono {
   );
 
   app.onError((err, c) => {
-    const trace_id = (c as unknown as { get(k: "requestId"): string | undefined }).get("requestId") ?? "";
+    const trace_id = c.get("requestId") ?? "";
     const problem = (status: 403 | 404 | 409 | 422 | 500, title: string, detail: string) => c.body(JSON.stringify({ type: "about:blank", title, status, detail, instance: c.req.path }), status, { "content-type": "application/problem+json", "x-request-id": trace_id });
     if (err instanceof ForbiddenError) {
-      (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").warn({ event: "forbidden", aggregate: "Customer", message: err.message, status: 403 });
+      c.get("log").warn({ event: "forbidden", aggregate: "Customer", message: err.message, status: 403 });
       recordDomainFault("forbidden");
       return problem(403, "Forbidden", err.message);
     }
     if (err instanceof DisallowedError) {
-      (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").warn({ event: "disallowed", aggregate: "Customer", message: err.message, status: 409 });
+      c.get("log").warn({ event: "disallowed", aggregate: "Customer", message: err.message, status: 409 });
       recordDomainFault("disallowed");
       return problem(409, "Disallowed", err.message);
     }
     if (err instanceof DomainError) {
-      (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").warn({ event: "domain_error", aggregate: "Customer", message: err.message, status: 422 });
+      c.get("log").warn({ event: "domain_error", aggregate: "Customer", message: err.message, status: 422 });
       recordDomainFault("domain_error");
       return problem(422, "Unprocessable Entity", err.message);
     }
     if (err instanceof AggregateNotFoundError) {
-      (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").warn({ event: "not_found", aggregate: "Customer", status: 404 });
+      c.get("log").warn({ event: "not_found", aggregate: "Customer", status: 404 });
       recordDomainFault("not_found");
       return problem(404, "Not Found", err.message);
     }
     if (err instanceof ConcurrencyError) {
-      (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").warn({ event: "conflict", aggregate: "Customer", message: err.message, status: 409 });
+      c.get("log").warn({ event: "conflict", aggregate: "Customer", message: err.message, status: 409 });
       recordDomainFault("conflict");
       return problem(409, "Conflict", err.message);
     }
     if (err instanceof ExternHandlerError) {
-      (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").error({ event: "extern_handler_threw", aggregate: err.aggName, op: err.opName, error: err.message });
+      c.get("log").error({ event: "extern_handler_threw", aggregate: err.aggName, op: err.opName, error: err.message });
       return problem(500, "Internal Server Error", "internal");
     }
     if (err instanceof HTTPException) {
-      (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").warn({ event: "client_error", error: err.message, status: err.status });
+      c.get("log").warn({ event: "client_error", error: err.message, status: err.status });
       return c.body(frameworkProblemBody(err.status, err.message, c.req.path), err.status, { "content-type": "application/problem+json", "x-request-id": trace_id });
     }
-    (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").error({ event: "internal_error", error: err instanceof Error ? err.message : String(err), status: 500 });
+    c.get("log").error({ event: "internal_error", error: err instanceof Error ? err.message : String(err), status: 500 });
     return problem(500, "Internal Server Error", "internal");
   });
 

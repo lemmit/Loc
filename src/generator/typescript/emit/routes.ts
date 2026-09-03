@@ -306,7 +306,7 @@ export function renderHttpIndex(
     // The request middleware mounts on THIS app (`app.use("*", …)`), so a fault
     // from a mounted sub-app has a request id to correlate on — same read, same
     // cast bridge as the sub-routers use.
-    `    const trace_id = (c as unknown as { get(k: "requestId"): string | undefined }).get("requestId") ?? "";`,
+    `    const trace_id = c.get("requestId") ?? "";`,
     `    const problem = (status: ${rootProblemUnion}, title: string, detail: string) => c.body(JSON.stringify({ type: "about:blank", title, status, detail, instance: c.req.path }), status, { "content-type": "application/problem+json", "x-request-id": trace_id });`,
     "    if (err instanceof ForbiddenError) {",
     `      ${renderHonoBaseLogCall("forbidden", `message: err.message, status: ${rootForbiddenStatus}`)}`,

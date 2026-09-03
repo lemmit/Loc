@@ -1538,6 +1538,34 @@ function renderWorkflowModule(
   const completedCall = renderPhoenixLogCall("workflowCompleted", [
     { name: "workflow", valueExpr: JSON.stringify(wf.name) },
   ]);
+  // The TERMINAL event of a FAILED run.  Elixir's workflow is result-tuple
+  // shaped, not exception shaped, so there is no `catch` to hang this on: the
+  // body's `with`-chain short-circuits to `{:error, reason}` and hands it back
+  // out of `run/1`.  Piping the RESULT through a reporter catches every one of
+  // those paths without touching the body (no re-indent, and the statement
+  // regions the source-map anchors on stay byte-identical).
+  //
+  // `def`, not `defp`, for the reason `commit_result/1` below is public:
+  // Elixir 1.18 narrows a PRIVATE function's parameter to the inferred
+  // argument type, so a workflow whose body cannot fail would have its
+  // `{:error, _}` clause flagged "never matches" and fail the -Werror build.
+  const failureReporter = `
+  # Terminal log for a FAILED run.  Without it a workflow that errored logged
+  # \`workflow_started\` and then nothing, so "started but never finished" was
+  # indistinguishable from "still running" in the log stream.
+  #
+  # \`def\`, not \`defp\`: Elixir 1.18 narrows a PRIVATE function's parameter to
+  # the inferred argument type, so a workflow whose body cannot fail would have
+  # its \`{:error, _}\` clause flagged "never matches" under -Werror.
+  def report_result({:error, reason} = result) do
+    ${renderPhoenixLogCall("workflowFailed", [
+      { name: "workflow", valueExpr: JSON.stringify(wf.name) },
+      { name: "error", valueExpr: "inspect(reason)" },
+    ])}
+    result
+  end
+
+  def report_result(result), do: result`;
   const lines = lowerStatements(wf.statements ?? [], contextModuleFq, renderCtx, ctx);
   const body = assembleBody(lines, completedCall);
   // A workflow that names `currentUser` in a guard/body — or calls a
@@ -1619,7 +1647,9 @@ defmodule ${moduleName} do
     ${appModule}.RequestContext.with_child_frame(fn ->
       Repo.transaction(fn ->${txnBody}end)
     end)
+    |> report_result()
   end
+${failureReporter}
 
   # Public (not defp): Elixir 1.18 narrows a private fn's parameter to
   # run_inner's inferred result, which flags whichever arm this workflow's
@@ -1652,7 +1682,9 @@ defmodule ${moduleName} do
     ${appModule}.RequestContext.with_child_frame(fn ->
 ${finalBody}
     end)
-  end${helperDefs}
+    |> report_result()
+  end
+${failureReporter}${helperDefs}
 end
 `;
   return { content, statementRegions };

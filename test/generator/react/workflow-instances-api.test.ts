@@ -48,7 +48,7 @@ describe("React workflows api module — instance hooks", () => {
     expect(mod).toContain("export function useAllFulfillmentInstances() {");
     expect(mod).toContain("export function useFulfillmentInstanceById(id: string | undefined) {");
     expect(mod).toContain("await api.get(`/workflows/fulfillment/instances`)");
-    expect(mod).toMatch(/await api\.get\(`\/workflows\/fulfillment\/instances\/\$\{id\}`\)/);
+    expect(mod).toMatch(/await api\.get\(`\/workflows\/fulfillment\/instances\/\$\{seg\(id\)\}`\)/);
     // useQuery is imported once an observable workflow exists.
     expect(mod).toContain('import { useMutation, useQuery } from "@tanstack/react-query";');
     // The enum schema the response references is imported.

@@ -1,0 +1,48 @@
+// Compile-gate fixture for the emitted `e2e/` PROJECT — the vitest suite a
+// `test e2e "…" against <backend>` block lowers to, together with the
+// `e2e/package.json` + `e2e/tsconfig.json` that `src/system/index.ts` emits
+// beside it.
+//
+// Those two constants used to disagree: the tsconfig declared
+// `types: ["node", …]` while the manifest installed no `@types/node`, so
+// `npx tsc --noEmit -p .` inside the emitted `e2e/` failed with
+// `TS2688: Cannot find type definition file for 'node'` on EVERY generated
+// system — and nothing compiled that project, so nothing noticed.  The suite
+// genuinely reaches for node globals (`process.env.E2E_<SVC>_BASE` for the
+// base URL), which is exactly why the types are declared.
+//
+// Deliberately minimal: one aggregate, one backend deployable, one api test.
+// The subject under test is the emitted PROJECT MANIFEST, not the domain.
+
+system E2EProject {
+  api OrdersApi from Sales
+
+  subdomain Sales {
+    context Orders {
+      aggregate Order with crudish {
+        code:  string
+        total: int
+      }
+
+      repository Orders for Order { }
+    }
+  }
+
+  storage primarySql { type: postgres }
+
+  resource ordersState { for: Orders, kind: state, use: primarySql }
+
+  deployable api {
+    platform: node
+    contexts: [Orders]
+    dataSources: [ordersState]
+    serves: OrdersApi
+    port: 3000
+  }
+
+  test e2e "create an order then read it back" against api {
+    let o = api.orders.create({ code: "A-1", total: 10 })
+    let read = api.orders.getById(o)
+    expect(read.code).toBe("A-1")
+  }
+}

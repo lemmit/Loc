@@ -727,6 +727,17 @@ export function renderJavaWorkflows(
       // `workflow_completed` on the success tail — a thrown guard / domain
       // exception short-circuits before reaching here.
       `            CatalogLog.event(${javaLogEvent("workflowCompleted")}, "workflow", ${JSON.stringify(wf.name)});`,
+      // The TERMINAL event of a FAILED run.  Without it a workflow that threw
+      // logged `workflow_started` and then nothing at all, so "started but
+      // never finished" was indistinguishable from "still running" in the log
+      // stream and every started/completed pairing leaked one row per failure.
+      // Rides the existing try-with-resources (the child execution frame), so
+      // the body needs no re-indent and the frame still closes on the way out;
+      // the exception is re-thrown unchanged, leaving the @ControllerAdvice
+      // status mapping exactly as it was.
+      `        } catch (RuntimeException __e) {`,
+      `            CatalogLog.event(${javaLogEvent("workflowFailed")}, "workflow", ${JSON.stringify(wf.name)}, "error", String.valueOf(__e.getMessage()));`,
+      `            throw __e;`,
       `        }`,
       `    }`,
       ``,

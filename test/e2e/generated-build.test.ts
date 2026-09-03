@@ -945,5 +945,47 @@ describe.skipIf(!ENABLED)(
         }
       }
     }, 300_000);
+
+    // The emitted `e2e/` PROJECT — the vitest suite a `test e2e "…" against
+    // <backend>` block lowers to, plus the `e2e/package.json` +
+    // `e2e/tsconfig.json` emitted beside it by `src/system/index.ts`.  Every
+    // other case in this file compiles a *deployable's* project; nothing
+    // compiled this one, and it did not type-check for ANY system:
+    //
+    //   - the tsconfig declared `types: ["node", …]` while the manifest
+    //     installed no `@types/node` → `TS2688: Cannot find type definition
+    //     file for 'node'`;
+    //   - `__post`/`__get` returned `Promise<unknown>`, so every emitted
+    //     assertion that read a wire field off a response was a `TS18046:
+    //     'x' is of type 'unknown'`.
+    //
+    // Runs the real `npx tsc --noEmit -p .` inside the emitted directory —
+    // asserting on the constants' TEXT would not have caught the second half.
+    it("system `test e2e` — the emitted e2e/ project installs and type-checks", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tsc-e2eproj-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/ts-build/e2e-project.ddd -o ${outDir}`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+        const proj = path.join(outDir, "e2e");
+        // Sanity: the suite really does reach for the node globals its tsconfig
+        // declares — which is why the manifest has to install their types.
+        const suite = fs.readFileSync(path.join(proj, "E2EProject.e2e.test.ts"), "utf8");
+        expect(suite).toContain("process.env.E2E_API_BASE");
+        execSync(`npm install --silent --no-audit --no-fund`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+        execSync(`npx tsc --noEmit -p .`, { cwd: proj, stdio: "inherit", timeout: 60_000 });
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 300_000);
   },
 );

@@ -81,9 +81,12 @@ describe("hono/drizzle generator — versioned optimistic-concurrency", () => {
       "customer.routes.ts",
     );
     expect(routes).toContain('const ifMatch = c.req.header("if-match");');
-    expect(routes).toContain(
-      "const expectedVersion = ifMatch !== undefined ? Number(ifMatch) : aggregate.version;",
-    );
+    // Parsed through the shared `parseIfMatch` (problem-details.ts), not a bare
+    // `Number(ifMatch)`: an entity-tag is a QUOTED string, so a client sending
+    // back the ETag this API now gives it (`If-Match: "3"`) produced
+    // `Number('"3"') === NaN`, matched no row, and answered a spurious 409.
+    expect(routes).toContain("const expectedVersion = parseIfMatch(ifMatch, aggregate.version);");
+    expect(routes).not.toContain("Number(ifMatch)");
     expect(routes).toContain("await repo.save(aggregate, expectedVersion);");
   });
 

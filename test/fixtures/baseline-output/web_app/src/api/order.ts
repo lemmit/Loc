@@ -1,7 +1,7 @@
 // Auto-generated.  Do not edit by hand.
 import { z } from "zod";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "./client";
+import { api, seg } from "./client";
 
 export const OrderStatusSchema = z.enum(["Draft", "Confirmed", "Shipped", "Cancelled"]);
 
@@ -77,7 +77,7 @@ export function useOrderById(id: string | undefined) {
     queryKey: ["orders", id],
     enabled: !!id,
     queryFn: async () => {
-      const r = await api.get(`/orders/${id}`);
+      const r = await api.get(`/orders/${seg(id)}`);
       return OrderResponse.parse(r);
     },
   });
@@ -98,7 +98,7 @@ export function useDeleteOrder() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      await api.delete(`/orders/${id}`);
+      await api.delete(`/orders/${seg(id)}`);
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["orders"] }),
   });
@@ -108,7 +108,7 @@ export function useAddLineOrder(id: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: AddLineOrderRequest) => {
-      await api.post(`/orders/${id}/add_line`, input);
+      await api.post(`/orders/${seg(id)}/add_line`, input);
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["orders", id] });
@@ -121,7 +121,7 @@ export function useConfirmOrder(id: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: ConfirmOrderRequest) => {
-      await api.post(`/orders/${id}/confirm`, input);
+      await api.post(`/orders/${seg(id)}/confirm`, input);
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["orders", id] });
@@ -134,7 +134,7 @@ export function useUpdateOrder(id: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: UpdateOrderRequest) => {
-      await api.post(`/orders/${id}/update`, input);
+      await api.post(`/orders/${seg(id)}/update`, input);
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["orders", id] });
