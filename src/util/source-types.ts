@@ -129,6 +129,15 @@ export function registerSourceType(descriptor: SourceTypeDescriptor): void {
   REGISTRY.set(descriptor.name, descriptor);
 }
 
+/** Remove a registered sourceType, returning whether one was there.  The
+ *  counterpart to `registerSourceType`: the registry is module-global and
+ *  outlives whoever registered into it, so a plugin loader — and the tests
+ *  that exercise one — need a way to undo a registration rather than leaking
+ *  it into every later consumer of the module graph. */
+export function unregisterSourceType(name: string): boolean {
+  return REGISTRY.delete(name);
+}
+
 /** Look up a sourceType descriptor by name (= `StorageKind`). */
 export function sourceTypeFor(name: string): SourceTypeDescriptor | undefined {
   return REGISTRY.get(name);
