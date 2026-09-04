@@ -16,6 +16,7 @@ import { PlainJsonBody } from "../backend/PlainJsonBody";
 import { LazyJsonBodyEditor } from "./lazy-panels";
 import { SqlConsole } from "../backend/SqlConsole";
 import { CUSTOM_ENDPOINT, groupEndpointsByTag } from "../backend/openapi";
+import { nextStepMid, RUNTIME_STATUS, STAGE } from "./vocabulary";
 
 interface Props {
   ctx: LayoutCtx;
@@ -29,25 +30,34 @@ interface Props {
 // Lifted out so both shells can reuse it: desktop renders it inside
 // a Group beside the "Runtime" label, mobile renders it in a banner
 // above the form body (Mantine Tabs.List only holds the labels).
+// On desktop the Boot button lives on the header's pipeline strip
+// (`btn-boot` there — M-T8.16); mobile has no strip buttons, so the
+// banner keeps it.
 export function BackendHeader({ ctx }: Props): JSX.Element {
-  const { pipeline, ddl, honoBundle, runBoot } = ctx;
+  const { isDesktop, pipeline, ddl, honoBundle, runBoot } = ctx;
   return (
     <Group gap="xs" wrap="wrap" justify="flex-end">
       {ddl ? (
-        <Badge size="xs" color="green" variant="light" data-testid="backend-status">booted</Badge>
+        <Badge size="xs" color="green" variant="light" data-testid="backend-status">
+          {RUNTIME_STATUS.booted}
+        </Badge>
       ) : (
-        <Badge size="xs" color="gray" variant="light" data-testid="backend-status">offline</Badge>
+        <Badge size="xs" color="gray" variant="light" data-testid="backend-status">
+          {RUNTIME_STATUS.offline}
+        </Badge>
       )}
-      <Button
-        size="xs"
-        onClick={runBoot}
-        loading={pipeline.booting}
-        disabled={!honoBundle}
-        variant="default"
-        data-testid="btn-boot"
-      >
-        {ddl ? "Reboot" : "Boot"}
-      </Button>
+      {!isDesktop && (
+        <Button
+          size="xs"
+          onClick={runBoot}
+          loading={pipeline.booting}
+          disabled={!honoBundle}
+          variant="default"
+          data-testid="btn-boot"
+        >
+          {ddl ? "Reboot" : STAGE.boot}
+        </Button>
+      )}
     </Group>
   );
 }
@@ -310,8 +320,8 @@ export function BackendBody({ ctx }: Props): JSX.Element {
       ) : (
         <Text size="xs" c="dimmed">
           {honoBundle
-            ? "Click Boot to spin up PGlite + the generated Hono app."
-            : "Generate and Bundle first to enable the runtime."}
+            ? `${isDesktop ? `Click ${STAGE.boot}` : nextStepMid("boot", false)} to start the generated API and an in-browser Postgres. You can then call endpoints and run SQL here.`
+            : `${nextStepMid("boot", isDesktop)} to start the generated API and an in-browser Postgres.`}
         </Text>
       )}
     </Box>
@@ -367,21 +377,50 @@ function DatabaseView({
 
       <SqlConsole runQuery={runQuery} isDesktop={isDesktop} />
 
-      <Stack gap={4}>
+      <ResetDatabase runWipe={runWipe} />
+    </Stack>
+  );
+}
+
+// Two-step reset: the first click reveals the consequence and a confirm,
+// so one stray click can't drop every row.  The explanation sits ABOVE
+// the button so it is read before, not after, the action.
+function ResetDatabase({ runWipe }: { runWipe: () => void }): JSX.Element {
+  const [armed, setArmed] = useState(false);
+  return (
+    <Stack gap={4}>
+      <Text size="xs" c="dimmed">
+        Reset drops every row and re-applies the schema. The table structure stays — only your data is cleared.
+      </Text>
+      {armed ? (
+        <Group gap={6}>
+          <Button
+            size="xs"
+            color="red"
+            onClick={() => {
+              setArmed(false);
+              runWipe();
+            }}
+            data-testid="btn-wipe-confirm"
+          >
+            Yes, clear all rows
+          </Button>
+          <Button size="xs" variant="subtle" color="gray" onClick={() => setArmed(false)}>
+            Cancel
+          </Button>
+        </Group>
+      ) : (
         <Button
           size="xs"
           variant="default"
           color="red"
-          onClick={runWipe}
+          onClick={() => setArmed(true)}
           style={{ alignSelf: "flex-start" }}
           data-testid="btn-wipe"
         >
-          Reset database
+          Reset database…
         </Button>
-        <Text size="xs" c="dimmed">
-          Drops every row and re-applies the schema. The table structure stays — only your data is cleared.
-        </Text>
-      </Stack>
+      )}
     </Stack>
   );
 }

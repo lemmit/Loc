@@ -1010,7 +1010,15 @@ export default function App(): JSX.Element {
   const reactBundleStatus = useMemo<ReactBundleStatus>(() => {
     if (pipeline.bundle.kind !== "result") return { kind: "pending" };
     const r = pipeline.bundle.react;
-    if (r === null) return { kind: "absent" };
+    if (r === null) {
+      // The React half is skipped when the Hono half fails, so a null react
+      // result after a failed Hono bundle is a FAILURE, not "no React
+      // deployable" — reporting it as absent told the user their system had
+      // no frontend when the real problem was a bundle error.
+      const hono = pipeline.bundle.hono;
+      if (hono && !hono.ok) return { kind: "fail", result: hono };
+      return { kind: "absent" };
+    }
     return r.ok ? { kind: "ok", result: r } : { kind: "fail", result: r };
   }, [pipeline.bundle]);
 
@@ -2166,7 +2174,12 @@ export default function App(): JSX.Element {
 
   return (
     <AppShell
-      header={{ height: isDesktop ? 48 : 52 }}
+      // The desktop toolbar wraps onto a second row below ~1200 px (a
+      // common laptop width); a fixed 48 px header then paints that row
+      // over the Explorer / editor.  Give the wrapped layout its own
+      // height instead of clipping it.
+      // Mobile: the 48 px row plus the pipeline dots under it.
+      header={{ height: isDesktop ? { base: 88, lg: 48 } : 74 }}
       footer={{ height: isDesktop ? 28 : 0 }}
       padding={0}
     >

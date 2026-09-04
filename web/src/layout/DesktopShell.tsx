@@ -23,6 +23,7 @@ import { SourceFilesTree } from "./SourceFilesTree";
 import { usePersistedState } from "../util/usePersistedState";
 import { PaneErrorBoundary } from "../PaneErrorBoundary";
 import { modeLabel, type LayoutCtx } from "./ctx";
+import { nextStep, nextStepMid, PANE, STAGE } from "./vocabulary";
 
 type ExplorerMode = "user" | "generated";
 
@@ -115,7 +116,7 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
       case "ok":
         return (
           <Text size="xs" c={ddl ? "green" : "dimmed"}>
-            {ddl ? "live" : "needs Boot"}
+            {ddl ? "live" : `needs ${STAGE.boot}`}
           </Text>
         );
       case "fail":
@@ -133,7 +134,7 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
       case "pending":
         return (
           <Text size="xs" c="dimmed">
-            needs Bundle
+            needs {STAGE.bundle}
           </Text>
         );
     }
@@ -169,7 +170,7 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
               >
                 <Box style={{ height: "100%", display: "flex", flexDirection: "column", background: "var(--mantine-color-dark-7)" }}>
                   <RegionHeader
-                    label="Explorer"
+                    label={PANE.explorer}
                     collapsed={leftCollapsed}
                     side="left"
                     onToggle={() => (leftCollapsed ? leftRef.current?.expand() : leftRef.current?.collapse())}
@@ -186,7 +187,7 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
                       onChange={(v) => setExplorerMode(v as ExplorerMode)}
                       data={[
                         { label: "User code", value: "user" },
-                        { label: "Generated", value: "generated" },
+                        { label: PANE.generated, value: "generated" },
                       ]}
                       data-testid="explorer-mode"
                     />
@@ -211,7 +212,7 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
                         nodes={tree.children}
                         selectedPath={generatedSelection}
                         onActivateFile={onPickGenerated}
-                        emptyHint="No files yet — click Generate."
+                        emptyHint={`No files yet — ${nextStepMid("generate", true)}.`}
                       />
                     </Box>
                   ) : (
@@ -254,10 +255,10 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
                         setCenterView(v as "source" | "builder" | "model" | "requirements")
                       }
                       data={[
-                        { value: "source", label: <span data-testid="doc-tab-source">Source</span> },
-                        { value: "builder", label: <span data-testid="doc-tab-builder">Builder</span> },
-                        { value: "model", label: <span data-testid="doc-tab-model">Model</span> },
-                        { value: "requirements", label: <span data-testid="doc-tab-requirements">Requirements</span> },
+                        { value: "source", label: <span data-testid="doc-tab-source">{PANE.source}</span> },
+                        { value: "builder", label: <span data-testid="doc-tab-builder">{PANE.builder}</span> },
+                        { value: "model", label: <span data-testid="doc-tab-model">{PANE.model}</span> },
+                        { value: "requirements", label: <span data-testid="doc-tab-requirements">{PANE.requirements}</span> },
                       ]}
                     />
                     {secondaryDoc && (
@@ -332,7 +333,7 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
               >
                 <Box data-testid="preview-region" style={{ height: "100%", display: "flex", flexDirection: "column" }}>
                   <RegionHeader
-                    label="Preview"
+                    label={PANE.preview}
                     collapsed={rightCollapsed}
                     side="right"
                     onToggle={() => (rightCollapsed ? rightRef.current?.expand() : rightRef.current?.collapse())}
@@ -364,7 +365,7 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
         {bottomCollapsed ? (
           <MGroup px="sm" py={4} bg="dark.6" gap="xs" justify="space-between" style={{ height: "100%" }}>
             <Text size="xs" fw={600} tt="uppercase" c="dimmed">
-              Dev Tools
+              {PANE.devTools}
             </Text>
             <UnstyledButton onClick={() => bottomRef.current?.expand()} data-testid="dock-toggle">
               <Text size="xs" c="dimmed">▴ expand</Text>

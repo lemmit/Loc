@@ -24,7 +24,11 @@ void gcOpfsAtStartup();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <MantineProvider theme={theme} defaultColorScheme="dark">
+    {/* Forced, not default: ~108 `dark.N` literals assume the dark palette,
+        so a stored light scheme rendered white-on-white (audit M16).  The
+        token migration that lets this go back to `defaultColorScheme` is
+        M-T8.23's residue. */}
+    <MantineProvider theme={theme} forceColorScheme="dark">
       <ErrorBoundary>
         <CrashTestHooks />
         <App />

@@ -13,7 +13,7 @@ export function ProblemsPanel({ items }: Props): JSX.Element {
   if (items.length === 0) {
     return (
       <Text c="dimmed" size="sm" p="sm">
-        No diagnostics.
+        No problems — the source is valid.
       </Text>
     );
   }

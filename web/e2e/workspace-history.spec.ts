@@ -162,10 +162,14 @@ test.describe("mobile", () => {
     await wipeStorage(page, { mobile: true });
     await editAndCommit(page, `// hist-mobile-${Date.now()}`);
 
+    // History lives behind the **More** sheet on mobile (M-T8.16): open it,
+    // pick the row (it keeps the `mobile-tab-history` id), and the More tab
+    // reports which secondary pane is showing.
+    await page.getByTestId("mobile-tab-more").click();
     await page.getByTestId("mobile-tab-history").click();
-    await expect(page.getByTestId("mobile-tab-history")).toHaveAttribute(
-      "aria-selected",
-      "true",
+    await expect(page.getByTestId("mobile-tab-more")).toHaveAttribute(
+      "data-secondary-active",
+      "history",
     );
     await expect
       .poll(() => page.getByTestId("history-row").count(), { timeout: 10_000 })
