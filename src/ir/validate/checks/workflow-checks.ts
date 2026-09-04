@@ -1050,6 +1050,23 @@ function validateWorkflowBody(
       case "resource-call":
         checkResourceOpExpr(st.call, ctx, wf, diags);
         break;
+      case "domain-service-call":
+        // Wave 2 packet 2.3 (M-T6.50 class): this switch had no arm for
+        // `domain-service-call` at all, so it was silently skipped by every
+        // check below — including `mutated` (correctly: a `domainService` is
+        // always non-mutating, so a call alone never satisfies a
+        // `transactional` workflow's effect requirement). Unlike `op-call` /
+        // `repo-let`, the `Svc.op(...)` reference itself is resolved through
+        // Langium's cross-reference linker at phase ③ (scope/link) — an
+        // unknown service or operation never reaches a lowered
+        // `domain-service-call` in the first place, so there is no
+        // service/op-existence check to add here; this arm exists so the
+        // switch is provably exhaustive instead of accidentally total.
+        break;
+      default: {
+        const _exhaustive: never = st;
+        void _exhaustive;
+      }
     }
   }
 

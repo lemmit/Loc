@@ -25,12 +25,13 @@ import {
   opWorkflowInstances,
 } from "../../ir/util/openapi-ids.js";
 import { resolveWorkflowIsolation } from "../../ir/util/resolve-datasource.js";
-import { walkWorkflowStmtExprsDeep } from "../../ir/util/walk.js";
+import { walkWorkflowStmtChildren, walkWorkflowStmtExprsDeep } from "../../ir/util/walk.js";
 import { commandWorkflowsOf } from "../../ir/util/workflow-command-route.js";
 import { workflowCorrIdValueType } from "../../ir/util/workflow-instances.js";
 import { type LinesPart, lines } from "../../util/code-builder.js";
 import { resolveErrorStatus } from "../../util/error-defaults.js";
 import { snake, upperFirst, workflowFnSnake } from "../../util/naming.js";
+import { numericEncode } from "../_numeric/target.js";
 import { LogEvents } from "../_obs/log-events.js";
 import { statementSubRegions } from "../_trace/sourcemap.js";
 import { renderWorkflowStmtChunks, type WorkflowStmtTarget } from "../_workflow/stmt-target.js";
@@ -38,6 +39,7 @@ import { zeroFor } from "./dispatch-builder.js";
 import type { OpFragment } from "./emit/aggregate.js";
 import { domainServiceImportLinesForWorkflow } from "./emit/domain-service.js";
 import { responsePyType, wireModelImport } from "./emit/http-models.js";
+import { PY_NUMERIC } from "./numeric-codec.js";
 import { wireHelperImport } from "./py-type-imports.js";
 import {
   type PyRenderContext,
@@ -348,32 +350,34 @@ interface RepoNeed {
   aggName: string;
 }
 
+// INSERTION ORDER is load-bearing (the repo-construction lines this feeds
+// emit in iteration order), so `reposFor` rides `walkWorkflowStmtChildren`
+// (wave-2 packet 2.3) for the RECURSION step only — the exhaustive,
+// `never`-checked "which kinds nest further bodies" fact `walk.ts` owns —
+// while keeping its own per-kind ordering around it, exactly as it was.
 function reposFor(wf: WorkflowIR): RepoNeed[] {
   const out = new Map<string, RepoNeed>();
-  const visit = (sts: WorkflowStmtIR[]): void => {
-    for (const st of sts) {
-      if (st.kind === "repo-let" || st.kind === "repo-run" || st.kind === "repo-delete") {
-        out.set(st.repoName, { repoName: st.repoName, aggName: st.aggName });
+  const visit = (st: WorkflowStmtIR): void => {
+    if (st.kind === "repo-let" || st.kind === "repo-run" || st.kind === "repo-delete") {
+      out.set(st.repoName, { repoName: st.repoName, aggName: st.aggName });
+      return;
+    }
+    if (st.kind === "if-let") {
+      // The retrieval itself reads through the repo, and each branch carries
+      // its own saves (mirrors the Hono `collectReposFromStmts` walk).
+      out.set(st.repoName, { repoName: st.repoName, aggName: st.aggName });
+      for (const s of [...st.savesInThen, ...st.savesInElse]) {
+        out.set(s.repoName, { repoName: s.repoName, aggName: s.aggName });
       }
-      if (st.kind === "for-each") {
-        visit(st.body);
-        for (const s of st.savesPerIteration) {
-          out.set(s.repoName, { repoName: s.repoName, aggName: s.aggName });
-        }
-      }
-      if (st.kind === "if-let") {
-        // The retrieval itself reads through the repo, and each branch carries
-        // its own saves (mirrors the Hono `collectReposFromStmts` walk).
-        out.set(st.repoName, { repoName: st.repoName, aggName: st.aggName });
-        for (const s of [...st.savesInThen, ...st.savesInElse]) {
-          out.set(s.repoName, { repoName: s.repoName, aggName: s.aggName });
-        }
-        visit(st.thenBody);
-        visit(st.elseBody ?? []);
+    }
+    walkWorkflowStmtChildren(st, { workflowStmt: visit });
+    if (st.kind === "for-each") {
+      for (const s of st.savesPerIteration) {
+        out.set(s.repoName, { repoName: s.repoName, aggName: s.aggName });
       }
     }
   };
-  visit(wf.statements);
+  for (const st of wf.statements) visit(st);
   for (const s of wf.savesAtExit) out.set(s.repoName, { repoName: s.repoName, aggName: s.aggName });
   return [...out.values()];
 }
@@ -801,9 +805,10 @@ export function instanceFieldValue(rowVar: string, f: WireField): string {
   }
   if (t.kind === "primitive" && t.name === "money") {
     // Precise-decimal string on the wire (parity with the other backends).
+    const wire = numericEncode(PY_NUMERIC, "money", "dto-map", attr);
     return f.optional || f.type.kind === "optional"
-      ? `(None if ${attr} is None else money_str(${attr}))`
-      : `money_str(${attr})`;
+      ? `(None if ${attr} is None else ${wire})`
+      : wire;
   }
   return attr;
 }

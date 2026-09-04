@@ -221,6 +221,10 @@ describe("flutterTarget — markup seams", () => {
   it("escapeText escapes the quote and the `$` interpolation sigil", () => {
     expect(flutterTarget.escapeText("a'b$c")).toBe("a\\'b\\$c");
   });
+
+  it("escapeAttr (Wave 2 packet 2.2) is the same rule as escapeText — Dart has no separate attribute syntax", () => {
+    expect(flutterTarget.escapeAttr("a'b$c")).toBe(flutterTarget.escapeText("a'b$c"));
+  });
 });
 
 describe("flutterTarget — handler seams (Dart closures, no JS arrow-block)", () => {

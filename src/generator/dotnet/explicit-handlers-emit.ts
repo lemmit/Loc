@@ -50,6 +50,7 @@ import type {
 } from "../../ir/types/loom-ir.js";
 import { wireTypeInfo } from "../../ir/types/wire-types.js";
 import { normalizeHandlerReturn, requestRecordFor } from "../../ir/util/handler-contracts.js";
+import { walkWorkflowStmtsDeep } from "../../ir/util/walk.js";
 import { escapeCsharpIdent, plural, upperFirst } from "../../util/naming.js";
 import { SCAFFOLD_ONCE_MARKER } from "../../util/scaffold-once.js";
 import { renderWorkflowStmtChunks } from "../_workflow/stmt-target.js";
@@ -69,20 +70,20 @@ type Handler = CommandHandlerIR | QueryHandlerIR;
 /** The repos a handler body references (repo-let loads + exit-saves), keyed by
  *  repo name → aggregate name.  These become the handler's injected
  *  `I<Agg>Repository _<repo>` fields — matching the field naming the shared
- *  workflow stmt target emits (`_<repoLowerFirst>`). */
+ *  workflow stmt target emits (`_<repoLowerFirst>`).
+ *
+ *  Rides `walkWorkflowStmtsDeep` (wave-2 packet 2.3): the hand-rolled
+ *  if/else-if chain this replaced re-derived the "which kinds nest further
+ *  bodies" fact `walk.ts` already owns exhaustively — correct today (`for-
+ *  each`/`if-let` are still the only two nesting kinds), but a silent gap
+ *  waiting for a third nesting kind to be added without this file noticing. */
 function collectRepos(h: Handler): Map<string, string> {
   const repos = new Map<string, string>();
-  const walk = (stmts: readonly WorkflowStmtIR[]): void => {
-    for (const s of stmts) {
-      if (s.kind === "repo-let" || s.kind === "repo-delete") repos.set(s.repoName, s.aggName);
-      else if (s.kind === "for-each") walk(s.body);
-      else if (s.kind === "if-let") {
-        walk(s.thenBody);
-        walk(s.elseBody ?? []);
-      }
-    }
-  };
-  walk(h.statements);
+  for (const s of h.statements) {
+    walkWorkflowStmtsDeep(s, (st) => {
+      if (st.kind === "repo-let" || st.kind === "repo-delete") repos.set(st.repoName, st.aggName);
+    });
+  }
   for (const save of h.savesAtExit) repos.set(save.repoName, save.aggName);
   return repos;
 }

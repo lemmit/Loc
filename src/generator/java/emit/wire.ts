@@ -1,5 +1,6 @@
 import type { TypeIR } from "../../../ir/types/loom-ir.js";
-import { MONEY_WIRE_SCALE } from "../../money-scale.js";
+import { numericEncode } from "../../_numeric/target.js";
+import { JAVA_NUMERIC } from "../numeric-codec.js";
 import { javaValueTypeForId } from "../render-expr.js";
 import { JAVA_PROVENANCED_RECORD } from "./provenance.js";
 
@@ -138,13 +139,12 @@ export function domainToWire(t: TypeIR, expr: string): string {
       // `toPlainString()` echoes the value's own scale (`12.5` vs `12.50`), so
       // pin it to the canonical `NUMERIC(19,4)` scale for a wire value
       // byte-consistent with the other backends.
-      if (t.name === "money")
-        return `${expr}.setScale(${MONEY_WIRE_SCALE}, java.math.RoundingMode.HALF_UP).toPlainString()`;
+      if (t.name === "money") return numericEncode(JAVA_NUMERIC, "money", "dto-map", expr);
       if (t.name === "datetime") return `${expr}.toString()`;
       // decimal → the response's `double` component (RS-24 / M-T6.46).  The
       // narrowing is the wire boundary's job, exactly as on .NET (#2575): the
       // DOMAIN value keeps every digit `MathContext.DECIMAL128` produced.
-      if (t.name === "decimal") return `${expr}.doubleValue()`;
+      if (t.name === "decimal") return numericEncode(JAVA_NUMERIC, "decimal", "dto-map", expr);
       return expr;
     case "id":
       return `${expr}.value()`;
@@ -171,11 +171,12 @@ function elementMapper(element: TypeIR): string | null {
   switch (element.kind) {
     case "primitive":
       if (element.name === "money")
-        return `__x -> __x.setScale(${MONEY_WIRE_SCALE}, java.math.RoundingMode.HALF_UP).toPlainString()`;
+        return `__x -> ${numericEncode(JAVA_NUMERIC, "money", "dto-map", "__x")}`;
       if (element.name === "datetime") return "__x -> __x.toString()";
       // `decimal[]` → `List<Double>` (RS-24 / M-T6.46): the element narrows on
       // the response exactly as a scalar decimal component does.
-      if (element.name === "decimal") return "__x -> __x.doubleValue()";
+      if (element.name === "decimal")
+        return `__x -> ${numericEncode(JAVA_NUMERIC, "decimal", "dto-map", "__x")}`;
       return null;
     case "id":
       return "__x -> __x.value()";
@@ -193,7 +194,7 @@ function elementMapper(element: TypeIR): string | null {
 export function wireToDomain(t: TypeIR, expr: string): string {
   switch (t.kind) {
     case "primitive":
-      if (t.name === "money") return `new BigDecimal(${expr})`;
+      if (t.name === "money") return numericEncode(JAVA_NUMERIC, "money", "find-param", expr);
       if (t.name === "datetime") return `Instant.parse(${expr})`;
       return expr;
     case "id":

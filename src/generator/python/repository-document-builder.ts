@@ -13,12 +13,14 @@ import { aggHasAuditedTarget } from "../../ir/util/audit-capability.js";
 import { aggregateIsVersioned } from "../../ir/util/versioned-capability.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
+import { numericEncode } from "../_numeric/target.js";
 import { renderPyHistoryRepoMethod } from "./emit/audit-history.js";
 import {
   aggUsesPrincipalContextFilter,
   documentCapabilityBody,
   lowerToSqlAlchemy,
 } from "./find-predicate.js";
+import { PY_NUMERIC, pyDocumentDecimalDecode } from "./numeric-codec.js";
 import { rowClassName } from "./py-columns.js";
 import { dtImportLine, wireHelperImport } from "./py-type-imports.js";
 import { renderPyExpr, renderPyType } from "./render-expr.js";
@@ -558,9 +560,9 @@ function deserialize(t: TypeIR, acc: string, ctx: EnrichedBoundedContextIR): str
     return `(None if ${acc} is None else ${deserialize(t.inner, acc, ctx)})`;
   }
   if (t.kind === "primitive") {
-    if (t.name === "money") return `Decimal(cast(str, ${acc}))`;
+    if (t.name === "money") return numericEncode(PY_NUMERIC, "money", "repo-read", acc);
     if (t.name === "datetime") return `datetime.fromisoformat(cast(str, ${acc}))`;
-    if (t.name === "decimal") return `float(cast(float, ${acc}))`;
+    if (t.name === "decimal") return pyDocumentDecimalDecode(acc);
     return `cast(${primitivePy(t.name)}, ${acc})`;
   }
   if (t.kind === "id") return `${t.targetName}Id(cast(str, ${acc}))`;

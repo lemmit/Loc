@@ -35,6 +35,7 @@ import { intrinsicFor, intrinsicKey, isQueryableBoolIntrinsic } from "../../util
 import { lowerFirst, plural } from "../../util/naming.js";
 import { DURATION_UNIT_MS, type DurationUnit } from "../../util/temporal.js";
 import { SQL_LIKE_ESCAPE_CLAUSE, tsSubtreeLikePattern } from "../_expr/subtree-like.js";
+import { refuseOutOfVocabulary } from "../_expr/target.js";
 import { joinColumnName, joinTableConstName } from "./emit.js";
 import { TS_INTRINSIC_RENDERERS } from "./render-expr.js";
 import { associationsOf } from "./repository-associations-builder.js";
@@ -131,6 +132,12 @@ export interface DrizzleLowering {
   ops: Set<string>;
 }
 
+/** Declared `QueryEmissionMode` (§F2, Wave 2 packet 2.4): `"drizzle-predicate"`.
+ *  Returns `null` (not a throw) for a shape it can't lower — the internal
+ *  signal every caller with a DECLARED filter in hand must route through
+ *  `refuseOutOfVocabulary("drizzle-predicate", …)` rather than treating as
+ *  "no filter" (see the call sites in `repository-find-builder.ts` /
+ *  `repository-find-predicate.ts`'s own `contextFilterPredicate`). */
 export function lowerToDrizzle(
   expr: ExprIR,
   tableName: string,
@@ -689,7 +696,9 @@ export function contextFilterPredicate(
       ? undefined
       : reifiableCriterion(e.criterionRef, ctx, tableName);
     if (c) {
-      const body = lowerToDrizzle(c.body, tableName, ctx)!;
+      const body =
+        lowerToDrizzle(c.body, tableName, ctx) ??
+        refuseOutOfVocabulary("drizzle-predicate", `body of criterion '${c.name}'`);
       for (const op of body.ops) ops.add(op);
       const args = (e.criterionRef?.args ?? []).map(renderCriterionArg).join(", ");
       lowered.push(`${criterionFnName(c.name)}(${args})`);
@@ -702,12 +711,12 @@ export function contextFilterPredicate(
       principalAccessor: "requireCurrentUser()",
     });
     if (!l) {
-      throw new Error(
-        `Loom internal: capability \`filter\` on aggregate '${agg.name}' is not lowerable to ` +
-          `a Drizzle predicate, so the read restriction it declares cannot be emitted. ` +
-          `The IR validator is supposed to reject a non-selectable filter before codegen ` +
-          `(loom.criterion-not-selectable) — this shape reached the emitter instead. ` +
-          `Dropping it would ship unfiltered reads, so this is a hard stop.`,
+      // Dropping this would ship unfiltered reads — a hard stop, not a
+      // fallback.  `loom.criterion-not-selectable` is the IR-validate-phase
+      // gate meant to keep a non-selectable filter off this path.
+      refuseOutOfVocabulary(
+        "drizzle-predicate",
+        `capability \`filter\` on aggregate '${agg.name}'`,
       );
     }
     for (const op of l.ops) ops.add(op);

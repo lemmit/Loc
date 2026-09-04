@@ -11,6 +11,7 @@
 import type { EmitCtx, LayoutAdapter, StyleAdapter } from "../../../generator/_adapters/index.js";
 import { brokerChannelBindings } from "../../../generator/_channels/bindings.js";
 import { collectWireValidationMessages } from "../../../generator/_i18n/validation-catalog.js";
+import { numericEncode } from "../../../generator/_numeric/target.js";
 import { renderHonoBaseLogCall } from "../../../generator/_obs/render-hono.js";
 import type { SourceMapRecorder } from "../../../generator/_trace/sourcemap.js";
 import {
@@ -62,6 +63,7 @@ import {
 } from "../../../generator/typescript/emit.js";
 import { buildExternSubclassFile } from "../../../generator/typescript/extern-builder.js";
 import { rewriteRelativeImports } from "../../../generator/typescript/layout-imports.js";
+import { TS_NUMERIC } from "../../../generator/typescript/numeric-codec.js";
 import { buildRepositoryFile } from "../../../generator/typescript/repository-builder.js";
 import { buildDocumentRepositoryFile } from "../../../generator/typescript/repository-document-builder.js";
 import { buildEmbeddedRepositoryFile } from "../../../generator/typescript/repository-embedded-builder.js";
@@ -1472,7 +1474,7 @@ export const moneySchema = z.string().transform((s: string, ctx: any) => {
     return z.NEVER;
   }
   try {
-    return new Decimal(s);
+    return ${numericEncode(TS_NUMERIC, "money", "find-param", "s")};
   } catch {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,

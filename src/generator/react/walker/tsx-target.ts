@@ -22,6 +22,7 @@
 // ---------------------------------------------------------------------------
 
 import type { ExprIR, TypeIR } from "../../../ir/types/loom-ir.js";
+import { escapeHtmlAttr } from "../../_walker/a11y-emit.js";
 import type { DetectedApiCall } from "../../_walker/api-hook-detector.js";
 import { jsExprLeaves } from "../../_walker/js-expr-leaves.js";
 import {
@@ -446,6 +447,15 @@ export const tsxTarget: WalkerTarget = {
    *  (kept local so this module stays self-contained). */
   escapeText(text: string): string {
     return escapeJsFamilyText(text);
+  },
+
+  /** JSX static-attribute escaping — the same rule every real static-attr
+   *  emit site in this backend already shares (`_walker/a11y-emit.ts`'s
+   *  `escapeHtmlAttr`, consumed by `ariaLabelAttr` / `localizedAriaLabelAttr`
+   *  / a static `label:`/`title:` hint), declared on the contract (Wave 2
+   *  packet 2.2). */
+  escapeAttr(text: string): string {
+    return escapeHtmlAttr(text);
   },
 
   // --- Store seam (Stage 5) -----------------------------------------------

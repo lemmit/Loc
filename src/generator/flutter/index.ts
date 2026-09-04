@@ -1062,17 +1062,80 @@ const NO_BOOT: AppBoot = {
   realtime: false,
 };
 
+/** M-T1.8 — global error boundary + failure sink, the flutter arm.  Built on
+ *  Flutter's OWN hooks, not a wrapper widget (Flutter has no
+ *  `componentDidCatch` equivalent to subclass):
+ *
+ *  - `ErrorWidget.builder` is what the framework calls whenever ANY widget's
+ *    `build()` throws — it replaces just that crashed subtree with a
+ *    readable fallback instead of the framework's default grey error box.
+ *    This is the direct analogue of the JSX frontends' top-level
+ *    `ErrorBoundary` (`getDerivedStateFromError` + a fallback render).
+ *  - `FlutterError.onError` is the framework's own uncaught-error terminus —
+ *    an exception outside a `build()` (a gesture callback, a layout pass)
+ *    that would otherwise only print to the debug console.
+ *  - `runZonedGuarded` is the failure sink for everything ABOVE the
+ *    framework: an unhandled exception from a bare `async` callback with no
+ *    `try`/`catch` and no `.catchError`, which neither hook above would ever
+ *    see.  The mobile analogue of the JS frontends' unhandled-promise-
+ *    rejection terminus ("Unhandled-`await` terminus", M-T1.8).
+ *
+ *  All three log through `debugPrint` — the same sink the framework's own
+ *  default error reporting uses, so output still reaches `flutter run`'s
+ *  console and CI's captured stdout with no new dependency. */
+const FLUTTER_ERROR_BOUNDARY_SETUP: readonly string[] = [
+  "  ErrorWidget.builder = (FlutterErrorDetails details) {",
+  "    debugPrint('Uncaught render error: ${details.exception}');",
+  "    return Material(",
+  "      child: Padding(",
+  "        padding: const EdgeInsets.all(16),",
+  "        child: Column(",
+  "          mainAxisSize: MainAxisSize.min,",
+  "          crossAxisAlignment: CrossAxisAlignment.start,",
+  "          children: [",
+  "            const Text(",
+  "              'Something went wrong.',",
+  "              style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold),",
+  "            ),",
+  "            Text('${details.exception}', style: const TextStyle(color: Colors.red)),",
+  "          ],",
+  "        ),",
+  "      ),",
+  "    );",
+  "  };",
+  "  FlutterError.onError = (FlutterErrorDetails details) {",
+  "    FlutterError.presentError(details);",
+  "    debugPrint('Uncaught framework error: ${details.exceptionAsString()}');",
+  "  };",
+];
+
 /** `main()` for a `persist:`-bearing app — the web-storage tier has to finish
  *  loading before the first widget builds. */
 function mainFn(boot: AppBoot): string[] {
-  if (!boot.initPrefs) return ["void main() {", "  runApp(const App());", "}"];
+  if (!boot.initPrefs) {
+    return [
+      "void main() {",
+      ...FLUTTER_ERROR_BOUNDARY_SETUP,
+      "  runZonedGuarded(() {",
+      "    runApp(const App());",
+      "  }, (Object error, StackTrace stack) {",
+      "    debugPrint('Unhandled error: $error');",
+      "  });",
+      "}",
+    ];
+  }
   return [
-    "Future<void> main() async {",
-    "  // The stored blobs must be in memory before the first Notifier `build()`,",
-    "  // which seeds its cells synchronously (`store_persist.dart`).",
-    "  WidgetsFlutterBinding.ensureInitialized();",
-    "  await LoomStorePersist.init();",
-    "  runApp(const App());",
+    "void main() {",
+    ...FLUTTER_ERROR_BOUNDARY_SETUP,
+    "  runZonedGuarded(() async {",
+    "    // The stored blobs must be in memory before the first Notifier `build()`,",
+    "    // which seeds its cells synchronously (`store_persist.dart`).",
+    "    WidgetsFlutterBinding.ensureInitialized();",
+    "    await LoomStorePersist.init();",
+    "    runApp(const App());",
+    "  }, (Object error, StackTrace stack) {",
+    "    debugPrint('Unhandled error: $error');",
+    "  });",
     "}",
   ];
 }
@@ -1129,6 +1192,10 @@ function renderMainWithRoutes(
 ): string {
   const home = pages[0];
   return `${lines(
+    // `dart:async` is `runZonedGuarded` (M-T1.8's failure-sink half) —
+    // needed unconditionally now, unlike `material.dart`'s other imports.
+    "import 'dart:async';",
+    "",
     "import 'package:flutter/material.dart';",
     "import 'package:flutter_riverpod/flutter_riverpod.dart';",
     "",
@@ -1489,6 +1556,10 @@ CMD ["nginx", "-g", "daemon off;"]
 
 function renderMain(title: string, boot: AppBoot = NO_BOOT): string {
   return `${lines(
+    // `dart:async` is `runZonedGuarded` (M-T1.8's failure-sink half) —
+    // needed unconditionally now, unlike `material.dart`'s other imports.
+    "import 'dart:async';",
+    "",
     "import 'package:flutter/material.dart';",
     "import 'package:flutter_riverpod/flutter_riverpod.dart';",
     "",

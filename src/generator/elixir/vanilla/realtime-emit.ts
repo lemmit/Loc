@@ -49,8 +49,9 @@ import { realtimeRoomPlan } from "../../../ir/util/realtime-rooms.js";
 import { API_BASE_PATH } from "../../../util/api-base.js";
 import { lines } from "../../../util/code-builder.js";
 import { snake, upperFirst } from "../../../util/naming.js";
-import { MONEY_WIRE_SCALE } from "../../money-scale.js";
+import { numericEncode } from "../../_numeric/target.js";
 import type { ApiRoute } from "../api-emit.js";
+import { ELIXIR_NUMERIC } from "./numeric-codec.js";
 
 /** The SSE endpoint, spelled from the router ROOT (the `:sse` pipeline sits
  *  outside `scope "/api"`, so the prefix is explicit here).  `API_BASE_PATH` +
@@ -186,7 +187,7 @@ function renderVanillaRealtimeController(
       "",
       "  defp __money_round(nil), do: nil",
       "",
-      `  defp __money_round(%Decimal{} = dec), do: Decimal.round(dec, ${MONEY_WIRE_SCALE})`,
+      `  defp __money_round(%Decimal{} = dec), do: ${numericEncode(ELIXIR_NUMERIC, "money", "dto-map", "dec")}`,
       "",
       "  defp __money_round(other), do: other",
     );
@@ -198,7 +199,7 @@ function renderVanillaRealtimeController(
       "",
       "  defp __decimal_num(nil), do: nil",
       "",
-      "  defp __decimal_num(%Decimal{} = dec), do: Decimal.to_float(dec)",
+      `  defp __decimal_num(%Decimal{} = dec), do: ${numericEncode(ELIXIR_NUMERIC, "decimal", "dto-map", "dec")}`,
       "",
       "  defp __decimal_num(other), do: other",
     );

@@ -19,7 +19,6 @@
 // D-SEED-XREF (an `@handle` indirection was considered and not adopted).
 // Not yet handled (later slices): create-shape validation.
 
-import { forCreateInput } from "../../../ir/enrich/wire-projection.js";
 import type {
   EnrichedBoundedContextIR,
   ExprIR,
@@ -28,7 +27,12 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, upperFirst } from "../../../util/naming.js";
-import { type Entry, groupByDataset, usedAggregates } from "../../_persistence/seed-datasets.js";
+import {
+  type Entry,
+  groupByDataset,
+  seederAggregates,
+  usedAggregates,
+} from "../../_persistence/seed-datasets.js";
 import { renderSeedRowInsert } from "../../sql-pg.js";
 import { renderTsExpr } from "../render-expr.js";
 
@@ -103,15 +107,19 @@ function emitSeeds(
   const datasets = groupByDataset(ctx);
   if (datasets.length === 0) return;
 
-  // Only non-abstract aggregates have a `create` factory + repository.
-  const seedable = new Set(ctx.aggregates.filter((a) => !a.isAbstract).map((a) => a.name));
-
-  // Create-input field types per aggregate, so a seed literal can coerce to
-  // its declared type (datetime string → `new Date(…)`).
+  // The shared seeder model (M-T6.52) — which aggregates are seedable, and
+  // each one's ordered create-call parameter TYPES.  For an event-sourced
+  // aggregate these are the `create` action's own params, not the field
+  // set — the `Agg.create({ … })` object-literal call below is already
+  // shaped correctly either way (see `aggregate.ts`'s event-sourced create
+  // factory, `input: { <esCreate.params> }`); this only has to get the
+  // TYPE right for the datetime-coercion check in `renderField`.
+  const seederAggs = seederAggregates(ctx);
+  const seedable = new Set(seederAggs.keys());
   const typesByAgg = new Map<string, Map<string, TypeIR>>(
-    ctx.aggregates.map((a) => [
-      a.name,
-      new Map(forCreateInput(a.fields).map((f) => [f.name, f.type] as const)),
+    [...seederAggs.values()].map((s) => [
+      s.name,
+      new Map(s.createParams.map((p) => [p.name, p.type] as const)),
     ]),
   );
 

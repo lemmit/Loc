@@ -221,6 +221,45 @@ describe("elixir/vanilla generator — first-boot seeding", () => {
     }
   });
 
+  it("event-sourced: appends the creation event through the context facade's create_<agg>/1 (M-T6.52)", async () => {
+    // `owner` is the create action's ONLY param; `balance` is a real
+    // aggregate FIELD folded by the applier, not a create param.  The OLD
+    // emitter silently DROPPED this row from the dataset (no `insert/1` seam
+    // exists on an event-sourced aggregate's repository) while still
+    // committing the dataset's ship-once marker — so it could never be
+    // applied on ANY later boot, with zero diagnostics.
+    const ES = `system EsSeed {
+      subdomain Bank { context Bank {
+        event Opened { account: Account id, owner: string }
+        aggregate Account persistedAs: eventLog {
+          owner: string
+          balance: int
+          create open(owner: string) { emit Opened { account: id, owner: owner } }
+          apply(e: Opened) { owner := e.owner  balance := 0 }
+        }
+        repository Accounts for Account { }
+        seed default { Account { owner: "seeded-alice" } }
+      } }
+      api A from Bank
+      storage primary { type: postgres }
+      resource bankLog { for: Bank, kind: eventLog, use: primary }
+      deployable api1 { platform: elixir, contexts: [Bank], dataSources: [bankLog], serves: A, port: 8081 }
+    }`;
+    const files = await generateSystemFiles(ES);
+    const seeds = files.get("api1/lib/api1/bank/seeds.ex")!;
+    expect(seeds).toBeDefined();
+    // Calls the SAME command seam an ordinary create request uses — the
+    // context facade's create_account/1 — never a repository insert/1
+    // (which an event-sourced aggregate's repository does not expose).
+    expect(seeds).toContain(
+      `insert!("default", "Account", Api1.Bank.create_account(%{"owner" => "seeded-alice"}))`,
+    );
+    expect(seeds).not.toContain("AccountRepository.insert(");
+    // No unused repository alias for an aggregate the domain path never
+    // touches through its repository (mix compile --warnings-as-errors).
+    expect(seeds).not.toContain("alias Api1.Bank.AccountRepository");
+  });
+
   it("emits nothing for a seedless system (strict additivity)", async () => {
     const files = await generateSystemFiles(UNSEEDED);
     // Guard the control fixture itself — a regex that stopped matching would

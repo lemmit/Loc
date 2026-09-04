@@ -8,11 +8,19 @@ import { discoverSourceTypePlugins } from "../../src/platform/source-type-plugin
 import {
   capabilitiesFor,
   configSchemaFor,
+  registeredSourceTypes,
   sourceTypeFor,
   supportsSurfaceKind,
+  unregisterSourceType,
 } from "../../src/util/source-types.js";
 
 let dir: string;
+// The sourceType registry is module-global and this file registers real
+// plugins into it.  Under `isolate: false` (vitest.config.ts) one module graph
+// is shared by every file in a worker, so a leaked registration reaches
+// whichever later file asserts the registry's exact contents — an
+// order-dependent failure that only surfaces when the two land in one shard.
+let preexisting: string[];
 
 function writePkg(name: string, pkg: unknown): void {
   const root = path.join(dir, name);
@@ -22,9 +30,16 @@ function writePkg(name: string, pkg: unknown): void {
 
 beforeEach(() => {
   dir = mkdtempSync(path.join(tmpdir(), "loom-stplugins-"));
+  preexisting = registeredSourceTypes();
 });
 afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
+  for (const name of registeredSourceTypes()) {
+    if (!preexisting.includes(name)) unregisterSourceType(name);
+  }
+  // Proves the restore above actually happened: without it this file leaves
+  // `clickhouseCloud` behind for every later file in the worker.
+  expect(registeredSourceTypes()).toEqual(preexisting);
 });
 
 describe("sourceType plugin discovery", () => {

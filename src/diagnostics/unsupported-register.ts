@@ -610,17 +610,6 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
     verified: true,
   },
   {
-    code: "loom.seed-event-sourced-unsupported",
-    kind: "gap",
-    site: "src/language/validators/seed.ts:101",
-    // Live, not latent: no backend HAS an event-append seed path.  It drains
-    // when one exists on all five (elixir appends the creation event; java/.NET
-    // build the call from the declared `create` params, not `forCreateInput`).
-    what: "a `seed` row on an event-sourced aggregate — no backend can append its creation event",
-    mission: "M-T6.52",
-    verified: true,
-  },
-  {
     code: "loom.sensitive-wire-unsupported",
     kind: "gap",
     site: "src/ir/validate/checks/sensitivity-checks.ts:84",

@@ -1,6 +1,8 @@
 import type { EventIR, SystemIR, TypeIR } from "../../../ir/types/loom-ir.js";
 import { upperFirst } from "../../../util/naming.js";
 import type { BrokerBinding } from "../../_channels/bindings.js";
+import { numericEncode } from "../../_numeric/target.js";
+import { CS_NUMERIC } from "../numeric-codec.js";
 
 // ---------------------------------------------------------------------------
 // `Infrastructure/Channels/ChannelTransport.cs` — the broker transport module
@@ -45,8 +47,14 @@ function toDataExpr(prop: string, t: TypeIR): string {
   const inner = t.kind === "optional" ? t.inner : t;
   const access = t.kind === "optional" ? `${prop}?` : prop;
   if (inner.kind === "primitive" && inner.name === "datetime") return `${access}.ToString("o")`;
+  // money pins the FIXED wire scale (RS-12) — a bare `.ToString(culture)` echoes
+  // whatever scale the domain `decimal` happens to carry rather than the
+  // canonical 4dp `projectToResponse` applies on the REST wire (#2549's class;
+  // reuses the `projection-read` leaf's short `CultureInfo` spelling — this
+  // file already brings `System.Globalization` into scope, unlike `dto-
+  // mapping.ts`'s fully-qualified form).
   if (inner.kind === "primitive" && inner.name === "money")
-    return `${access}.ToString(CultureInfo.InvariantCulture)`;
+    return numericEncode(CS_NUMERIC, "money", "projection-read", access);
   if (inner.kind === "id") return `${access}.ToString()`;
   if (inner.kind === "enum") return `${access}.ToString()`;
   return prop;

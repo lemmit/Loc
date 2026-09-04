@@ -1129,11 +1129,18 @@ system P {
     repoOnly(`    aggregate Article shape: document, with crudish { title: string }
     repository Articles for Article { }
     seed wired raw { Article { id: "11111111-1111-1111-1111-111111111111", title: "Anchor" } }`),
-  "loom.seed-event-sourced-unsupported":
-    repoOnly(`    event Opened { account: Account id, owner: string }
+  "loom.seed-raw-eventsourced": repoOnly(`    event Opened { account: Account id, owner: string }
     aggregate Account persistedAs: eventLog {
       owner: string
       create open(owner: string) { emit Opened { account: id, owner: owner } }
+      apply(e: Opened) { owner := e.owner }
+    }
+    repository Accounts for Account { }
+    seed wired raw { Account { id: "11111111-1111-1111-1111-111111111111", owner: "seeded-alice" } }`),
+  "loom.seed-eventsourced-no-create":
+    repoOnly(`    event Opened { account: Account id, owner: string }
+    aggregate Account persistedAs: eventLog {
+      owner: string
       apply(e: Opened) { owner := e.owner }
     }
     repository Accounts for Account { }
@@ -1296,6 +1303,19 @@ const UNREACHABLE_PINS: Record<string, string> = {
     "it is a compiler bug to fix, not a fixture to keep — pinning a crashing source here would " +
     "enshrine the crash as expected behaviour and make the fixture fail the day it is fixed.  " +
     "Re-test by removing the try/catch: every source that reaches it should be a bug report.",
+  "loom.query-emission-invalid":
+    "Not a `validate()` diagnostic at all — `QueryEmissionRefusal` (src/generator/_expr/" +
+    "target.ts `refuseOutOfVocabulary`) throws from inside a phase-⑧ QUERY-LANGUAGE renderer " +
+    "(java JPQL, the Postgres migration-backfill renderer, dotnet dapper raw SQL, python " +
+    "SQLAlchemy filter lowering, node Drizzle predicate lowering) when a construct outside that " +
+    "renderer's declared vocabulary reaches it — which `firstNonQueryableNode` (finds/" +
+    "retrievals) and `loom.projection-where-not-queryable` (query-time-projection filters) " +
+    "already gate at THIS census's own altitude (`validate()`), so no `.ddd` source this census " +
+    "could construct ever reaches the renderer at all.  Re-test by removing one of those two " +
+    "validator gates: the renderer refusal should then fire, not this census's fixture harness " +
+    "(it cannot drive generation).  Its own coverage — a census, a pinned vocabulary, and a " +
+    "reachability suite calling the real renderer entry points directly with an out-of-" +
+    "vocabulary ExprIR node — lives in test/generator/_expr/emission-mode.test.ts.",
 
   // The two `loom.java-{workflow-instance,projection}-field-unsupported` pins
   // that sat here are GONE, because the codes are (M-T6.36).  This census

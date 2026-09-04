@@ -2,7 +2,7 @@
 
 Two smaller context-level declarations that sit *beside* the aggregates rather than inside them. A `domainService` is a stateless, named container of `operation`s for a cross-aggregate computation or decision that belongs to the domain layer but to no single aggregate — pure by default, with an opt-in *reading* tier (read-only repository queries) and a *mutating* tier (calling operations on the aggregates passed in), never a repository write. A `seed` is declarative first-boot data: typed records that lower through each aggregate's canonical `create` (so invariants hold), plus a `raw` opt-out for table-level inserts the domain model does not own. Reach for the first when a calculation spans aggregates and has no `this`; reach for the second when the app must boot with rows instead of empty lists.
 
-> **Grammar:** `DomainService`, `DomainServiceOperation`, `Seed`, `SeedRow` · **Validators:** `loom.domain-service-no-emit`, `loom.domain-service-no-mutation`, `loom.domain-service-no-repo-write`, `loom.domain-service-no-workflow-start`, `loom.domain-service-cross-context-read`, `loom.domain-service-read-unsupported`, `loom.domain-service-infra-call-from-aggregate`, `loom.domain-service-single-aggregate`, `loom.resource-op-outside-workflow` (`src/ir/validate/checks/domain-service-checks.ts`); `loom.seed-foreign-aggregate`, `loom.seed-duplicate-field`, `loom.seed-id-needs-raw`, `loom.seed-raw-column-invalid`, `loom.seed-dataset-name-collision`, `loom.seed-raw-document-shape`, `loom.seed-event-sourced-unsupported`, `loom.seed-abstract-aggregate`, `loom.seed-tenant-owned-needs-raw` ([`src/language/validators/seed.ts`](../../src/language/validators/seed.ts)), plus `loom.seed-raw-column-invalid` / `loom.seed-raw-non-literal-column` again at IR level (`src/ir/validate/checks/`) · **Docs:** [`../domain-services.md`](../domain-services.md) · [`../old/proposals/database-seeding.md`](../old/proposals/database-seeding.md)
+> **Grammar:** `DomainService`, `DomainServiceOperation`, `Seed`, `SeedRow` · **Validators:** `loom.domain-service-no-emit`, `loom.domain-service-no-mutation`, `loom.domain-service-no-repo-write`, `loom.domain-service-no-workflow-start`, `loom.domain-service-cross-context-read`, `loom.domain-service-read-unsupported`, `loom.domain-service-infra-call-from-aggregate`, `loom.domain-service-single-aggregate`, `loom.resource-op-outside-workflow` (`src/ir/validate/checks/domain-service-checks.ts`); `loom.seed-foreign-aggregate`, `loom.seed-duplicate-field`, `loom.seed-id-needs-raw`, `loom.seed-raw-column-invalid`, `loom.seed-dataset-name-collision`, `loom.seed-raw-document-shape`, `loom.seed-raw-eventsourced`, `loom.seed-eventsourced-no-create`, `loom.seed-abstract-aggregate`, `loom.seed-tenant-owned-needs-raw` ([`src/language/validators/seed.ts`](../../src/language/validators/seed.ts)), plus `loom.seed-raw-column-invalid` / `loom.seed-raw-non-literal-column` again at IR level (`src/ir/validate/checks/`) · **Docs:** [`../domain-services.md`](../domain-services.md) · [`../old/proposals/database-seeding.md`](../old/proposals/database-seeding.md)
 
 Every tab below is from one five-deployable generation (node / dotnet / python / java / elixir) of the corpus fixtures `test/fixtures/corpus/domain-services.ddd` and `test/fixtures/corpus/seeding.ddd`.
 
@@ -317,15 +317,33 @@ Repo.query!("INSERT INTO \"catalog\".\"gadgets\" (\"id\", \"widget_id\", \"label
 
 ### What a seed row may not be
 
-Five crossings parsed clean and then produced a *different* wrong artefact on each backend (`F2-SEED-*`, [targets-completeness-2026-08-30](../audits/targets-completeness-2026-08-30.md), closed by #2700). Each is now one AST-tier rule all five backends inherit, raised before any emitter runs.
+Six crossings parsed clean and then produced a *different* wrong artefact on each backend (`F2-SEED-*`, [targets-completeness-2026-08-30](../audits/targets-completeness-2026-08-30.md), closed by #2700). Each is now one AST-tier rule all five backends inherit, raised before any emitter runs.
 
 | Crossing | Code | Why, and what to write instead |
 |---|---|---|
-| Two datasets in one context whose names collide once cased into a seeder function (`default` + `Default`, `demoSet` + `demo_set`) | `loom.seed-dataset-name-collision` | Each backend derives the function name by casing (`snake` on elixir/python, PascalCase on node/java/.NET) with no uniquifier, so the two datasets emitted one duplicated function. Rename one, or merge them (same-named blocks already merge). |
-| `raw` row on a `shape: document` aggregate | `loom.seed-raw-document-shape` | The table is `(id, data, version)` — no per-field columns for the INSERT to target (`42703` at first boot). Use the domain path. |
-| Row on an aggregate `persistedAs: eventLog` | `loom.seed-event-sourced-unsupported` | Its truth is the append-only stream and no backend has a seed path that appends one. Tracked by **M-T6.52**. |
-| Row on an `abstract` inheritance base | `loom.seed-abstract-aggregate` | A base has no create factory and no repository. Seed a concrete subtype. |
-| Domain-path row on a `tenantOwned` aggregate | `loom.seed-tenant-owned-needs-raw` | The capability stamps `tenantId`/`dataKey` **from the principal**; a first-boot seeder has none, so the row would land with an empty tenant the capability's read filter can never match. Use the `raw` path and spell the tenant columns: |
+| Two datasets in one context whose names collide once cased into a seeder function (`default` + `Default`, `demoSet` + `demo_set`) | `loom.seed-dataset-name-collision` | Each backend derives the function name by casing (`snake` on elixir/python, PascalCase on node/java/.NET) with no uniquifier, so the two datasets emitted one duplicated function — a compile error on three backends, a silently-dropped dataset on the other two. Rename one, or merge them into a single block (same-named blocks already merge). |
+| `raw` row on a `shape: document` aggregate | `loom.seed-raw-document-shape` | The table is `(id, data, version)` — there are no per-field columns for the INSERT to target, so first boot answers `42703`, and on elixir the supervision-tree seeder takes the application down with it. Use the **domain** path, which writes a document aggregate correctly everywhere. |
+| `raw` row on an aggregate `persistedAs: eventLog` | `loom.seed-raw-eventsourced` | Its truth is the append-only `<agg>_events` stream (stream_id, version, type, data, occurred_at), which has no per-field columns either. Use the **domain** path — see below, this is the one crossing that changed from a hard refusal to a supported path (**M-T6.52**). |
+| Domain-path row on an aggregate `persistedAs: eventLog` with **no** `create` action | `loom.seed-eventsourced-no-create` | Zero `create` actions is a legitimate event-sourced shape (constructed only out-of-band), but then there is no creation event for a seed row to append. Add a canonical `create(...)`, or drop the row. |
+| Row on an `abstract` inheritance base | `loom.seed-abstract-aggregate` | A base has no create factory and no repository, so every backend drops the row (elixir again keeping the marker). Seed a concrete subtype. |
+| Domain-path row on a `tenantOwned` aggregate | `loom.seed-tenant-owned-needs-raw` | The capability keeps `tenantId`/`dataKey` `internal` and stamps them **from the principal**; a first-boot seeder has none, so the row lands with an empty/NULL tenant against a `NOT NULL` column and the capability's own read filter (`tenant_id = NULL`) can never match it. Use the `raw` path and spell the tenant columns: |
+
+A **domain-path row on an event-sourced aggregate that DOES declare a `create`** is accepted — the seed appends the aggregate's creation event through the same command seam an ordinary create request uses, on all five backends:
+
+```ddd
+event Opened { account: Account id, owner: string }
+aggregate Account persistedAs: eventLog {
+  owner: string
+  balance: int
+  create open(owner: string) { emit Opened { account: id, owner: owner } }
+  apply(e: Opened) { owner := e.owner  balance := 0 }
+}
+repository Accounts for Account { }
+
+seed default { Account { owner: "seeded-alice" } }
+```
+
+The row's fields must name the `create` action's own declared parameters (`owner` here) — not every field the aggregate happens to carry (`balance` is folded by the applier, never a seed input).
 
 ```ddd
 seed wired raw {

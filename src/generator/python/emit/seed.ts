@@ -1,6 +1,4 @@
-import { createInputFields } from "../../../ir/enrich/wire-projection.js";
 import type {
-  EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   ExprIR,
   SeedRowIR,
@@ -8,7 +6,13 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { snake } from "../../../util/naming.js";
-import { type Entry, groupByDataset, usedAggregates } from "../../_persistence/seed-datasets.js";
+import {
+  type Entry,
+  groupByDataset,
+  type SeederAggregate,
+  seederAggregates,
+  usedAggregates,
+} from "../../_persistence/seed-datasets.js";
 import { renderSeedRowInsert } from "../../sql-pg.js";
 import { renderPyExpr } from "../render-expr.js";
 
@@ -41,10 +45,15 @@ export function buildPySeedFile(
   const datasets = groupByDataset(ctx);
   if (datasets.length === 0) return null;
 
-  // Only non-abstract aggregates have a `create` factory + repository.
-  const seedableAggs = ctx.aggregates.filter((a) => !a.isAbstract);
-  const seedable = new Set(seedableAggs.map((a) => a.name));
-  const aggByName = new Map<string, EnrichedAggregateIR>(seedableAggs.map((a) => [a.name, a]));
+  // The shared seeder model (M-T6.52) — which aggregates are seedable, and
+  // each one's ordered create-call parameters.  For an event-sourced
+  // aggregate these are the `create` action's own params, not the field
+  // set — the `Agg.create(field=…)` kwargs call below already matches
+  // either factory shape (both accept keyword args), so this only has to
+  // get the coercion TYPE right.
+  const seederAggs = seederAggregates(ctx);
+  const seedable = new Set(seederAggs.keys());
+  const aggByName = seederAggs;
   const fnBlocks: string[] = [];
   const callLines: string[] = [];
   for (const ds of datasets) {
@@ -140,7 +149,7 @@ function renderDatasetFn(
   dataset: string,
   entries: Entry[],
   schemaFor: (aggName: string) => string | undefined,
-  aggByName: Map<string, EnrichedAggregateIR>,
+  aggByName: Map<string, SeederAggregate>,
 ): string {
   const domainAggs = [...new Set(entries.filter((e) => !e.raw).map((e) => e.row.aggregate))];
   const repoDecls = domainAggs.map(
@@ -179,8 +188,8 @@ function qualifiedInsert(row: SeedRowIR, schema: string | undefined): string {
  *  expressions never reference `this`; the default render context
  *  (literals / enum values / value-object ctors / money / now())
  *  suffices — except `datetime` fields, coerced below. */
-function renderInput(row: SeedRowIR, agg: EnrichedAggregateIR): string {
-  const typeByName = new Map(createInputFields(agg).map((f) => [f.name, f.type]));
+function renderInput(row: SeedRowIR, agg: SeederAggregate): string {
+  const typeByName = new Map(agg.createParams.map((p) => [p.name, p.type]));
   return row.fields
     .map((f) => `${snake(f.name)}=${renderField(f.value, typeByName.get(f.name))}`)
     .join(", ");

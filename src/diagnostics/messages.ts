@@ -520,12 +520,16 @@ export const DIAGNOSTIC_MESSAGES = {
     "columns for a raw INSERT to target (Postgres answers 42703 at first boot). Use the " +
     "domain path — `seed <dataset> { … }` without `raw` — which writes a document " +
     "aggregate correctly on every backend.",
-  "loom.seed-event-sourced-unsupported": (p: { name: unknown }) =>
-    `Seed row on event-sourced aggregate '${p.name}': its truth is the append-only event ` +
-    "stream, and no backend has a seed path that appends one — elixir drops the row while " +
-    "still committing the dataset's ship-once marker, and java/.NET emit a create call " +
-    "that does not match the declared `create` signature. Seed a state-persisted " +
-    "aggregate, or drive the stream through the aggregate's own create at runtime.",
+  "loom.seed-raw-eventsourced": (p: { name: unknown }) =>
+    `Raw seed row on event-sourced aggregate '${p.name}': its truth is the append-only ` +
+    "`<agg>_events` stream (stream_id, version, type, data, occurred_at), so it has no " +
+    "per-field columns for a raw INSERT to target. Use the domain path — " +
+    "`seed <dataset> { … }` without `raw` — which appends the creation event correctly " +
+    "on every backend.",
+  "loom.seed-eventsourced-no-create": (p: { name: unknown }) =>
+    `Seed row on event-sourced aggregate '${p.name}': it declares no \`create\` action, ` +
+    "so there is no creation event for a seed row to append — it is constructed only " +
+    "out-of-band. Add a canonical `create(...)` to seed it, or drop the row.",
   "loom.seed-abstract-aggregate": (p: { name: unknown }) =>
     `Seed row on abstract aggregate '${p.name}': an inheritance base has no create ` +
     "factory and no repository, so every backend drops the row — and elixir still commits " +
@@ -3087,6 +3091,18 @@ export const DIAGNOSTIC_MESSAGES = {
   // ----------------------------------------------------------------------
   "loom.ir-internal#generation": (p: { err: unknown }) =>
     `IR phase failed before generation: ${p.err}`,
+
+  // ----------------------------------------------------------------------
+  // src/generator/_expr/target.ts — QueryEmissionRefusal (§F2, Wave 2
+  // packet 2.4).  A construct outside a query-language renderer's declared
+  // vocabulary (see QUERY_EMISSION_VOCABULARY) reached codegen — a validator
+  // gap or a compiler bug, never a user mistake (the IR validator's
+  // `firstNonQueryableNode`, or a backend-specific queryable gate, is what
+  // keeps an ordinary `.ddd` program off this path).
+  // ----------------------------------------------------------------------
+  "loom.query-emission-invalid": (p: { mode: unknown; what: unknown }) =>
+    `${p.mode}: ${p.what} is outside the declared query-emission vocabulary — ` +
+    `the IR validator should have rejected this filter before codegen reached it.`,
 } satisfies Record<string, MessageEntry>;
 
 type Catalog = typeof DIAGNOSTIC_MESSAGES;

@@ -49,6 +49,7 @@ import type {
 } from "../../ir/types/loom-ir.js";
 import { wireTypeInfo } from "../../ir/types/wire-types.js";
 import { normalizeHandlerReturn, requestRecordFor } from "../../ir/util/handler-contracts.js";
+import { walkWorkflowStmtsDeep } from "../../ir/util/walk.js";
 import { lines } from "../../util/code-builder.js";
 import { lowerFirst } from "../../util/naming.js";
 import { SCAFFOLD_ONCE_MARKER } from "../../util/scaffold-once.js";
@@ -69,29 +70,28 @@ type Handler = CommandHandlerIR | QueryHandlerIR;
 
 /** The aggregates a handler body loads / saves — its injected
  *  `<Agg>Repository` fields (repo-let loads + exit-saves).  Same derivation the
- *  shared workflow stmt target uses for its field/method names. */
+ *  shared workflow stmt target uses for its field/method names.
+ *
+ *  Rides `walkWorkflowStmtsDeep` (wave-2 packet 2.3): the hand-rolled
+ *  if/else-if chain this replaced re-derived the "which kinds nest further
+ *  bodies" fact `walk.ts` already owns exhaustively. */
 function reposUsed(h: Handler): string[] {
   const aggs = new Set<string>();
-  const walk = (stmts: readonly WorkflowStmtIR[]): void => {
-    for (const s of stmts) {
+  for (const s of h.statements) {
+    walkWorkflowStmtsDeep(s, (st) => {
       if (
-        s.kind === "repo-let" ||
-        s.kind === "repo-run" ||
-        s.kind === "factory-let" ||
-        s.kind === "repo-delete"
+        st.kind === "repo-let" ||
+        st.kind === "repo-run" ||
+        st.kind === "factory-let" ||
+        st.kind === "repo-delete" ||
+        st.kind === "if-let"
       ) {
-        aggs.add(s.aggName);
-      } else if (s.kind === "for-each") {
-        for (const save of s.savesPerIteration) aggs.add(save.aggName);
-        walk(s.body);
-      } else if (s.kind === "if-let") {
-        aggs.add(s.aggName);
-        walk(s.thenBody);
-        walk(s.elseBody ?? []);
+        aggs.add(st.aggName);
+      } else if (st.kind === "for-each") {
+        for (const save of st.savesPerIteration) aggs.add(save.aggName);
       }
-    }
-  };
-  walk(h.statements);
+    });
+  }
   for (const save of h.savesAtExit) aggs.add(save.aggName);
   return [...aggs].sort();
 }

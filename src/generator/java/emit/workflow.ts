@@ -13,6 +13,7 @@ import { exprUsesCurrentUser, workflowEmitsCommandRoute } from "../../../ir/type
 import { readPortsForOperation } from "../../../ir/util/domain-service-read-ports.js";
 import { operationBodyUsesCurrentUser, operationGates } from "../../../ir/util/op-gates.js";
 import { resolveWorkflowIsolation } from "../../../ir/util/resolve-datasource.js";
+import { walkWorkflowStmtExprsDeep } from "../../../ir/util/walk.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, snake, upperFirst, workflowFnCamel } from "../../../util/naming.js";
 import { javaLogEvent } from "../../_obs/render-java.js";
@@ -128,38 +129,22 @@ export interface WorkflowCtx {
 
 const baseRenderCtx = { thisName: "this" };
 
+/** Rides `walkWorkflowStmtExprsDeep` (M-T6.50 class, wave-2 packet 2.3): the
+ *  hand-rolled `visit` this replaced had no arm for `assign` /
+ *  `domain-service-call` / `if-let` / `repo-delete` (4 of `WorkflowStmtIR`'s
+ *  14 kinds) — so a workflow that reads `currentUser` only inside one of
+ *  those (`field := currentUser.id`, an `if-let` branch, …) never triggered
+ *  the principal-threading this predicate gates, and the generated method
+ *  omits the `currentUser` parameter its own body reads. */
 function workflowUsesCurrentUser(wf: WorkflowIR): boolean {
-  const exprs: (ExprIR | undefined)[] = [];
-  const visit = (s: WorkflowStmtIR): void => {
-    switch (s.kind) {
-      case "precondition":
-      case "requires":
-        exprs.push(s.expr);
-        break;
-      case "emit":
-      case "factory-let":
-        for (const f of s.fields) exprs.push(f.value);
-        break;
-      case "repo-let":
-      case "op-call":
-        for (const a of s.args) exprs.push(a);
-        break;
-      case "expr-let":
-        exprs.push(s.expr);
-        break;
-      case "repo-run":
-        break;
-      case "for-each":
-        exprs.push(s.iterable);
-        for (const b of s.body) visit(b);
-        break;
-      case "resource-call":
-        exprs.push(s.call);
-        break;
-    }
-  };
-  for (const s of wf.statements) visit(s);
-  return exprs.some((e) => exprUsesCurrentUser(e));
+  for (const s of wf.statements) {
+    let found = false;
+    walkWorkflowStmtExprsDeep(s, (e) => {
+      if (exprUsesCurrentUser(e)) found = true;
+    });
+    if (found) return true;
+  }
+  return false;
 }
 
 /** Repositories a workflow touches (repo-lets, factory-lets, saves). */
@@ -478,29 +463,27 @@ function renderCtxFor(ctx: EnrichedBoundedContextIR, wctx: WorkflowCtx): JavaRen
 /** The reading-tier domain services a workflow calls in its body — each is a
  *  `@Service` bean the workflow constructor-injects
  *  (domain-services.md rev. 4).  De-duplicated by service name, in first-call order; a PURE service
- *  call is a static call (no injection), so it never appears here. */
+ *  call is a static call (no injection), so it never appears here.
+ *
+ *  Rides `walkWorkflowStmtExprsDeep` (M-T6.50 class, wave-2 packet 2.3) —
+ *  see `staticServicesCalled` below for the bug this and its sibling shared
+ *  (the hand-rolled traversal only recursed into `for-each` bodies, missing
+ *  `if-let`, plus `exprChildren`'s own gaps). */
 function readingServicesCalled(wf: WorkflowIR, ctx: EnrichedBoundedContextIR): string[] {
   const seen = new Set<string>();
   const order: string[] = [];
-  const visit = (e: ExprIR | undefined): void => {
-    if (!e) return;
-    if (e.kind === "call" && e.callKind === "domain-service" && e.serviceRef) {
-      const svc = ctx.domainServices.find((s) => s.name === e.serviceRef!.service);
-      const op = svc?.operations.find((o) => o.name === e.serviceRef!.op);
-      if (svc && op && readPortsForOperation(op).length > 0 && !seen.has(svc.name)) {
-        seen.add(svc.name);
-        order.push(svc.name);
+  for (const s of wf.statements) {
+    walkWorkflowStmtExprsDeep(s, (e) => {
+      if (e.kind === "call" && e.callKind === "domain-service" && e.serviceRef) {
+        const svc = ctx.domainServices.find((x) => x.name === e.serviceRef?.service);
+        const op = svc?.operations.find((o) => o.name === e.serviceRef?.op);
+        if (svc && op && readPortsForOperation(op).length > 0 && !seen.has(svc.name)) {
+          seen.add(svc.name);
+          order.push(svc.name);
+        }
       }
-    }
-    for (const c of exprChildren(e)) visit(c);
-  };
-  const walk = (stmts: WorkflowStmtIR[]): void => {
-    for (const s of stmts) {
-      for (const e of workflowStmtExprs(s)) visit(e);
-      if (s.kind === "for-each") walk(s.body);
-    }
-  };
-  walk(wf.statements);
+    });
+  }
   return order;
 }
 
@@ -508,82 +491,32 @@ function readingServicesCalled(wf: WorkflowIR, ctx: EnrichedBoundedContextIR): s
  *  `callKind: "domain-service"` whose op declares NO read ports
  *  (domain-services.md rev. 4).  Rendered as a static `Service.op(...)` call, so
  *  the workflow file must import the service class (unlike a reading-tier call,
- *  which is an injected bean).  De-duplicated by service name, first-call order. */
+ *  which is an injected bean).  De-duplicated by service name, first-call order.
+ *
+ *  Rides `walkWorkflowStmtExprsDeep` (M-T6.50 class, wave-2 packet 2.3): the
+ *  hand-rolled `walk`/`visit`/`workflowStmtExprs`/`exprChildren` cluster this
+ *  and `readingServicesCalled` shared only recursed into `for-each` bodies —
+ *  an `if-let` branch's domain-service call was never visited, so its class
+ *  silently never imported, a Java compile failure (unresolved symbol) the
+ *  moment a workflow calls a domain service from inside an `if-let`.
+ *  `exprChildren`'s own gaps (missing `list`/`convert`/`match`/… — the same
+ *  shape as `exprCallsDomainService` in `emit/entity.ts`) compounded it. */
 function staticServicesCalled(wf: WorkflowIR, ctx: EnrichedBoundedContextIR): string[] {
   const seen = new Set<string>();
   const order: string[] = [];
-  const visit = (e: ExprIR | undefined): void => {
-    if (!e) return;
-    if (e.kind === "call" && e.callKind === "domain-service" && e.serviceRef) {
-      const svc = ctx.domainServices.find((s) => s.name === e.serviceRef!.service);
-      const op = svc?.operations.find((o) => o.name === e.serviceRef!.op);
-      if (svc && op && readPortsForOperation(op).length === 0 && !seen.has(svc.name)) {
-        seen.add(svc.name);
-        order.push(svc.name);
+  for (const s of wf.statements) {
+    walkWorkflowStmtExprsDeep(s, (e) => {
+      if (e.kind === "call" && e.callKind === "domain-service" && e.serviceRef) {
+        const svc = ctx.domainServices.find((x) => x.name === e.serviceRef?.service);
+        const op = svc?.operations.find((o) => o.name === e.serviceRef?.op);
+        if (svc && op && readPortsForOperation(op).length === 0 && !seen.has(svc.name)) {
+          seen.add(svc.name);
+          order.push(svc.name);
+        }
       }
-    }
-    for (const c of exprChildren(e)) visit(c);
-  };
-  const walk = (stmts: WorkflowStmtIR[]): void => {
-    for (const s of stmts) {
-      for (const e of workflowStmtExprs(s)) visit(e);
-      if (s.kind === "for-each") walk(s.body);
-    }
-  };
-  walk(wf.statements);
+    });
+  }
   return order;
-}
-
-/** Sub-expressions of a workflow statement that may contain a domain-service
- *  call (mirrors `workflowUsesCurrentUser`'s per-kind expr extraction). */
-function workflowStmtExprs(s: WorkflowStmtIR): (ExprIR | undefined)[] {
-  switch (s.kind) {
-    case "precondition":
-    case "requires":
-      return [s.expr];
-    case "emit":
-    case "factory-let":
-      return s.fields.map((f) => f.value);
-    case "repo-let":
-    case "op-call":
-      return s.args;
-    case "expr-let":
-      return [s.expr];
-    case "for-each":
-      return [s.iterable];
-    case "resource-call":
-    case "domain-service-call":
-      return [s.call];
-    default:
-      return [];
-  }
-}
-
-/** Direct sub-expressions of an ExprIR (for the domain-service-call walk). */
-function exprChildren(e: ExprIR): (ExprIR | undefined)[] {
-  switch (e.kind) {
-    case "method-call":
-      return [e.receiver, ...e.args];
-    case "member":
-      return [e.receiver];
-    case "binary":
-      return [e.left, e.right];
-    case "ternary":
-      return [e.cond, e.then, e.otherwise];
-    case "unary":
-      return [e.operand];
-    case "paren":
-      return [e.inner];
-    case "call":
-      return e.args;
-    case "new":
-    case "object":
-      return e.fields.map((f) => f.value);
-    case "lambda":
-      return [e.body];
-    default:
-      return [];
-  }
 }
 
 export function renderJavaWorkflows(

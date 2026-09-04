@@ -1,8 +1,9 @@
 import type { ExprIR, PathIR, ProvSite, StmtIR } from "../../ir/types/loom-ir.js";
+import { walkStmtExprsDeep } from "../../ir/util/walk.js";
 import { escapeJavaIdent } from "../../util/naming.js";
 import { collectLeaves, provTempNames, wrapProvCapture } from "../_stmt/leaves.js";
 import { renderStmtChunksWith, renderStmtsWith, type StmtTarget } from "../_stmt/target.js";
-import { collectJavaExprImports, type JavaRenderContext, renderJavaExpr } from "./render-expr.js";
+import { addJavaExprImport, type JavaRenderContext, renderJavaExpr } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
 // Statement LEAF TABLE for the Java / Spring backend.  The 11-kind `StmtIR`
@@ -59,32 +60,21 @@ export function renderJavaStatementChunks(
 export { statementSubRegions } from "../_trace/sourcemap.js";
 
 /** Imports a statement body needs — the union of
- *  `collectJavaExprImports` over every rendered expression. */
+ *  `collectJavaExprImports` over every rendered expression.
+ *
+ *  Rides `walkStmtExprsDeep` (M-T6.50 class, wave-2 packet 2.3): the
+ *  hand-rolled switch it replaced had no `variant-match` arm — the same gap
+ *  wave 1 found and fixed in the Python collector (M-T6.50 (c)) — so an
+ *  import-triggering expression (a `decimal`/`money` literal, a
+ *  `.matches(...)` call) nested inside a `variant-match` arm or else body
+ *  never reached `collectJavaExprImports`, and the class it needed silently
+ *  never made it into the generated import block. */
 export function collectJavaStmtImports(
   stmts: StmtIR[],
   into: Set<string> = new Set(),
 ): Set<string> {
   for (const s of stmts) {
-    switch (s.kind) {
-      case "precondition":
-      case "requires":
-      case "let":
-      case "expression":
-        collectJavaExprImports(s.expr, into);
-        break;
-      case "assign":
-      case "add":
-      case "remove":
-      case "return":
-        collectJavaExprImports(s.value, into);
-        break;
-      case "emit":
-        for (const f of s.fields) collectJavaExprImports(f.value, into);
-        break;
-      case "call":
-        for (const a of s.args) collectJavaExprImports(a, into);
-        break;
-    }
+    walkStmtExprsDeep(s, (e) => addJavaExprImport(e, into));
   }
   return into;
 }

@@ -25,7 +25,7 @@
 import type { TypeIR } from "../../ir/types/loom-ir.js";
 import { unreachableExprLeaves } from "../_walker/js-expr-leaves.js";
 import type { ApiCallSite, RenderPosition, StateRef, WalkerTarget } from "../_walker/target.js";
-import { escapeHeexText } from "./heex-walker-core.js";
+import { escapeHeexAttr, escapeHeexText } from "./heex-walker-core.js";
 
 export const heexTarget: WalkerTarget = {
   framework: "phoenixLiveView",
@@ -213,6 +213,14 @@ export const heexTarget: WalkerTarget = {
    *  here would silently drift from `renderChild`/`renderInTemplate`). */
   escapeText(text: string): string {
     return escapeHeexText(text);
+  },
+
+  /** HEEx attribute escaping.  Delegates to the LIVE funnel
+   *  (`escapeHeexAttr`) every real `attr="…"` emit site already shares
+   *  (`heex-primitives.ts` / `heex-walker-core.ts`), same discipline as
+   *  `escapeText` above (Wave 2 packet 2.2, F2-ELX-ESCAPE-FUNNEL). */
+  escapeAttr(text: string): string {
+    return escapeHeexAttr(text);
   },
 };
 

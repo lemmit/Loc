@@ -19,16 +19,19 @@ import {
 } from "../../../ir/util/projection-aggregate.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
-import { MONEY_WIRE_SCALE, MONEY_WIRE_ZERO } from "../../money-scale.js";
+import { numericEncode } from "../../_numeric/target.js";
+import { MONEY_WIRE_ZERO } from "../../money-scale.js";
 import {
   bypassDrops,
   bypassedPromotedCaps,
   type FilterBypass,
   promotedCapabilities,
 } from "../capability-filter.js";
+import { JAVA_NUMERIC, javaMoneyProjectionKeyEncode } from "../numeric-codec.js";
 import { collectJavaExprImports, renderJavaExpr } from "../render-expr.js";
 import {
   JPQL_INTRINSIC_SQL,
+  type JpqlCtx,
   principalBindExpr,
   principalParamName,
   renderJpqlWhere,
@@ -51,7 +54,13 @@ import { workflowStateClass } from "./workflow-state.js";
 // an `X id` FK, so the follow is an explicit map load — the analogue of Hono
 // `findManyByIds` / Python `find_many_by_ids` / the Elixir bulk-load map), and
 // each `select f = <expr>` projects one row.  A `select` that reads a join
-// alias (`c.name`) rewrites to `<mapVar>.get(<key>).name()`.
+// alias (`c.name`) rewrites to a null-guarded `<mapVar>.get(<key>) == null ?
+// null : <mapVar>.get(<key>).name()` — LEFT JOIN semantics (G2667-D3,
+// `docs/conformance-semantics.md`): the joined aggregate's own capability
+// filters (soft-delete, tenancy, an ordinary dangling reference) can leave it
+// absent from the bulk-loaded map, and the source row survives with the
+// joined field carrying wire `null` rather than an unguarded `.get(...)`
+// throwing a `NullPointerException` on data the model permits.
 //
 // One `<Ctx>QueryProjections` @Service + a `<Ctx>QueryProjectionsController`
 // exposing `GET /projections/<slug>` per projection (sibling of the folded
@@ -151,7 +160,16 @@ function aggregationScope(
   imports: Set<string>,
 ): AggregationScope {
   const principalAccessors = new Set<string>();
-  const jpqlCtx = { alias: "e", enumsPkg, principalAccessors };
+  // `EntityManager.createQuery` mode (§F2, Wave 2 packet 2.4): this read runs
+  // raw JPQL through the EntityManager, not a Spring Data `@Query` method, so
+  // a `currentUser.<claim>` member must bind as a plain `:name` parameter
+  // (`principalAccessors`) rather than Spring Data SpEL — see `JpqlCtx.mode`.
+  const jpqlCtx: JpqlCtx = {
+    alias: "e",
+    enumsPkg,
+    mode: "jpql-entity-manager",
+    principalAccessors,
+  };
   const filter = proj.query!.filter;
   const ownWhere = filter ? renderJpqlWhere(filter, jpqlCtx) : null;
   if (filter) collectJavaExprImports(filter, imports);
@@ -536,7 +554,7 @@ export function renderJavaQueryProjections(
               const sel = selectByField.get(f.name);
               if (!sel) return `null`;
               collectJavaExprImports(sel.expr, imports);
-              return domainToWire(f.type, renderSelect(sel.expr, aliasMap));
+              return renderSelectWire(f.type, sel.expr, aliasMap);
             });
 
       methods.push(
@@ -709,10 +727,6 @@ export function renderJavaQueryProjections(
   return out;
 }
 
-/** Render a `select` expression against the source row `a` and the join alias
- *  maps.  A member read on a join alias (`c.name`) rewrites to
- *  `<mapVar>.get(<key>).name()` — the loaded-by-id aggregate for this row.
- *  Source-candidate reads (`o.id`, bare `lineCount`) render off `a`. */
 /** The JPQL aggregate call for one `select`.  `count` counts ROWS (no column);
  *  the rest take the aggregated column off the entity alias `e`. */
 function jpqlAggregate(agg: ProjectionAggregateIR): string {
@@ -750,7 +764,7 @@ function jpqlCoerce(s: AggregateSelect, read: string): string {
   // Via `new BigDecimal(toString())` because JPQL types an aggregate result by
   // provider choice — a `BigDecimal` for one, a `Double` for another.
   if (c.isMoney) {
-    const scaled = `new java.math.BigDecimal(${read}.toString()).setScale(${MONEY_WIRE_SCALE}, java.math.RoundingMode.HALF_UP).toPlainString()`;
+    const scaled = numericEncode(JAVA_NUMERIC, "money", "projection-read", read);
     return c.optional
       ? `${read} == null ? null : ${scaled}`
       : `${read} == null ? "${MONEY_WIRE_ZERO}" : ${scaled}`;
@@ -768,12 +782,13 @@ function jpqlCoerce(s: AggregateSelect, read: string): string {
     // backend ships.  Before this, only `avg` was double-parity, and only by
     // the provider's accident; `sum`/`min`/`max` re-wrapped into a
     // `BigDecimal` and serialized the stored column's full precision.
+    const decoded = numericEncode(JAVA_NUMERIC, "decimal", "projection-read", read);
     return c.optional
-      ? `${read} == null ? null : ((Number) ${read}).doubleValue()`
-      : `${read} == null ? 0.0 : ((Number) ${read}).doubleValue()`;
+      ? `${read} == null ? null : ${decoded}`
+      : `${read} == null ? 0.0 : ${decoded}`;
   }
   const asLong = inner.kind === "primitive" && inner.name === "long";
-  const num = `((Number) ${read}).${asLong ? "longValue" : "intValue"}()`;
+  const num = numericEncode(JAVA_NUMERIC, asLong ? "long" : "int", "projection-read", read);
   return c.optional ? `${read} == null ? null : ${num}` : `${read} == null ? 0 : ${num}`;
 }
 
@@ -805,21 +820,23 @@ function groupKeyCoerce(
   if (t.kind === "primitive") {
     switch (t.name) {
       case "int":
-        return `((Number) ${read}).intValue()`;
+        return numericEncode(JAVA_NUMERIC, "int", "projection-read", read);
       case "long":
-        return `((Number) ${read}).longValue()`;
+        return numericEncode(JAVA_NUMERIC, "long", "projection-read", read);
       case "decimal":
         // decimal → the row's `double` component (RS-24 / M-T6.46), the same
         // narrowing `domainToWire` applies on a per-row read.  A key column
         // comes back as the entity's own mapped `BigDecimal`, so it still goes
         // through `Number` rather than a cast — but it lands on a double, not
         // on a re-wrapped BigDecimal carrying the stored column's full scale.
-        return `((Number) ${read}).doubleValue()`;
+        return numericEncode(JAVA_NUMERIC, "decimal", "projection-read", read);
       case "money":
         // money → wire STRING at the fixed money scale (RS-12), matching
-        // `domainToWire`.
+        // `domainToWire` — the SAME `projection-read` transform
+        // `jpqlCoerce`'s aggregate arm applies, spelled with the short
+        // `BigDecimal` name this file already imports.
         imports.add("java.math.BigDecimal");
-        return `new BigDecimal(${read}.toString()).setScale(${MONEY_WIRE_SCALE}, java.math.RoundingMode.HALF_UP).toPlainString()`;
+        return javaMoneyProjectionKeyEncode(read);
       case "datetime":
         // Instant → ISO-8601 wire string.  Through HQL's `function(…)` escape
         // Hibernate has no static return type, so normalise first.
@@ -838,12 +855,28 @@ function groupKeyCoerce(
   );
 }
 
-function renderSelect(expr: ExprIR, aliasMap: Map<string, JoinMap>): string {
+/** Render one `select` expression as the row's declared WIRE value.
+ *
+ *  A member read through a join alias (`c.name`) is LEFT-JOIN semantics
+ *  (G2667-D3, `docs/conformance-semantics.md`): `join <Agg> as c on <idRef>`
+ *  bulk-loads the target through its OWN (tenancy-/capability-scoped)
+ *  `findAll()`, so a soft-deleted target, an out-of-tenant target, or an
+ *  ordinary dangling reference is simply ABSENT from `<mapVar>` — the source
+ *  row survives, and the joined field carries wire `null`. Indexing the map
+ *  directly (the pre-fix shape) was a `NullPointerException` 500 on data the
+ *  model permits. The guard sits OUTSIDE `domainToWire` — not inside it — so
+ *  a joined `money`/`decimal`/`datetime` field's non-null narrowing
+ *  (`.setScale(…)`, `.doubleValue()`, `.toString()`) never runs on the absent
+ *  row; only a present join target's value is coerced. */
+function renderSelectWire(t: TypeIR, expr: ExprIR, aliasMap: Map<string, JoinMap>): string {
   if (expr.kind === "member" && expr.receiver.kind === "ref") {
     const alias = aliasMap.get(expr.receiver.name);
-    if (alias) return `${alias.mapVar}.get(${alias.keyExpr}).${expr.member}()`;
+    if (alias) {
+      const lookup = `${alias.mapVar}.get(${alias.keyExpr})`;
+      return `${lookup} == null ? null : ${domainToWire(t, `${lookup}.${expr.member}()`)}`;
+    }
   }
-  return renderJavaExpr(expr, { thisName: "a", accessorProps: true });
+  return domainToWire(t, renderJavaExpr(expr, { thisName: "a", accessorProps: true }));
 }
 
 function repoField(aggName: string): string {

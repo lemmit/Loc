@@ -1,7 +1,16 @@
 import type { ExprIR, TypeIR } from "../ir/types/loom-ir.js";
 import { sqlRenderableExpr } from "../ir/util/sql-renderable-expr.js";
-import { type BinaryExpr, isIntDivWidenedToDecimal } from "./_expr/target.js";
+import {
+  type BinaryExpr,
+  isIntDivWidenedToDecimal,
+  refuseOutOfVocabulary,
+} from "./_expr/target.js";
 import { qIdent, sqlStr } from "./sql-pg.js";
+
+/** This renderer's declared `QueryEmissionMode` (§F2, Wave 2 packet 2.4) —
+ *  constant, not threaded per call: `renderSqlScalarExpr` has exactly one
+ *  target sub-language, unlike JPQL's two SpEL-vs-plain-param sub-modes. */
+const MODE = "sql-postgres-migration";
 
 export { sqlRenderableExpr };
 
@@ -56,7 +65,7 @@ export function renderSqlScalarExpr(e: ExprIR, ctx: SqlExprContext): string {
           return "now()";
       }
       // Exhaustive over LiteralKind; keep the compiler honest if it grows.
-      throw new Error(`renderSqlScalarExpr: unhandled literal kind '${e.lit}'`);
+      return refuseOutOfVocabulary(MODE, `literal kind '${e.lit}'`);
     case "ref": {
       if (e.refKind === "enum-value") return sqlStr(e.name);
       if (e.refKind === "this-prop") {
@@ -68,7 +77,7 @@ export function renderSqlScalarExpr(e: ExprIR, ctx: SqlExprContext): string {
         }
         return qIdent(col);
       }
-      throw new Error(`renderSqlScalarExpr: unsupported ref kind '${e.refKind}'`);
+      return refuseOutOfVocabulary(MODE, `ref kind '${e.refKind}'`);
     }
     case "paren":
       return `(${renderSqlScalarExpr(e.inner, ctx)})`;
@@ -94,9 +103,7 @@ export function renderSqlScalarExpr(e: ExprIR, ctx: SqlExprContext): string {
       return `(CASE WHEN ${c} THEN ${t} ELSE ${o} END)`;
     }
     default:
-      throw new Error(
-        `renderSqlScalarExpr: unsupported expression kind '${e.kind}' (validator should have rejected this)`,
-      );
+      return refuseOutOfVocabulary(MODE, `expression kind '${e.kind}'`);
   }
 }
 

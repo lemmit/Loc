@@ -43,6 +43,7 @@ import { type ValueCollectionIR, valueCollectionsFor } from "../../ir/util/value
 import { aggregateIsVersioned } from "../../ir/util/versioned-capability.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
+import { numericEncode } from "../_numeric/target.js";
 import { provenancedEntries } from "../_payload/provenanced-wire.js";
 import { renderPyHistoryRepoMethod } from "./emit/audit-history.js";
 import { PY_PROV_SUFFIX, provColumn, provenancedFieldsOf } from "./emit/provenance.js";
@@ -53,9 +54,11 @@ import {
   type FilterBypass,
   lowerToSqlAlchemy,
   type PyPredicate,
+  requireLowered,
   writeScopeDeniesAll,
   writeScopePredicate,
 } from "./find-predicate.js";
+import { PY_NUMERIC } from "./numeric-codec.js";
 import {
   columnsForFields,
   isRefCollectionField,
@@ -482,8 +485,14 @@ export function relationalFindMethod(
   // currentUser-scoped finds take the actor as the trailing parameter;
   // the predicate renders `current_user.<claim>` as a plain bind value.
   if (findUsesCurrentUser(find)) params.push("current_user: User");
+  // §F2 (Wave 2 packet 2.4): a DECLARED `find.filter` that fails to lower
+  // must REFUSE, not silently fall through as "no filter" — `requireLowered`
+  // is what stops a validator gap here from becoming an unfiltered read.
   const pred = find.filter
-    ? lowerToSqlAlchemy(find.filter, agg, ctx)
+    ? requireLowered(
+        `find '${find.name}' on '${agg.name}'`,
+        lowerToSqlAlchemy(find.filter, agg, ctx),
+      )
     : conventionPredicate(agg, find);
   // Per-find capability filter — a `find … ignoring <Cap>`/`ignoring *` OMITS
   // the named capability predicate(s) for this method only (the bypass is
@@ -680,7 +689,14 @@ function viewFindMethod(
 ): string {
   const root = rowClassName(tableOwnerName(agg, ctx.aggregates));
   const kind = discriminatorValue(agg, ctx.aggregates);
-  const pred = view.filter ? lowerToSqlAlchemy(view.filter, agg, ctx) : null;
+  // Same refusal discipline as `findQueryMethod` above — a declared
+  // `view.filter` that fails to lower must not silently drop.
+  const pred = view.filter
+    ? requireLowered(
+        `query-time projection '${view.name}' on '${agg.name}'`,
+        lowerToSqlAlchemy(view.filter, agg, ctx),
+      )
+    : null;
   // A read `… ignoring <Cap>`/`ignoring *` OMITS the named capability
   // predicate(s) for this read only (baked in statically).
   const methodFilterPred =
@@ -716,13 +732,10 @@ function runMethod(
   // When an inline `ignoring` call-site reaches this retrieval, OMIT the
   // bypassed capability predicate(s) (the union across sites — baked in).
   const methodFilterPred = bypass ? contextFilterPredicate(agg, ctx, bypass) : filterPred;
-  const pred = lowerToSqlAlchemy(retrieval.where, agg, ctx);
-  if (!pred) {
-    throw new Error(
-      `internal: where-clause for retrieval '${retrieval.name}' on '${agg.name}' could not ` +
-        "lower to SQLAlchemy, but validateRetrievals should have caught this.",
-    );
-  }
+  const pred = requireLowered(
+    `retrieval '${retrieval.name}' on '${agg.name}'`,
+    lowerToSqlAlchemy(retrieval.where, agg, ctx),
+  );
   const orderBy =
     retrieval.sort.length > 0
       ? `.order_by(${retrieval.sort
@@ -757,7 +770,8 @@ function hydrateScalar(expr: string, t: TypeIR, optional: boolean): string {
   const opt = optional || t.kind === "optional";
   const wrap = (conv: string): string =>
     opt ? `(${conv} if ${expr} is not None else None)` : conv;
-  if (inner.kind === "primitive" && inner.name === "decimal") return wrap(`float(${expr})`);
+  if (inner.kind === "primitive" && inner.name === "decimal")
+    return wrap(numericEncode(PY_NUMERIC, "decimal", "repo-read", expr));
   if (inner.kind === "enum") return wrap(`${inner.name}(${expr})`);
   if (inner.kind === "id") return wrap(`${inner.targetName}Id(${expr})`);
   if (inner.kind === "array") {
@@ -765,7 +779,9 @@ function hydrateScalar(expr: string, t: TypeIR, optional: boolean): string {
       return wrap(`[${inner.element.name}(__v) for __v in ${expr}]`);
     }
     if (inner.element.kind === "primitive" && inner.element.name === "decimal") {
-      return wrap(`[float(__v) for __v in ${expr}]`);
+      return wrap(
+        `[${numericEncode(PY_NUMERIC, "decimal", "repo-read", "__v")} for __v in ${expr}]`,
+      );
     }
     return wrap(`list(${expr})`);
   }
@@ -1545,7 +1561,8 @@ export function wireValue(
     // JSON-encode as a number and diverge both the payload and the OpenAPI
     // type; a plain `str(...)` would leak a derived money's own scale
     // (`money("0.00")` → `"0.00"`).
-    return optional ? `(None if ${expr} is None else money_str(${expr}))` : `money_str(${expr})`;
+    const wire = numericEncode(PY_NUMERIC, "money", "dto-map", expr);
+    return optional ? `(None if ${expr} is None else ${wire})` : wire;
   }
   if (t.kind === "valueobject") {
     const vo = ctx.valueObjects.find((v) => v.name === t.name);

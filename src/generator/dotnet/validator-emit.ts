@@ -501,6 +501,12 @@ function renderFluentPredicate(e: ExprIR): string {
       // `authz-filter` sentinel is a query-filter node, never a
       // wire-boundary invariant.)
       return `false /* UNRENDERABLE:${e.kind} */`;
+    default: {
+      // Wave 2 packet 2.3 — every `ExprIR` kind is already listed above;
+      // this turns that into a compile-time guarantee.
+      const _exhaustive: never = e;
+      return _exhaustive;
+    }
   }
 }
 

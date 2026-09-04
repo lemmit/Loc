@@ -10,6 +10,7 @@ import {
   TENANT_OWNED_DATA_KEY_FIELD,
   TENANT_OWNED_TENANT_ID_FIELD,
 } from "../../ir/util/tenant-stance.js";
+import { walkExprDeep } from "../../ir/util/walk.js";
 import { bodyTypeOf } from "../../util/expr-body-type.js";
 import { intrinsicKey } from "../../util/intrinsics.js";
 import { escapeCsharpIdent, upperFirst } from "../../util/naming.js";
@@ -158,64 +159,48 @@ export function collectCsExprUsings(
    *  expression knows its own root namespace. */
   ns: string,
 ): Set<string> {
-  switch (e.kind) {
+  // Rides `walkExprDeep` (M-T6.50 class, wave-2 packet 2.3): the hand-rolled
+  // switch it replaced skipped a block-body lambda's statements, so a
+  // `matches`/domain-service call hidden inside one never triggered its
+  // `using` — `walkExprDeep` closes that gap.
+  walkExprDeep(e, (x) => addCsExprUsing(x, into, ns));
+  return into;
+}
+
+/** The per-kind side effect `collectCsExprUsings` applies at each node —
+ *  factored out (no recursion of its own) so `collectCsStmtUsings` can drive
+ *  it from `walkStmtExprsDeep`'s single traversal instead of visiting every
+ *  sub-expression twice. */
+export function addCsExprUsing(x: ExprIR, into: Set<string>, ns: string): void {
+  switch (x.kind) {
     case "method-call":
       if (
-        e.member === "matches" &&
-        e.receiverType.kind === "primitive" &&
-        e.receiverType.name === "string" &&
-        e.args.length === 1
+        x.member === "matches" &&
+        x.receiverType.kind === "primitive" &&
+        x.receiverType.name === "string" &&
+        x.args.length === 1
       ) {
         into.add("System.Text.RegularExpressions");
       }
-      collectCsExprUsings(e.receiver, into, ns);
-      for (const a of e.args) collectCsExprUsings(a, into, ns);
-      return into;
-    case "member":
-      return collectCsExprUsings(e.receiver, into, ns);
-    case "binary":
-      collectCsExprUsings(e.left, into, ns);
-      return collectCsExprUsings(e.right, into, ns);
-    case "unary":
-      return collectCsExprUsings(e.operand, into, ns);
-    case "paren":
-      return collectCsExprUsings(e.inner, into, ns);
-    case "ternary":
-      collectCsExprUsings(e.cond, into, ns);
-      collectCsExprUsings(e.then, into, ns);
-      return collectCsExprUsings(e.otherwise, into, ns);
+      break;
     case "call":
-      // A domain-service member call (`Pricing.Quote(...)`) reaches into the
-      // generated `Domain.Services` namespace — the call leaf renders the
-      // class name unqualified, so the file must import it.
-      if (e.callKind === "domain-service") {
+      // A domain-service member call (`Pricing.Quote(...)`) reaches into
+      // the generated `Domain.Services` namespace — the call leaf renders
+      // the class name unqualified, so the file must import it.
+      if (x.callKind === "domain-service") {
         into.add(`${ns}.Domain.Services`);
       }
-      for (const a of e.args) collectCsExprUsings(a, into, ns);
-      return into;
-    case "lambda":
-      if (e.body) collectCsExprUsings(e.body, into, ns);
-      return into;
-    case "new":
-    case "object":
-      for (const f of e.fields) collectCsExprUsings(f.value, into, ns);
-      return into;
-    case "convert":
-      return collectCsExprUsings(e.value, into, ns);
-    case "match":
-      for (const arm of e.arms) {
-        collectCsExprUsings(arm.cond, into, ns);
-        collectCsExprUsings(arm.value, into, ns);
-      }
-      if (e.otherwise) collectCsExprUsings(e.otherwise, into, ns);
-      return into;
+      break;
     default:
-      // literal | this | id | ref — leaves with no sub-expressions.
-      return into;
+      break;
   }
 }
 
 const CS_TARGET: ExprTarget<CsRenderContext> = {
+  // C# double-quoted string literals don't interpolate (that needs a `$"…"`
+  // prefix the emitter never uses for a splice) — JSON's escaping is already
+  // correct C# syntax (_expr/target.ts).
+  escapeStringLiteral: (value) => JSON.stringify(value),
   literal: renderLiteral,
   id: (ctx) => `${ctx.thisName}.${ctx.idAccessor ?? "Id"}`,
   ref: renderRef,
@@ -356,6 +341,14 @@ export function renderCsExpr(e: ExprIR, ctx: CsRenderContext = DEFAULT): string 
   // kind (it is not a domain expression).  A discriminated node so a missing
   // arm is a `tsc` error here, not a silent authorization bypass.
   if (e.kind === "authz-filter") return renderCsAuthzFilter(e, ctx);
+  // `ctx.efQuery` IS this renderer's declared `QueryEmissionMode` (§F2, Wave
+  // 2 packet 2.4): `"linq-efcore"` when set, `"app"` (unrestricted) when not.
+  // Unlike JPQL/Drizzle/SQLAlchemy/raw-SQL, `linq-efcore`'s vocabulary is
+  // `ALL_EXPR_KINDS` — EF Core's LINQ translator covers nearly the whole
+  // domain-logic surface `CS_TARGET` already emits, so there is no narrower
+  // per-kind refusal here; `firstNonQueryableNode` at the IR-validate phase
+  // is what actually keeps a `.ddd` program off constructs EF can't
+  // translate (see `QUERY_EMISSION_VOCABULARY["linq-efcore"]`).
   return renderExprWith(e, ctx.efQuery ? CS_TARGET_EF : CS_TARGET, ctx);
 }
 

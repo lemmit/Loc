@@ -697,3 +697,46 @@ describe("WalkerTarget — angularTarget (angular-frontend-plan.md)", () => {
     expect(angularTarget.renderChildrenSlot?.()).toBe("<ng-content></ng-content>");
   });
 });
+
+// ---------------------------------------------------------------------------
+// escapeAttr (Wave 2 packet 2.2, F2-ELX-ESCAPE-FUNNEL) — the attribute-
+// position twin of escapeText, added to the WalkerTarget contract so a new
+// target can't add a markup attribute position without declaring its own
+// escaping rule. React/Vue/Svelte/Angular share ONE rule (the same
+// escapeHtmlAttr every real static-attr emit site already used); HEEx has
+// its own live funnel (escapeHeexAttr).
+// ---------------------------------------------------------------------------
+
+describe("escapeAttr — the WalkerTarget attribute-escaping seam", () => {
+  const HOSTILE = `a "quote" & <tag> value`;
+
+  it("React/Vue/Svelte/Angular agree byte-for-byte (shared escapeHtmlAttr rule)", () => {
+    const react = tsxTarget.escapeAttr(HOSTILE);
+    expect(react).toBe("a &quot;quote&quot; &amp; &lt;tag&gt; value");
+    expect(vueTarget.escapeAttr(HOSTILE)).toBe(react);
+    expect(svelteTarget.escapeAttr(HOSTILE)).toBe(react);
+    expect(angularTarget.escapeAttr(HOSTILE)).toBe(react);
+  });
+
+  it("escapes `&` FIRST so a literal `&` can't combine with an injected entity", () => {
+    // If `"` were escaped before `&`, "a&quot;b" would decode as a stray `"`.
+    expect(tsxTarget.escapeAttr('a&"b')).toBe("a&amp;&quot;b");
+  });
+
+  it("HEEx escapes the same four characters through its own live funnel (escapeHeexAttr)", () => {
+    // Not byte-identical wording is not required — only that the same four
+    // structurally-dangerous characters are neutralized the same way.
+    const heex = heexTarget.escapeAttr(HOSTILE);
+    expect(heex).toBe("a &quot;quote&quot; &amp; &lt;tag&gt; value");
+    expect(heex).toBe(tsxTarget.escapeAttr(HOSTILE));
+  });
+
+  it("a value with no special characters passes through unchanged on every target", () => {
+    const plain = "plain value 123";
+    expect(tsxTarget.escapeAttr(plain)).toBe(plain);
+    expect(vueTarget.escapeAttr(plain)).toBe(plain);
+    expect(svelteTarget.escapeAttr(plain)).toBe(plain);
+    expect(angularTarget.escapeAttr(plain)).toBe(plain);
+    expect(heexTarget.escapeAttr(plain)).toBe(plain);
+  });
+});

@@ -32,6 +32,7 @@ import { sortableFields } from "../../ir/util/sortable-fields.js";
 import { valueCollectionsFor } from "../../ir/util/value-collections.js";
 import { indent, lines } from "../../util/code-builder.js";
 import { lowerFirst, plural, upperFirst } from "../../util/naming.js";
+import { refuseOutOfVocabulary } from "../_expr/target.js";
 import { renderHonoStoreLogCall } from "../_obs/render-hono.js";
 import { joinColumnName, joinTableConstName } from "./emit.js";
 import { associationMapLines, associationsOf } from "./repository-associations-builder.js";
@@ -119,12 +120,13 @@ export function renderCriterionFn(
   tableName: string,
   ctx: EnrichedBoundedContextIR,
 ): string {
-  const lowered = lowerToDrizzle(
-    c.body,
-    tableName,
-    ctx,
-    exprUsesCurrentUser(c.body) ? { principalAccessor: "requireCurrentUser()" } : undefined,
-  )!;
+  const lowered =
+    lowerToDrizzle(
+      c.body,
+      tableName,
+      ctx,
+      exprUsesCurrentUser(c.body) ? { principalAccessor: "requireCurrentUser()" } : undefined,
+    ) ?? refuseOutOfVocabulary("drizzle-predicate", `body of criterion '${c.name}'`);
   const params = c.params.map((p) => `${p.name}: ${tsTypeForReturn(p.type)}`).join(", ");
   return `const ${criterionFnName(c.name)} = (${params}) => ${lowered.expr};`;
 }
@@ -583,14 +585,12 @@ export function runMethod(
 
   // `where` → Drizzle predicate, AND-ed with the TPH `kind` scope.
   const kindPred = kindPredicate(agg, ctx, tableName);
-  const lowered = lowerToDrizzle(retrieval.where, tableName, ctx);
-  if (!lowered) {
-    throw new Error(
-      `internal: where-clause for retrieval '${retrieval.name}' on '${agg.name}' ` +
-        "could not lower to Drizzle, but validateRetrievals should have caught this. " +
-        "Please file a bug.",
+  const lowered =
+    lowerToDrizzle(retrieval.where, tableName, ctx) ??
+    refuseOutOfVocabulary(
+      "drizzle-predicate",
+      `where-clause for retrieval '${retrieval.name}' on '${agg.name}'`,
     );
-  }
   // When the `where` is exactly a named criterion, call its reified predicate
   // function instead of inlining (behaviour-identical; the function is emitted
   // module-level by repository-builder).
@@ -659,14 +659,12 @@ export function buildFindWhereClause(
     // lower to Drizzle's queryable subset, so by the time we get here
     // lowering always succeeds.  See validateLoomModel +
     // firstNonQueryableNode in src/ir/validate/validate.ts.
-    const lowered = lowerToDrizzle(find.filter, tableName, ctx);
-    if (!lowered) {
-      throw new Error(
-        `internal: where-clause for find '${find.name}' on '${agg.name}' ` +
-          "could not lower to Drizzle, but the validator should have caught this. " +
-          "Please file a bug.",
+    const lowered =
+      lowerToDrizzle(find.filter, tableName, ctx) ??
+      refuseOutOfVocabulary(
+        "drizzle-predicate",
+        `where-clause for find '${find.name}' on '${agg.name}'`,
       );
-    }
     // When the `where` is exactly a named criterion, call its reified predicate
     // function (emitted module-level by repository-builder) instead of inlining
     // — behaviour-identical, matching the retrieval path.

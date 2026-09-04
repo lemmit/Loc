@@ -259,6 +259,22 @@ export function emitVanillaShellFiles(
     }
   }
   out.set(`lib/${appName}_web/controllers/error_json.ex`, renderVanillaErrorJson(appModule));
+  // M-T1.8 — global error boundary + failure sink, the HEEx arm.  Only when
+  // this deployable mounts LiveView: `render_errors`' `formats:` list has
+  // carried `json` only (below), so an HTML-accepting request that errors
+  // BELOW the router (a bad path, a plug crash before `mount/3`, the initial
+  // disconnected/"dead" render) fell through to Phoenix's own bare built-in
+  // fallback instead of anything this app styles — the dead-render half of
+  // what a JSX frontend's top-level `ErrorBoundary` covers. A LiveView crash
+  // AFTER the socket connects is a different failure and needs no code here:
+  // `phoenix_live_view.js` already shows its own reconnect/error overlay and
+  // the crashed process's exit is logged through the SAME `:logger` pipeline
+  // (`log_formatter.ex`) every other backend's failure sink writes through —
+  // OTP supervision gives LiveView the render-time boundary + failure sink
+  // for free once the socket is live; only the DEAD path needed one added.
+  if (hasLiveView) {
+    out.set(`lib/${appName}_web/controllers/error_html.ex`, renderVanillaErrorHtml(appModule));
+  }
   out.set(`lib/${appName}_web/body_parser.ex`, renderVanillaBodyParser(appModule));
   out.set(`lib/${appName}_web/fault_handler.ex`, renderVanillaFaultHandler(appModule));
   out.set(
@@ -275,7 +291,14 @@ export function emitVanillaShellFiles(
   );
   out.set(
     "config/config.exs",
-    renderVanillaConfig(appName, appModule, swooshSmtpOnly, usesOban, authEnabled && oidc),
+    renderVanillaConfig(
+      appName,
+      appModule,
+      swooshSmtpOnly,
+      usesOban,
+      authEnabled && oidc,
+      hasLiveView,
+    ),
   );
   out.set("config/dev.exs", renderVanillaDev(appName, appModule));
   out.set("config/prod.exs", renderVanillaProd(appName, appModule));
@@ -1242,12 +1265,51 @@ end
 `;
 }
 
+/** M-T1.8 (HEEx arm) — the DEAD-render (disconnected, pre-socket) error page.
+ *  Sibling of `ErrorJSON` above, same minimal independent-module shape (a
+ *  bare `render/2`, no template files, no `use <App>Web, :html` / CoreComponents
+ *  coupling) so it needs nothing the LiveView spine doesn't already always
+ *  carry once `hasLiveView` is true.  Markup is built as a plain string and
+ *  wrapped in `Phoenix.HTML.raw/1` — returning the bare string would run it
+ *  through `Phoenix.HTML.Safe`'s BitString impl, which HTML-ESCAPES it (every
+ *  `<tag>` would render as literal text, not markup).
+ *
+ *  A >= 500 detail is never shown (mirrors `ErrorJSON`'s own
+ *  `detail_for(status, _, _) when status >= 500` rule) — an exception message
+ *  can name modules, SQL text and hosts, and a customer-facing error page is
+ *  exactly the wrong place to leak them regardless of format. */
+function renderVanillaErrorHtml(appModule: string): string {
+  return `# Auto-generated.
+defmodule ${appModule}Web.ErrorHTML do
+  def render(template, _assigns) do
+    status = template |> String.split(".") |> hd() |> String.to_integer()
+    title = Phoenix.Controller.status_message_from_template(template)
+
+    Phoenix.HTML.raw("""
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <title>#{status} #{title}</title>
+      </head>
+      <body style="font-family: system-ui, sans-serif; padding: 2rem; color: #1f2937;">
+        <h1 style="color: #b91c1c; margin: 0 0 0.5rem;">#{title}</h1>
+        <p style="margin: 0;">#{status}</p>
+      </body>
+    </html>
+    """)
+  end
+end
+`;
+}
+
 function renderVanillaConfig(
   appName: string,
   appModule: string,
   swooshSmtpOnly = false,
   usesOban = false,
   oidc = false,
+  hasLiveView = false,
 ): string {
   // OIDC only: joken_jwks fetches the issuer's JWKS through Tesla, whose
   // default adapter is Hackney (which we don't depend on) — left unset the
@@ -1280,7 +1342,7 @@ config :${appName}, ${appModule}Web.Endpoint,
   url: [host: "localhost"],
   adapter: Phoenix.Endpoint.Cowboy2Adapter,
   render_errors: [
-    formats: [json: ${appModule}Web.ErrorJSON],
+    formats: [json: ${appModule}Web.ErrorJSON${hasLiveView ? `, html: ${appModule}Web.ErrorHTML` : ""}],
     layout: false
   ],
   pubsub_server: ${appModule}.PubSub,

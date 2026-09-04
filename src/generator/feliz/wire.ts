@@ -59,6 +59,7 @@ import { isEntityHistoryRead } from "../_walker/history-read.js";
 import { isOfReadCall } from "../_walker/of-reads.js";
 import { isPagedQuery } from "../_walker/paged-query.js";
 import { boolNamed } from "../_walker/shared/args.js";
+import { fsString } from "./fs-expr.js";
 import { typeToFs } from "./type-fs.js";
 
 /** A read the page view issues, projected to everything the MVU wiring + api
@@ -3101,7 +3102,11 @@ function formFieldFsType(fld: FelizFormField): string {
 /** The `empty<Form>` seed for a form-record cell — `None` for a `file` field (no
  *  upload yet), else the field's `emptyValue` string literal. */
 function formFieldEmpty(fld: FelizFormField): string {
-  return fld.inputKind === "file" ? "None" : JSON.stringify(fld.emptyValue);
+  // `emptyValue` carries a `.ddd`-authored field DEFAULT verbatim
+  // (`felizDefaultString`'s string-literal arm) — route through the funnel
+  // every F# string-literal site shares (Wave 2 packet 2.2) rather than a
+  // second `JSON.stringify` copy.
+  return fld.inputKind === "file" ? "None" : fsString(fld.emptyValue);
 }
 
 /** Emit the form record types + their `empty<Form>` values — every field is a

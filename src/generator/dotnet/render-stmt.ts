@@ -1,9 +1,10 @@
 import type { ExprIR, MessageIR, PathIR, ProvSite, StmtIR } from "../../ir/types/loom-ir.js";
+import { walkStmtExprsDeep } from "../../ir/util/walk.js";
 import { escapeCsharpIdent, upperFirst } from "../../util/naming.js";
 import { collectLeaves, provTempNames, wrapProvCapture } from "../_stmt/leaves.js";
 import { renderStmtChunksWith, renderStmtsWith, type StmtTarget } from "../_stmt/target.js";
 import type { CsRenderContext } from "./render-expr.js";
-import { collectCsExprUsings, renderCsExpr } from "./render-expr.js";
+import { addCsExprUsing, renderCsExpr } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
 // Statement LEAF TABLE for the .NET backend.  The 11-kind `StmtIR` dispatch,
@@ -78,27 +79,11 @@ export function collectCsStmtUsings(
    *  `using`, i.e. C# that does not compile. */
   ns: string,
 ): Set<string> {
+  // Rides `walkStmtExprsDeep` (M-T6.50 class, wave-2 packet 2.3): the switch
+  // it replaced had no `variant-match` arm, so a `using`-triggering
+  // expression nested in an arm/else body was silently dropped.
   for (const s of stmts) {
-    switch (s.kind) {
-      case "precondition":
-      case "requires":
-      case "let":
-      case "expression":
-        collectCsExprUsings(s.expr, into, ns);
-        break;
-      case "assign":
-      case "add":
-      case "remove":
-      case "return":
-        collectCsExprUsings(s.value, into, ns);
-        break;
-      case "emit":
-        for (const f of s.fields) collectCsExprUsings(f.value, into, ns);
-        break;
-      case "call":
-        for (const a of s.args) collectCsExprUsings(a, into, ns);
-        break;
-    }
+    walkStmtExprsDeep(s, (e) => addCsExprUsing(e, into, ns));
   }
   return into;
 }

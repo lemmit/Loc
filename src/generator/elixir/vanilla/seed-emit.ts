@@ -29,28 +29,27 @@
 // `42P01 relation "parts" does not exist`.
 // ---------------------------------------------------------------------------
 
-import { forCreateInput } from "../../../ir/enrich/wire-projection.js";
-import type {
-  EnrichedAggregateIR,
-  EnrichedBoundedContextIR,
-  ExprIR,
-  SeedRowIR,
-} from "../../../ir/types/loom-ir.js";
+import type { EnrichedBoundedContextIR, ExprIR, SeedRowIR } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
-import { snake, upperFirst } from "../../../util/naming.js";
-import { type Entry, groupByDataset, usedAggregates } from "../../_persistence/seed-datasets.js";
+import { elixirString, snake, upperFirst } from "../../../util/naming.js";
+import {
+  type Entry,
+  groupByDataset,
+  type SeederAggregate,
+  seederAggregates,
+  usedAggregates,
+} from "../../_persistence/seed-datasets.js";
 import { renderSeedRowInsert } from "../../sql-pg.js";
 import { renderExpr } from "../render-expr.js";
-import { isEventSourced } from "./eventsourced-emit.js";
-import { isAbstractBase } from "./inheritance-emit.js";
 
-/** An Elixir double-quoted string literal for arbitrary emitted SQL.  JSON's
- *  escape rules are a subset of Elixir's — plus `#{`, which Elixir would treat
- *  as INTERPOLATION, so a `.ddd`-sourced value containing it must not be able
- *  to reach the compiler as code. */
-function exStr(s: string): string {
-  return JSON.stringify(s).replace(/#\{/g, "\\#{");
-}
+// A `.ddd`-sourced string reaching this file's emitted Elixir routes through
+// `elixirString` (src/util/naming.ts) — the ONE escape funnel every Elixir
+// emitter shares (F2-ELX-ESCAPE-FUNNEL, Wave 2 packet 2.2).  This module used
+// to carry its own copy (`exStr`, same `JSON.stringify(...).replace(/#\{/g,
+// "\\#{")` body under a different name) — a second implementation of the same
+// rule that would silently drift the next time the funnel's escaping grew a
+// case. Deleted in favour of the shared import; every call site below is
+// unchanged text.
 
 /** Migration schema for an aggregate — qualifies the `raw` INSERT. */
 export type SeedSchemaFor = (aggregateName: string) => string | undefined;
@@ -77,20 +76,25 @@ export function emitVanillaSeeds(
   if (datasets.length === 0) return null;
 
   const ctxModule = `${appModule}.${upperFirst(ctx.name)}`;
-  // Only a plain state-persisted, non-abstract aggregate has a repository
-  // `insert/1`: an abstract inheritance base is read-only, and an
-  // event-sourced one is created by appending its creation EVENT.
+  // The shared seeder model (M-T6.52): which aggregates are seedable, and
+  // each one's persistence kind + ordered create-call parameters.  An
+  // abstract inheritance base is read-only (no repository `insert/1`); a
+  // state-persisted aggregate is created through its repository; an
+  // event-sourced one is created by APPENDING its creation event — through
+  // the SAME `<ctxModule>.create_<agg>/1` command seam an ordinary create
+  // request uses (`renderEsContextBlock` in eventsourced-emit.ts), not a
+  // repository `insert/1` that does not exist for it.
   //
   // This filter used to be able to SHRINK a dataset that the emitted
   // `mark_seeded/1` then committed as applied — the dropped rows could never be
   // written, on this or any later boot, with no diagnostic anywhere
-  // (`F2-SEED-EVENTSOURCED`).  It no longer can: `loom.seed-event-sourced-
-  // unsupported` and `loom.seed-abstract-aggregate` (src/language/validators/
-  // seed.ts) reject both shapes at the AST tier, so a row reaching here is
-  // always seedable and the two predicates are a backstop, not a policy.
-  const seedableAggs = ctx.aggregates.filter((a) => !isAbstractBase(a) && !isEventSourced(a));
-  const seedable = new Set(seedableAggs.map((a) => a.name));
-  const aggByName = new Map<string, EnrichedAggregateIR>(seedableAggs.map((a) => [a.name, a]));
+  // (`F2-SEED-EVENTSOURCED`).  It no longer can: `loom.seed-abstract-aggregate`
+  // (src/language/validators/seed.ts) still rejects an abstract-base row at the
+  // AST tier, so a row reaching here is always seedable and the predicate is a
+  // backstop, not a policy.
+  const seederAggs = seederAggregates(ctx);
+  const seedable = new Set(seederAggs.keys());
+  const aggByName = seederAggs;
 
   const fnBlocks: string[] = [];
   const callLines: string[] = [];
@@ -104,8 +108,15 @@ export function emitVanillaSeeds(
   }
   if (callLines.length === 0) return null;
   // `usedAggregates` is the shared derivation of "which aggregates does the
-  // DOMAIN path touch" — the aliases below, and nothing else.
-  const aliases = usedAggregates(datasets, seedable).map(
+  // REPOSITORY path touch" — the aliases below, and nothing else.  An
+  // event-sourced aggregate is excluded here even though it's `seedable`: its
+  // seed rows call the context FACADE (`create_<agg>/1`), never
+  // `<Agg>Repository` directly, so aliasing its repository would be an unused
+  // alias (a `mix compile --warnings-as-errors` failure).
+  const repoBackedAggs = new Set(
+    [...seederAggs].filter(([, s]) => s.persistenceKind !== "event-sourced").map(([n]) => n),
+  );
+  const aliases = usedAggregates(datasets, repoBackedAggs).map(
     (a) => `  alias ${ctxModule}.${upperFirst(a)}Repository`,
   );
 
@@ -162,7 +173,7 @@ export function emitVanillaSeeds(
       `  @doc "Apply every enabled, not-yet-applied dataset.  Safe to call on every boot."`,
       `  def run do`,
       `    Repo.query!(`,
-      `      ${exStr(
+      `      ${elixirString(
         `CREATE TABLE IF NOT EXISTS "__loom_seed" ("dataset" text PRIMARY KEY, "applied_at" timestamptz NOT NULL DEFAULT now())`,
       )}`,
       `    )`,
@@ -186,12 +197,12 @@ export function emitVanillaSeeds(
       ``,
       `  defp already_seeded?(dataset) do`,
       `    %{rows: rows} =`,
-      `      Repo.query!(${exStr(`SELECT 1 FROM "__loom_seed" WHERE "dataset" = $1`)}, [dataset])`,
+      `      Repo.query!(${elixirString(`SELECT 1 FROM "__loom_seed" WHERE "dataset" = $1`)}, [dataset])`,
       `    rows != []`,
       `  end`,
       ``,
       `  defp mark_seeded(dataset) do`,
-      `    Repo.query!(${exStr(`INSERT INTO "__loom_seed" ("dataset") VALUES ($1)`)}, [dataset])`,
+      `    Repo.query!(${elixirString(`INSERT INTO "__loom_seed" ("dataset") VALUES ($1)`)}, [dataset])`,
       `  end`,
       ``,
       `  # A seed row that the domain refuses (a violated invariant) is a BUILD-TIME`,
@@ -214,19 +225,25 @@ function renderDatasetFn(
   dataset: string,
   entries: Entry[],
   ctxModule: string,
-  aggByName: Map<string, EnrichedAggregateIR>,
+  aggByName: Map<string, SeederAggregate>,
   schemaFor: SeedSchemaFor,
 ): string[] {
   const rowLines = entries.map((e) => {
     if (e.raw) {
       const sql = renderSeedRowInsert(e.row.aggregate, e.row.fields, schemaFor(e.row.aggregate));
-      return `    Repo.query!(${exStr(sql)})`;
+      return `    Repo.query!(${elixirString(sql)})`;
     }
     const agg = aggByName.get(e.row.aggregate);
-    const attrs = renderAttrs(e.row, agg, ctxModule);
-    return `    insert!(${JSON.stringify(dataset)}, ${JSON.stringify(e.row.aggregate)}, ${upperFirst(
-      e.row.aggregate,
-    )}Repository.insert(${attrs}))`;
+    const call =
+      agg?.persistenceKind === "event-sourced"
+        ? // Event-sourced (M-T6.52): append the creation event through the
+          // SAME command seam an ordinary create request uses — the context
+          // facade's `create_<agg_snake>/1`, not a repository `insert/1`
+          // (which an event-sourced aggregate's repository does not expose;
+          // its truth is the append-only event stream).
+          `${ctxModule}.create_${snake(e.row.aggregate)}(${renderEsAttrs(e.row, agg, ctxModule)})`
+        : `${upperFirst(e.row.aggregate)}Repository.insert(${renderAttrs(e.row, agg, ctxModule)})`;
+    return `    insert!(${JSON.stringify(dataset)}, ${JSON.stringify(e.row.aggregate)}, ${call})`;
   });
   return [
     `  defp seed_${snake(dataset)}(requested) do`,
@@ -256,21 +273,36 @@ function renderDatasetFn(
 /** `%{field: <expr>, …}` attrs map for the repository `insert/1` changeset.
  *  ATOM keys throughout — `cast/3` requires one key type, and the emitted
  *  `__normalize_keys` passes atoms through untouched. */
-function renderAttrs(
-  row: SeedRowIR,
-  agg: EnrichedAggregateIR | undefined,
-  ctxModule: string,
-): string {
+function renderAttrs(row: SeedRowIR, agg: SeederAggregate | undefined, ctxModule: string): string {
   if (row.fields.length === 0) return "%{}";
   // Emit in the DECLARED create-input order, so the attrs map reads the same
   // way the other backends' create-input literals do regardless of the order
   // the row happened to spell its fields in.
-  const rank = new Map(agg ? forCreateInput(agg.fields).map((f, i) => [f.name, i] as const) : []);
+  const rank = new Map((agg?.createParams ?? []).map((p, i) => [p.name, i] as const));
   const fields = [...row.fields].sort(
     (a, b) =>
       (rank.get(a.name) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b.name) ?? Number.MAX_SAFE_INTEGER),
   );
   const pairs = fields.map((f) => `${snake(f.name)}: ${renderSeedValue(f.value, ctxModule)}`);
+  return `%{${pairs.join(", ")}}`;
+}
+
+/** `%{"paramName" => <expr>, …}` attrs map for an event-sourced aggregate's
+ *  `create_<agg>/1` command runner — STRING keys AS AUTHORED (camelCase, not
+ *  snake_cased or atoms), matching what `renderCommandRunner`
+ *  (eventsourced-emit.ts) reads: `Map.get(attrs, "paramName")` per the
+ *  `create` action's OWN declared params (`agg.createParams` here, which for
+ *  an event-sourced `SeederAggregate` IS that param list — M-T6.52). */
+function renderEsAttrs(row: SeedRowIR, agg: SeederAggregate, ctxModule: string): string {
+  if (row.fields.length === 0) return "%{}";
+  const rank = new Map(agg.createParams.map((p, i) => [p.name, i] as const));
+  const fields = [...row.fields].sort(
+    (a, b) =>
+      (rank.get(a.name) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b.name) ?? Number.MAX_SAFE_INTEGER),
+  );
+  const pairs = fields.map(
+    (f) => `${JSON.stringify(f.name)} => ${renderSeedValue(f.value, ctxModule)}`,
+  );
   return `%{${pairs.join(", ")}}`;
 }
 

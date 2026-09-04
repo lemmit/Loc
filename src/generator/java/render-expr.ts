@@ -1,5 +1,6 @@
 import { unionInstanceName } from "../../ir/stdlib/unions.js";
 import type { EnrichedAggregateIR, ExprIR, TypeIR } from "../../ir/types/loom-ir.js";
+import { walkExprDeep } from "../../ir/util/walk.js";
 import { bodyTypeOf } from "../../util/expr-body-type.js";
 import { intrinsicKey } from "../../util/intrinsics.js";
 import {
@@ -124,92 +125,68 @@ const DEFAULT: JavaRenderContext = { thisName: "this" };
 /** Imports a rendered domain expression needs beyond `java.lang`.
  *  Pure mirror of the triggers in the leaf table below — file emitters
  *  call it over the same expressions they render to build the import
- *  header (the analog of `collectCsExprUsings`). */
+ *  header (the analog of `collectCsExprUsings`).
+ *
+ *  Rides `walkExprDeep` (M-T6.50 class, wave-2 packet 2.3): the recursion
+ *  and the child enumeration are `walk.ts`'s, exhaustively `never`-checked —
+ *  this function only adds side effects per visited kind. The hand-rolled
+ *  switch it replaced skipped a block-body lambda's statements (`x => {
+ *  … }`), so a `decimal`/`money` literal or `.matches(...)` call hidden
+ *  inside one never triggered its import; `walkExprDeep` closes that gap. */
 export function collectJavaExprImports(e: ExprIR, into: Set<string> = new Set()): Set<string> {
-  const visit = (x: ExprIR): void => {
-    collectJavaExprImports(x, into);
-  };
-  switch (e.kind) {
+  walkExprDeep(e, (x) => addJavaExprImport(x, into));
+  return into;
+}
+
+/** The per-kind side effect `collectJavaExprImports` applies at each node —
+ *  factored out (no recursion of its own) so `collectJavaStmtImports` can
+ *  drive it from `walkStmtExprsDeep`'s single traversal instead of visiting
+ *  every sub-expression twice. */
+export function addJavaExprImport(x: ExprIR, into: Set<string>): void {
+  switch (x.kind) {
     case "literal":
-      if (e.lit === "now") into.add("java.time.Instant");
-      if (e.lit === "decimal" || e.lit === "money") into.add("java.math.BigDecimal");
-      return into;
+      if (x.lit === "now") into.add("java.time.Instant");
+      if (x.lit === "decimal" || x.lit === "money") into.add("java.math.BigDecimal");
+      break;
     case "method-call":
-      if (isStringMatches(e)) into.add("java.util.regex.Pattern");
-      visit(e.receiver);
-      for (const a of e.args) visit(a);
-      return into;
-    case "member":
-      visit(e.receiver);
-      return into;
+      if (isStringMatches(x)) into.add("java.util.regex.Pattern");
+      break;
     case "binary": {
-      const lt = unwrapOptional(e.leftType);
+      const lt = unwrapOptional(x.leftType);
       if (isMoneyLike(lt)) {
         into.add("java.math.BigDecimal");
-        if (e.op === "/") into.add("java.math.MathContext");
-      } else if ((e.op === "==" || e.op === "!=") && needsObjectsEquals(lt, e)) {
+        if (x.op === "/") into.add("java.math.MathContext");
+      } else if ((x.op === "==" || x.op === "!=") && needsObjectsEquals(lt, x)) {
         into.add("java.util.Objects");
       }
       // A5 temporal — `datetime - datetime` renders `Duration.between(…)`.
       if (
-        e.op === "-" &&
-        e.resultType?.kind === "primitive" &&
-        e.resultType.name === "duration" &&
+        x.op === "-" &&
+        x.resultType?.kind === "primitive" &&
+        x.resultType.name === "duration" &&
         lt?.kind === "primitive" &&
         lt.name === "datetime"
       ) {
         into.add("java.time.Duration");
       }
-      visit(e.left);
-      visit(e.right);
-      return into;
+      break;
     }
-    case "unary":
-      visit(e.operand);
-      return into;
-    case "paren":
-      visit(e.inner);
-      return into;
-    case "ternary":
-      visit(e.cond);
-      visit(e.then);
-      visit(e.otherwise);
-      return into;
-    case "call":
-      for (const a of e.args) visit(a);
-      return into;
-    case "lambda":
-      if (e.body) visit(e.body);
-      return into;
-    case "new":
     case "object":
-      if (e.kind === "object") into.add("java.util.Map");
-      for (const f of e.fields) visit(f.value);
-      return into;
+      into.add("java.util.Map");
+      break;
     case "convert":
-      if (e.target === "decimal" || e.target === "money") into.add("java.math.BigDecimal");
-      visit(e.value);
-      return into;
-    case "match":
-      for (const arm of e.arms) {
-        visit(arm.cond);
-        visit(arm.value);
-      }
-      if (e.otherwise) visit(e.otherwise);
-      return into;
+      if (x.target === "decimal" || x.target === "money") into.add("java.math.BigDecimal");
+      break;
     case "list":
       into.add("java.util.List");
-      for (const el of e.elements) visit(el);
-      return into;
+      break;
     case "duration":
       // A5 temporal — an absolute duration constructor renders
       // `Duration.ofDays(…)` etc.
       into.add("java.time.Duration");
-      visit(e.amount);
-      return into;
+      break;
     default:
-      // this | id | ref — leaves with no sub-expressions.
-      return into;
+      break;
   }
 }
 
@@ -217,64 +194,18 @@ export function collectJavaExprImports(e: ExprIR, into: Set<string> = new Set())
  *  anywhere in `e` (dynamic-arg matches can't be hoisted, so they're skipped).
  *  The entity / validator emitters use this to hoist each distinct pattern into
  *  a `private static final Pattern` field instead of recompiling per evaluation.
- *  Mirrors the traversal of `collectJavaExprImports`. */
+ *  Rides `walkExprDeep` (wave-2 packet 2.3) — mirrors `collectJavaExprImports`. */
 export function collectJavaRegexLiterals(e: ExprIR, into: Set<string> = new Set()): Set<string> {
-  const visit = (x: ExprIR): void => void collectJavaRegexLiterals(x, into);
-  switch (e.kind) {
-    case "method-call":
-      if (isStringMatches(e) && e.args[0]?.kind === "literal" && e.args[0].lit === "string") {
-        into.add(e.args[0].value);
-      }
-      visit(e.receiver);
-      for (const a of e.args) visit(a);
-      break;
-    case "member":
-      visit(e.receiver);
-      break;
-    case "binary":
-      visit(e.left);
-      visit(e.right);
-      break;
-    case "unary":
-      visit(e.operand);
-      break;
-    case "paren":
-      visit(e.inner);
-      break;
-    case "ternary":
-      visit(e.cond);
-      visit(e.then);
-      visit(e.otherwise);
-      break;
-    case "call":
-      for (const a of e.args) visit(a);
-      break;
-    case "lambda":
-      if (e.body) visit(e.body);
-      break;
-    case "new":
-    case "object":
-      for (const f of e.fields) visit(f.value);
-      break;
-    case "convert":
-      visit(e.value);
-      break;
-    case "match":
-      for (const arm of e.arms) {
-        visit(arm.cond);
-        visit(arm.value);
-      }
-      if (e.otherwise) visit(e.otherwise);
-      break;
-    case "list":
-      for (const el of e.elements) visit(el);
-      break;
-    case "duration":
-      visit(e.amount);
-      break;
-    default:
-      break;
-  }
+  walkExprDeep(e, (x) => {
+    if (
+      x.kind === "method-call" &&
+      isStringMatches(x) &&
+      x.args[0]?.kind === "literal" &&
+      x.args[0].lit === "string"
+    ) {
+      into.add(x.args[0].value);
+    }
+  });
   return into;
 }
 
@@ -359,6 +290,9 @@ function comparesNullLiteral(e: BinaryExpr): boolean {
 }
 
 const JAVA_TARGET: ExprTarget<JavaRenderContext> = {
+  // Java double-quoted string literals don't interpolate — JSON's escaping is
+  // already correct Java syntax (_expr/target.ts).
+  escapeStringLiteral: (value) => JSON.stringify(value),
   literal: renderLiteral,
   // Within the owning class the id is a direct field read; lambda-param
   // receivers (`x.id`) read the package-visible field the same way.

@@ -1,6 +1,7 @@
+import { numericEncode } from "../../../generator/_numeric/target.js";
 import { renderHonoLogCall } from "../../../generator/_obs/render-hono.js";
-import { MONEY_WIRE_SCALE } from "../../../generator/money-scale.js";
 import { whereToMikroFilter } from "../../../generator/typescript/emit/mikroorm.js";
+import { TS_NUMERIC } from "../../../generator/typescript/numeric-codec.js";
 import { renderTsExpr } from "../../../generator/typescript/render-expr.js";
 import {
   allContextFilterEntries,
@@ -918,8 +919,8 @@ function coerceAggregate(sel: AggregateSelect, expr: string): string {
   // `Decimal` (not `Number`) because money can exceed float64's exact range.
   if (c.isMoney) {
     return c.optional
-      ? `${expr} == null ? null : new Decimal(${expr}).toFixed(${MONEY_WIRE_SCALE})`
-      : `new Decimal(${expr} ?? 0).toFixed(${MONEY_WIRE_SCALE})`;
+      ? `${expr} == null ? null : ${numericEncode(TS_NUMERIC, "money", "projection-read", expr)}`
+      : numericEncode(TS_NUMERIC, "money", "projection-read", `${expr} ?? 0`);
   }
   if (c.optional) return `${expr} == null ? null : ${c.asString ? "String" : "Number"}(${expr})`;
   return c.asString ? `String(${expr} ?? "0")` : `Number(${expr} ?? 0)`;
@@ -1044,11 +1045,13 @@ function groupKeyWireExpr(inner: TypeIR, expr: string): string {
   if (inner.kind !== "primitive") return expr;
   switch (inner.name) {
     case "int":
+      return numericEncode(TS_NUMERIC, "int", "projection-read", expr);
     case "long":
+      return numericEncode(TS_NUMERIC, "long", "projection-read", expr);
     case "decimal":
       // `numeric` (decimal) comes back as a string; int/long are already
       // numbers, and `Number` keeps the three shapes on one rule.
-      return `Number(${expr})`;
+      return numericEncode(TS_NUMERIC, "decimal", "projection-read", expr);
     case "money":
       // Wire-carried as a string (`zodForRow`) at the FIXED money scale — the
       // same RS-12 pin the aggregate arm applies (#2549).  A grouping KEY reads
@@ -1056,7 +1059,7 @@ function groupKeyWireExpr(inner: TypeIR, expr: string): string {
       // shipped whatever scale the row was written at; java and .NET already
       // routed their key through the money renderer, so this closes the last
       // three.
-      return `new Decimal(${expr}).toFixed(${MONEY_WIRE_SCALE})`;
+      return numericEncode(TS_NUMERIC, "money", "projection-read", expr);
     case "datetime":
       // Same canonical trim the aggregate wire applies (RS-4) — a projection
       // row and an aggregate read must spell the same instant identically.

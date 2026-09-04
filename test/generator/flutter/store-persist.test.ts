@@ -97,7 +97,10 @@ describe("flutter `persist: local` — shared_preferences, JS-compatible key + b
     const out = await gen(LOCAL);
     expect(out.get("app/pubspec.yaml")!).toContain("shared_preferences: ^2.3.2");
     const main = out.get("app/lib/main.dart")!;
-    expect(main).toContain("Future<void> main() async {");
+    // M-T1.8 (flutter arm): the persist-boot work runs inside the
+    // `runZonedGuarded` async closure, so `main()` itself stays sync.
+    expect(main).toContain("void main() {");
+    expect(main).toContain("runZonedGuarded(() async {");
     expect(main).toContain("WidgetsFlutterBinding.ensureInitialized();");
     expect(main).toContain("await LoomStorePersist.init();");
     // The runtime sets the EMPTY prefix, so the web key is the bare
