@@ -218,8 +218,15 @@ export function checkMigrationBaseline(
         `migration files for module '${m.module}' are inconsistent with the snapshot ` +
           `(.loom/snapshots/${m.module}.snapshot.json): migration file(s) for version(s) ` +
           `${missing.join(", ")} are recorded in the snapshot history but absent from the output ` +
-          `tree. The snapshot and the generated migrations have drifted — restore both from ` +
-          `version control together, or re-baseline deliberately.`,
+          `tree. The snapshot and the generated migrations have drifted (deleting part of the ` +
+          `output tree by hand does this). Recover either way:\n` +
+          `  - keep the history: restore the missing migration file(s) and the snapshot from ` +
+          `version control together, then re-run; or\n` +
+          `  - start the history over: delete .loom/snapshots/${m.module}.snapshot.json and ` +
+          `re-run with --allow-rebaseline, which re-emits a single "Initial" migration for the ` +
+          `module's current schema and discards the recorded history. Only safe against a ` +
+          `database you can also recreate — an existing database still has the old migrations ` +
+          `applied.`,
       );
     }
 

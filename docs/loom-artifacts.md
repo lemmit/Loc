@@ -14,6 +14,7 @@ consumption.
 ├── <deployable-2>/
 ├── ...
 └── .loom/
+    ├── manifest.json            # what this run emitted — the next run prunes against it
     ├── wire-spec.json
     ├── messages.en.json
     ├── domain.mmd
@@ -41,6 +42,12 @@ None of the files in `.loom/` ship to runtime; they are review and
 tooling output.  Check them into the project alongside the generated
 code if you want pull-request-time diff visibility on wire contracts,
 traceability coverage, or migration baselines.
+
+## Regeneration bookkeeping
+
+| File | Producer | What it is |
+|---|---|---|
+| `manifest.json` | `src/system/manifest.ts`, written by the CLI write phase (`src/cli/main.ts`, phase ⑩) | Every path this run emitted, sorted, with a `scaffoldOnce` flag on the files the user takes ownership of.  **This is how regeneration deletes.**  On the next run, a path the previous manifest lists and the current run does not emit is stale and is removed — so renaming an `operation` or a `page` no longer leaves a dead `CommentHandler.cs` / `board.tsx` behind to break the build.  The prune is deliberately narrow: a file with no manifest entry (every hand-written file) is structurally unreachable, and `.loomignore`d paths, scaffold-once files, migration files, and `.loom/snapshots/` are all spared.  An absent or unreadable manifest degrades to "prune nothing".  Check it in — that is what makes the prune work on a teammate's clone. |
 
 ## Wire contract
 
