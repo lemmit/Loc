@@ -596,6 +596,24 @@ system S {
   // Needs the DEPLOYMENT side, and specifically a JAVA one: the same field is
   // legal on every other backend (`get case()` / `def case` / `field :case` /
   // `@case`), so a declaration-only system — or a node one — raises nothing.
+  // F11: an operation whose C# method name hides the sibling entity part the
+  // same class body constructs (`Comment._Create(...)` -> CS0119).
+  "loom.dotnet-name-collision": `
+system P {
+  subdomain D { context Orders {
+    aggregate Order with crudish {
+      note: string
+      contains lines: Line[]
+      operation line(sku: string) { lines += Line { sku: sku } }
+      entity Line { sku: string }
+    }
+    repository Orders for Order { }
+  } }
+  api A from D
+  storage pg { type: postgres }
+  resource st { for: Orders, kind: state, use: pg }
+  deployable d { platform: dotnet, contexts: [Orders], dataSources: [st], serves: A, port: 4000 }
+}`,
   "loom.java-reserved-identifier-unsupported": `
 system P {
   subdomain D { context Orders {

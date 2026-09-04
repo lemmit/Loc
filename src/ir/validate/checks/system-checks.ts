@@ -12,7 +12,7 @@ import {
 } from "../../../language/validators/data/platform-rules.js";
 import { descriptorFor } from "../../../platform/metadata.js";
 import { FLUTTER_DEFERRED_BUILDER_NAMES } from "../../../util/flutter-deferred-primitives.js";
-import { isJavaKeyword, lowerFirst, plural, snake } from "../../../util/naming.js";
+import { isJavaKeyword, lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import {
   capabilitiesFor,
   configSchemaFor,
@@ -24,12 +24,15 @@ import type {
   BoundedContextIR,
   ConfigEntryIR,
   ConfigValueIR,
+  ContainmentIR,
   DataSourceIR,
   DeployableIR,
+  DerivedIR,
   EnrichedAggregateIR,
   EnrichedLoomModel,
   EnrichedSystemIR,
   ExprIR,
+  FieldIR,
   FunctionIR,
   OperationIR,
   Platform,
@@ -2614,6 +2617,169 @@ export function validateJavaReservedIdentifiers(sys: SystemIR, diags: LoomDiagno
           source: `${sys.name}/${ctxName}/${owner}`,
           code: "loom.java-reserved-identifier-unsupported",
         });
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// C# member-vs-type name collisions on the dotnet backend (F11).
+//
+// THE DEFECT.  `src/generator/dotnet/emit/entity.ts` puts every declared
+// member of an aggregate into a bare C# member position on the aggregate
+// class — `upperFirst(name)` for a field/derived/containment property, a
+// function, or an operation method — while the SAME class body references its
+// sibling TYPES by simple name (`Comment._Create(...)`, `CommentId.New()`,
+// `new IssueOpened { … }`).  C# resolves a simple name in EXPRESSION position
+// against the enclosing class's members FIRST, so a member whose C# name
+// equals one of those type names hides the type and the reference stops
+// compiling:
+//
+//   aggregate Issue { contains comments: Comment[]
+//                     operation comment(author: string, body: string) { … }
+//                     entity Comment { … } }
+//
+//   public void Comment(string author, string body) {
+//       _comments.Add(Comment._Create(…));   // CS0119: 'Issue.Comment(string,
+//   }                                        // string)' is a method, which is
+//                                            // not valid in the given context
+//
+// A field-shaped collision fails the same way with a different code — a
+// `comment: string` beside `entity Comment` makes `Comment._Create` read as
+// `string._Create` (CS1061).  Both were reproduced under
+// `dotnet build /warnaserror`; neither produces any diagnostic from codegen,
+// so today the failure surfaces only in a compile tier (or, for a user, as a
+// build error in generated code they did not write).
+//
+// WHY THIS REFUSES INSTEAD OF RENAMING.  The .NET emitter's only naming
+// escape is `escapeCsharpIdent` — `@case`, a VERBATIM IDENTIFIER that is
+// lexically the same identifier, so it renames nothing.  There is no
+// member-renaming precedent to follow, and inventing one would move more
+// than the C# member: an operation's name is also its route segment, its
+// `<Op>Command` / `<Op>Handler` type names and its wire path, so a silent
+// `comment` → `AddComment` would move the HTTP surface on dotnet alone.  A
+// rename that changes the wire to fix a compile error is the same trade
+// `loom.java-reserved-identifier-unsupported` rejected above.
+//
+// WHERE THE LINE IS, AND WHY IT IS NOT "ANY EQUAL NAME".  C# deliberately
+// permits the "Color Color" case (§12.8.7.2): a FIELD or PROPERTY whose own
+// type is the type it shadows still resolves both ways, so `public Kind Kind`
+// beside `enum Kind` and `public Money Money` beside a `Money` value object
+// compile — probed, not assumed.  Firing on those would refuse models that
+// build today, so a property-shaped member is exempt exactly when its emitted
+// C# type IS the colliding type.  A method never gets that rescue (the rule
+// covers fields/properties only), and a COLLECTION property does not either:
+// `IReadOnlyList<Comment> Comment` has type `IReadOnlyList<Comment>`, not
+// `Comment`.
+//
+// SCOPED TO THE AXIS THE LIMITATION LIVES ON: it fires only for a context
+// hosted by a `platform: dotnet` deployable.  The same model on node / python
+// / elixir / java is untouched — none of them scope member names against type
+// names this way.
+// ---------------------------------------------------------------------------
+
+/** Simple C# type name the dotnet emitter renders for `t`, or null when it
+ *  is not a user-declared type (a primitive, a collection wrapper, …).  Used
+ *  ONLY for the "Color Color" exemption, so a null answer just means "no
+ *  exemption" — it never widens what the gate refuses. */
+function csDeclaredTypeName(t: TypeIR): string | null {
+  if (t.kind === "optional") return csDeclaredTypeName(t.inner);
+  // A collection property's C# type is `IReadOnlyList<T>`, not `T`, so the
+  // Color-Color rule does not apply to it.
+  if (t.kind === "array") return null;
+  if (t.kind === "id") return `${t.targetName}Id`;
+  if (t.kind === "enum" || t.kind === "valueobject" || t.kind === "entity") return t.name;
+  return null;
+}
+
+/** Every C# type name an aggregate class body in `ctx` can reach by SIMPLE
+ *  name: its own part classes (same namespace) plus everything reachable
+ *  through the four `using` directives every emitted aggregate file carries
+ *  (`Api.Domain.Ids` / `.Events` / `.ValueObjects` / `.Enums`).  Other
+ *  aggregates and THEIR parts are deliberately absent — each aggregate gets
+ *  its own `Api.Domain.<Plural>` namespace, which this file does not import,
+ *  so a name equal to a foreign part is not a collision. */
+function csVisibleTypeNames(ctx: BoundedContextIR, agg: AggregateIR): Set<string> {
+  const names = new Set<string>([agg.name]);
+  for (const p of agg.parts) names.add(p.name);
+  for (const e of ctx.enums) names.add(e.name);
+  for (const v of ctx.valueObjects) names.add(v.name);
+  for (const ev of ctx.events) names.add(ev.name);
+  // `Api.Domain.Ids` holds an id class per aggregate AND per part.
+  for (const a of ctx.aggregates) {
+    names.add(`${a.name}Id`);
+    for (const p of a.parts) names.add(`${p.name}Id`);
+  }
+  return names;
+}
+
+/** Every `.ddd`-declared member of `agg` (and of its parts) the dotnet
+ *  emitter puts in a bare C# MEMBER position, as
+ *  `[what, owner, name, exemptType]`.  `exemptType` is the type name that
+ *  rescues the member under the Color-Color rule, or null for a method-shaped
+ *  member, which never gets one. */
+function csMemberPositions(agg: AggregateIR): [string, string, string, string | null][] {
+  const out: [string, string, string, string | null][] = [];
+  const holder = (
+    owner: string,
+    h: { fields: FieldIR[]; contains: ContainmentIR[]; derived: DerivedIR[] },
+  ): void => {
+    for (const f of h.fields) out.push(["field", owner, f.name, csDeclaredTypeName(f.type)]);
+    for (const c of h.contains)
+      out.push(["containment", owner, c.name, c.collection ? null : c.partName]);
+    for (const d of h.derived)
+      out.push(["derived field", owner, d.name, csDeclaredTypeName(d.type)]);
+  };
+  holder(agg.name, agg);
+  for (const fn of agg.functions) out.push(["function", agg.name, fn.name, null]);
+  // The canonical `create` / `destroy` never emit a `.ddd` name as a method —
+  // they are `Create` / the repository's `DeleteAsync` — so only NAMED
+  // operations are at risk.
+  for (const op of agg.operations)
+    if (!op.canonical) out.push(["operation", agg.name, op.name, null]);
+  for (const part of agg.parts) {
+    holder(`${agg.name}.${part.name}`, part);
+    for (const fn of part.functions)
+      out.push(["function", `${agg.name}.${part.name}`, fn.name, null]);
+  }
+  return out;
+}
+
+export function validateDotnetNameCollisions(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const ctxByName = new Map<string, BoundedContextIR>();
+  for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
+  // One diagnostic per offending NAME, not per hosting deployable — two dotnet
+  // deployables serving the same context describe one defect, not two.
+  const seen = new Set<string>();
+  for (const dep of sys.deployables) {
+    if (platformFamily(dep.platform) !== "dotnet") continue;
+    for (const ctxName of dep.contextNames) {
+      const ctx = ctxByName.get(ctxName);
+      if (!ctx) continue;
+      for (const agg of ctx.aggregates) {
+        const types = csVisibleTypeNames(ctx, agg);
+        for (const [what, owner, name, exemptType] of csMemberPositions(agg)) {
+          const member = upperFirst(name);
+          if (!types.has(member)) continue;
+          // "Color Color": a property whose own C# type IS the shadowed type
+          // still resolves both ways, so it is not a collision.
+          if (exemptType === member) continue;
+          const key = `${ctxName}/${owner}/${what}/${name}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          diags.push({
+            severity: "error",
+            message: diagMessage("loom.dotnet-name-collision", {
+              what,
+              owner,
+              name,
+              member,
+              ctxName,
+            }),
+            source: `${sys.name}/${ctxName}/${owner}`,
+            code: "loom.dotnet-name-collision",
+          });
+        }
       }
     }
   }

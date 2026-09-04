@@ -1,0 +1,78 @@
+// C# member-vs-type name collisions — the LEGAL NEIGHBOURS (field-test F11).
+//
+// `loom.dotnet-name-collision` refuses an aggregate member whose C# name hides
+// a type the same class body reaches by simple name: `operation comment(…)`
+// beside `entity Comment` emits `public void Comment(string, string)` and the
+// `Comment._Create(…)` inside it stops compiling (CS0119); a `comment: string`
+// field beside the same part fails as CS1061.  Both were reproduced under
+// `dotnet build /warnaserror` before that gate was written.
+//
+// THIS FIXTURE IS THE OTHER SIDE OF THAT LINE.  Every shape below is one the
+// gate must NOT refuse, and the only way to know the line is drawn where the
+// C# COMPILER draws it is to compile them:
+//
+//   * `operation addComment(…)` — the renamed form the diagnostic recommends,
+//     constructing `Comment { … }` in its body (the CS0119 site, now clear).
+//   * `kind: Kind` beside `enum Kind`, and `money: Money` beside the value
+//     object — C#'s "Color Color" rule (§12.8.7.2) lets a field/property whose
+//     own type is the type it shadows resolve both ways, so `public Kind Kind`
+//     and `public Money Money` are legal.  The operations below then USE the
+//     shadowed names in expression position (`Kind.Chore`, `new Money(…)`),
+//     which is exactly where the rule has to hold.
+//   * `contains comments: Comment[]` — the plural containment that emits
+//     `IReadOnlyList<Comment> Comments`, adjacent to but distinct from the
+//     singular collision the gate does refuse.
+//
+// Bare `context {…}` (not a `system {…}` wrapper) so legacy
+// `ddd generate dotnet` emits a single buildable project, matching the other
+// fixtures in this suite.
+context Tracking {
+
+  enum Kind { Bug, Feature, Chore }
+
+  valueobject Money {
+    amount: int
+    currency: string
+  }
+
+  aggregate Issue {
+    title: string
+    kind: Kind
+    money: Money
+    contains comments: Comment[]
+
+    derived commentCount: int = comments.count
+
+    function isChore(): bool = kind == Chore
+
+    // The shape the diagnostic points at: the renamed operation, whose body
+    // constructs the part by simple name.  With the member called `Comment`
+    // this line is CS0119.
+    operation addComment(author: string, body: string) {
+      comments += Comment { author: author, body: body }
+    }
+
+    // `Kind` and `Money` are used as TYPES here and as simple-name EXPRESSIONS
+    // below — the position where a hidden type would surface as an error.
+    operation reclassify(k: Kind) {
+      kind := k
+    }
+
+    operation makeChore() {
+      kind := Chore
+    }
+
+    operation reprice(amount: int, currency: string) {
+      money := Money { amount: amount, currency: currency }
+    }
+
+    entity Comment {
+      author: string
+      body: string
+    }
+  }
+
+  repository Issues for Issue {
+    find byKind(k: Kind): Issue[] where this.kind == k
+  }
+}

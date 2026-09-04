@@ -83,6 +83,15 @@ describe.skipIf(!ENABLED)(
       // BoxId), matching the entity State.ParentId so the ToSnapshot/FromSnapshot
       // field copies compile (regresses the nested-ParentId mistyping).
       "test/e2e/fixtures/dotnet-build/document-nested-parts.ddd",
+      // The LEGAL NEIGHBOURS of the `loom.dotnet-name-collision` gate (F11):
+      // `operation addComment` beside `entity Comment`, plus the two C#
+      // "Color Color" shapes (`kind: Kind` beside `enum Kind`, `money: Money`
+      // beside the value object) that the gate must NOT refuse — used as
+      // simple-name EXPRESSIONS in operation bodies, which is where a hidden
+      // type surfaces as CS0119/CS1061.  Seeding the collision back in
+      // (`addComment` -> `comment`) makes this cell fail with
+      // `CS0119: 'Issue.Comment(string, string)' is a method` — verified.
+      "test/e2e/fixtures/dotnet-build/name-collision-neighbours.ddd",
     ])("%s — `ddd generate dotnet` output restores + builds", (example) => {
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-dotnet-"));
       try {

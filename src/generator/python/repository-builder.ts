@@ -1209,6 +1209,16 @@ function saveMethod(
   out.push("        root = {");
   out.push(...rootPairs.map(([k, v]) => `            "${k}": ${v},`));
   out.push("        }");
+  // TPH: the conflict branch of the upsert must only ever rewrite a row of
+  // THIS concrete.  Every read on the shared table is `kind`-scoped; the write
+  // was not, so `car_repo.save(x)` on a truck's id conflicted on the id, took
+  // the DO UPDATE branch and flipped that row's `kind` to "Car" (review-B D1,
+  // the python twin of the hono defect).  The `index_elements` target stays the
+  // bare primary key — the conflict IS the id, across the whole shared table —
+  // and the guard rides the DO UPDATE's `where`, so a foreign-subtype id
+  // matches nothing and raises the same ConcurrencyError a lost race raises.
+  // `null` for a non-TPH aggregate ⇒ byte-identical emission.
+  const kindGuard = kind ? `${root}.kind == ${JSON.stringify(kind)}` : null;
   if (versioned) {
     // Guarded upsert (optimistic concurrency): on an INSERT-conflict, only
     // overwrite when the stored `version` still equals the caller's expected
@@ -1229,7 +1239,11 @@ function saveMethod(
     out.push("            .on_conflict_do_update(");
     out.push('                index_elements=["id"],');
     out.push(`                set_={${setEntries.join(", ")}},`);
-    out.push(`                where=${root}.version == _expected,`);
+    out.push(
+      kindGuard
+        ? `                where=and_(${root}.version == _expected, ${kindGuard}),`
+        : `                where=${root}.version == _expected,`,
+    );
     out.push("            )");
     out.push(`            .returning(${root}.id)`);
     out.push("        )");
@@ -1240,6 +1254,12 @@ function saveMethod(
   } else {
     out.push("        await self._session.execute(");
     out.push(
+      // NOTE: this unversioned arm is UNREACHABLE today and deliberately
+      // carries no `kind` guard — `applyDefaultVersioning` (macros/expander.ts)
+      // tags every non-eventLog aggregate `versioned`, and an eventLog
+      // aggregate never reaches this builder.  Were that ever narrowed, this
+      // line needs the same `where=` guard the branch above carries or the TPH
+      // corruption returns; left unwritten rather than shipped untested.
       `            insert(${root}).values(**root).on_conflict_do_update(index_elements=["id"], set_=root)`,
     );
     out.push("        )");
@@ -1513,7 +1533,16 @@ function deleteMethod(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): 
     );
   }
   const root = rowClassName(tableOwnerName(agg, ctx.aggregates));
-  out.push(`        await self._session.execute(delete(${root}).where(${root}.id == id))`);
+  // TPH: a concrete's delete targets the hierarchy's SHARED table, so it must
+  // carry the same `kind` predicate every read on that table carries — without
+  // it `car_repo.delete(id)` deletes a Truck row outright, and such ids do
+  // reach it (the polymorphic reader hands each concrete repo a base id).
+  // `null` for a non-TPH aggregate ⇒ byte-identical emission.
+  const kind = discriminatorValue(agg, ctx.aggregates);
+  const rootPred = kind
+    ? `and_(${root}.id == id, ${root}.kind == ${JSON.stringify(kind)})`
+    : `${root}.id == id`;
+  out.push(`        await self._session.execute(delete(${root}).where(${rootPred}))`);
   out.push("        await self._session.flush()");
   return out.join("\n");
 }

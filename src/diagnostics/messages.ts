@@ -1812,6 +1812,20 @@ export const DIAGNOSTIC_MESSAGES = {
     `verbatim-identifier escape (C#'s '@${p.name}'), and renaming it to '${p.name}_' would ` +
     `rename the JSON property on java alone. Rename the declaration, or host this context on a ` +
     `node / dotnet / python / elixir deployable.`,
+  "loom.dotnet-name-collision": (p: {
+    what: unknown;
+    owner: unknown;
+    name: unknown;
+    member: unknown;
+    ctxName: unknown;
+  }) =>
+    `'${p.ctxName}.${p.owner}' declares ${p.what} '${p.name}', which the dotnet backend emits ` +
+    `as the C# member '${p.member}' on a class that also references the type '${p.member}' by ` +
+    `simple name. C# resolves a simple name in expression position against the enclosing ` +
+    `class's members first, so the member hides the type and the generated C# stops compiling ` +
+    `(CS0119 for a method, CS1061 for a property). Rename the declaration to something other ` +
+    `than '${p.member}' (an operation reads well as 'add${p.member}'), or host this context on ` +
+    `a node / python / elixir / java deployable.`,
   "loom.context-filter-unsupported#no-auth-user": (p: {
     name: unknown;
     platform: unknown;

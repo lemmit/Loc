@@ -21,6 +21,7 @@ import {
   findByIdMethod,
   findManyByIdsMethod,
   findQueryMethod,
+  kindPredicate,
   lowerToDrizzle,
   nonPrincipalContextFilterEntries,
   nonPrincipalContextFilters,
@@ -28,6 +29,7 @@ import {
   renderCriterionFn,
   repoTableName,
   runMethod,
+  withKind,
 } from "./repository-find-builder.js";
 import { writeScopeGuardLines } from "./repository-find-predicate.js";
 import { collectEnums, collectValueObjects } from "./repository-imports-builder.js";
@@ -339,9 +341,16 @@ function deleteMethod(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): 
   // delete targets the owner's table (`tableOwnerName`) — not the subtype's
   // own pluralised name, which has no `schema` export (matches save/find).
   const tableName = lowerFirst(plural(tableOwnerName(agg, ctx.aggregates)));
+  // …and it must carry the same `kind` predicate every READ on that shared
+  // table carries.  Without it a concrete's delete is `WHERE id = …` over the
+  // WHOLE hierarchy's table, so `carRepo.delete(id)` happily deletes a Truck
+  // row — and such ids DO reach it: the polymorphic reader hands each concrete
+  // repo a base id cast to that concrete's branded id, laundering the brand.
+  // Non-TPH aggregates get `null` here, so their emission is byte-identical.
+  const filter = withKind(`eq(schema.${tableName}.id, id)`, kindPredicate(agg, ctx, tableName));
   return lines(
     `  async delete(id: Ids.${agg.name}Id): Promise<void> {`,
-    `    await this.db.delete(schema.${tableName}).where(eq(schema.${tableName}.id, id));`,
+    `    await this.db.delete(schema.${tableName}).where(${filter});`,
     `  }`,
   );
 }
