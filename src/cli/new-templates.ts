@@ -274,3 +274,52 @@ export function renderLoomignore(): string {
 # drizzle.config.ts
 `;
 }
+
+/**
+ * MIT grant written at the root of a project `ddd new` scaffolds.  Loom
+ * itself is FSL-1.1-Apache-2.0, but generated OUTPUT is licensed to the
+ * user under MIT so that production users can ship it without inheriting
+ * FSL terms.  The companion FAQ lives at `docs/license-faq.md` in the Loom
+ * repo.
+ *
+ * Scaffold-time only (M-FT.13, finding G9).  `ddd generate` used to inject
+ * this into the output tree on EVERY run, which silently dropped a LICENSE
+ * into a directory the user may already have licensed differently — and
+ * re-created it after every delete.  `ddd new` owns the project's identity
+ * files (main.ddd / README.md / .loomignore), so the licence belongs with
+ * them; `ddd generate` writes only build output.  A user generating into a
+ * tree they did not scaffold keeps whatever LICENSE they already have.
+ */
+export const GENERATED_OUTPUT_LICENSE = `MIT License
+
+Copyright (c) ${new Date().getFullYear()} the authors of this generated project.
+
+This project was scaffolded by Loom (https://github.com/lemmit/loc), a
+source-available DDD code generator licensed under FSL-1.1-Apache-2.0.
+The generator's license does NOT extend to this output: every file in
+this directory is licensed to you under the MIT License below.  Any
+runtime helper snippets that Loom embedded verbatim into this project
+are dual-licensed MIT OR Apache-2.0 in this context.  See
+https://github.com/lemmit/loc/blob/main/docs/license-faq.md for the
+full posture.
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT.  IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+`;

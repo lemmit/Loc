@@ -17,6 +17,12 @@ const parse = parseHelper<Model>(services.Ddd);
 
 async function filesFor(src: string): Promise<Map<string, string>> {
   const doc = await parse(src, { validation: false });
+  // `parseHelper` returns a PARTIAL ast on a syntax error instead of
+  // throwing, so a fixture typo would silently move these assertions onto a
+  // half-read model.  This fixture used to say `ui web { for: OrdersApi }`,
+  // which is not a `ui` member at all — every assertion below was judging
+  // output composed from a broken parse (`experience_gathered.md` §59).
+  expect(doc.parseResult.parserErrors.map((e) => e.message)).toEqual([]);
   return generateSystems(doc.parseResult.value, { emitKubernetes: true }).files;
 }
 
@@ -33,15 +39,16 @@ system Shop {
   storage primary { type: postgres }
   resource st { for: Orders, kind: state, use: primary }
   deployable api { platform: node contexts: [Orders] serves: OrdersApi dataSources: [st] port: 8080 }
-  ui web { framework: react  api Orders: OrdersApi }
-  deployable webApp { platform: react ui: web targets: api port: 3000 }
+  ui web { framework: react  api ordersApi: OrdersApi }
+  deployable webApp { platform: react ui: web { ordersApi: api } targets: api port: 3000 }
 }`;
 
 describe("Prometheus collector wiring (M-T7.1)", () => {
   it("adds a prometheus service + scrape config for backends, excludes the frontend", async () => {
     const files = await filesFor(SYSTEM);
-    const compose = files.get("docker-compose.yml")!;
-    // The collector service.
+    // The collector service — in the OPT-IN overlay (M-FT.13), not the base
+    // compose file, which stays lean for a plain `docker compose up`.
+    const compose = files.get("docker-compose.obs.yml")!;
     expect(compose).toContain("prometheus:");
     expect(compose).toContain("image: prom/prometheus:");
     expect(compose).toContain("/etc/prometheus/prometheus.yml:ro");

@@ -1,0 +1,28 @@
+# Auto-generated.  Observability overlay (opt-in):
+#   docker compose -f docker-compose.yml -f docker-compose.obs.yml up
+#
+# Prometheus UI: http://localhost:9090
+# Jaeger UI:     http://localhost:16686
+services:
+  api:
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://jaeger:4318"
+      OTEL_SERVICE_NAME: "api"
+  catalog_web:
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://jaeger:4318"
+      OTEL_SERVICE_NAME: "catalog_web"
+  catalog_api:
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://jaeger:4318"
+      OTEL_SERVICE_NAME: "catalog_api"
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+  jaeger:
+    image: jaegertracing/all-in-one:1.62.0
+    ports:
+      - "16686:16686"

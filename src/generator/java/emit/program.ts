@@ -16,6 +16,11 @@
 // ---------------------------------------------------------------------------
 
 import { lines } from "../../../util/code-builder.js";
+import {
+  DEBIAN_CERTS_LINES,
+  NODE_CERTS_LINES,
+  NPM_INSTALL_LINES,
+} from "../../_docker/node-stage.js";
 import { javaLogEvent } from "../../_obs/render-java.js";
 
 /** Spring Boot release the generated projects build against.  Bumping it
@@ -462,32 +467,37 @@ export function renderDockerfile(
   // Fullstack: a build stage compiles the embedded SPA (ClientApp/) and the
   // runtime image serves the bundle from /app/ui on the same origin as the
   // /api/* controllers (SpaWebConfig).  Two build shapes:
-  //  - "vite" (react / vue / svelte / angular): a node-only `npm ci … && npm
-  //    run build` stage.
+  //  - "vite" (react / vue / svelte / angular): a node-only `npm install &&
+  //    npm run build` stage.
   //  - "feliz" (F#/Fable): the bundle is compiled by `dotnet fable` + `vite
   //    build`, so the stage needs a .NET SDK image with Node layered on and a
   //    `dotnet tool restore` for the fable tool (mirrors the standalone feliz
-  //    Dockerfile).  There is no lockfile, so `npm install` (not `npm ci`).
+  //    Dockerfile).
+  //
+  // Both open with the proxy-CA block (M-FT.13): the install below is the
+  // stage's first network call, so certs have to be trusted before it.
   const spaStage = !options.embeddedSpa
     ? []
     : options.spaBuildKind === "feliz"
       ? [
           `FROM mcr.microsoft.com/dotnet/sdk:8.0 AS spa-build`,
           `WORKDIR /spa`,
+          ...DEBIAN_CERTS_LINES,
           `RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \\`,
           `  && apt-get install -y --no-install-recommends nodejs \\`,
           `  && rm -rf /var/lib/apt/lists/*`,
           `COPY ClientApp/ ./`,
           `RUN dotnet tool restore`,
-          `RUN npm install`,
+          ...NPM_INSTALL_LINES,
           `RUN npm run build`,
           ``,
         ]
       : [
           `FROM node:22-alpine AS spa-build`,
           `WORKDIR /spa`,
-          `COPY ClientApp/package.json ClientApp/package-lock.json* ./`,
-          `RUN npm ci --prefer-offline --no-audit --no-fund || npm install`,
+          ...NODE_CERTS_LINES,
+          `COPY ClientApp/package.json ./`,
+          ...NPM_INSTALL_LINES,
           `COPY ClientApp/ ./`,
           `RUN npm run build`,
           ``,

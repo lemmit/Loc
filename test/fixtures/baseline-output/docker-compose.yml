@@ -1,4 +1,7 @@
 # Auto-generated.
+#
+# Metrics + traces are opt-in — add the observability overlay:
+#   docker compose -f docker-compose.yml -f docker-compose.obs.yml up
 services:
   db:
     image: postgres:18-alpine
@@ -25,8 +28,6 @@ services:
       ConnectionStrings__Default: "Host=db;Port=5432;Database=api;Username=postgres;Password=postgres"
       LOG_LEVEL: "info"
       CORS_ORIGIN: "http://localhost:3001"
-      OTEL_EXPORTER_OTLP_ENDPOINT: "http://jaeger:4318"
-      OTEL_SERVICE_NAME: "api"
     ports:
       - "8080:8080"
     healthcheck:
@@ -44,8 +45,6 @@ services:
       DATABASE_URL: "postgres://postgres:postgres@db:5432/catalog_web"
       LOG_LEVEL: "info"
       CORS_ORIGIN: "http://localhost:3001"
-      OTEL_EXPORTER_OTLP_ENDPOINT: "http://jaeger:4318"
-      OTEL_SERVICE_NAME: "catalog_web"
     ports:
       - "3000:3000"
     healthcheck:
@@ -63,8 +62,6 @@ services:
       ConnectionStrings__Default: "Host=db;Port=5432;Database=catalog_api;Username=postgres;Password=postgres"
       LOG_LEVEL: "info"
       CORS_ORIGIN: "http://localhost:3001"
-      OTEL_EXPORTER_OTLP_ENDPOINT: "http://jaeger:4318"
-      OTEL_SERVICE_NAME: "catalog_api"
     ports:
       - "8081:8080"
     healthcheck:
@@ -85,18 +82,6 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
-
-  prometheus:
-    image: prom/prometheus:v3.1.0
-    volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-    ports:
-      - "9090:9090"
-
-  jaeger:
-    image: jaegertracing/all-in-one:1.62.0
-    ports:
-      - "16686:16686"
 
 volumes:
   pgdata: {}

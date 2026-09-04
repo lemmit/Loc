@@ -34,6 +34,7 @@ import { resolveErrorStatus } from "../../util/error-defaults.js";
 import { plural, snake } from "../../util/naming.js";
 import { devClaimFields } from "../_auth/dev-claims.js";
 import { brokerChannelBindings } from "../_channels/bindings.js";
+import { DEBIAN_CERTS_BLOCK, NODE_CERTS_BLOCK, NPM_INSTALL_BLOCK } from "../_docker/node-stage.js";
 import { embedSpaInto } from "../_frontend/embedded-spa.js";
 import { collectWireValidationMessages } from "../_i18n/validation-catalog.js";
 import { unionJsonSchema } from "../_payload/union-wire.js";
@@ -1428,18 +1429,16 @@ function renderPyFullstackDockerfile(
     spaBuildKind === "feliz"
       ? `FROM mcr.microsoft.com/dotnet/sdk:8.0 AS spa-build
 WORKDIR /spa
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \\
+${DEBIAN_CERTS_BLOCK}RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \\
   && apt-get install -y --no-install-recommends nodejs \\
   && rm -rf /var/lib/apt/lists/*
 COPY ClientApp/ ./
 RUN dotnet tool restore
-RUN npm install
-RUN npm run build`
+${NPM_INSTALL_BLOCK}RUN npm run build`
       : `FROM node:24-alpine AS spa-build
 WORKDIR /spa
-COPY ClientApp/package.json ./
-RUN npm install --no-audit --no-fund
-COPY ClientApp/ ./
+${NODE_CERTS_BLOCK}COPY ClientApp/package.json ./
+${NPM_INSTALL_BLOCK}COPY ClientApp/ ./
 RUN npm run build`;
   return `# syntax=docker/dockerfile:1
 # Auto-generated — fullstack Python + embedded SPA.
