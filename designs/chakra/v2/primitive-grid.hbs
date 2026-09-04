@@ -1,4 +1,4 @@
-{{#if hasChildren}}<SimpleGrid columns=\{{ base: 1, sm: 2, md: 3 }} spacing={4}{{{testidAttr}}}{{{styleAttr}}}>
+{{#if hasChildren}}<SimpleGrid columns=\{{ base: {{#if hasResponsiveCols}}{{colsMobile}}, md: {{colsTablet}}, lg: {{colsDesktop}}{{else}}1, sm: 2, md: 3{{/if}} }} spacing={4}{{{testidAttr}}}{{{styleAttr}}}>
 {{colIndent}}{{#each children}}<Box>
 {{../childIndent}}{{{this}}}
 {{../colIndent}}</Box>{{#unless @last}}

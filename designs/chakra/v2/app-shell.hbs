@@ -106,11 +106,9 @@ function AppShellLayout() {
   }, [location.pathname]);
 
   const drawerContent = (
-    <Box data-testid="nav-sidebar" w={DRAWER_WIDTH}>
-      <Box h="64px" />
-      <Divider />
-      <List spacing={0} pt={2}>
-{{#each navSections}}        <Text fontSize="xs" fontWeight={600} color="gray.500" px={4} py={1} textTransform="uppercase">{{{labelText}}}</Text>
+    <Box data-testid="nav-sidebar" w={DRAWER_WIDTH} py={2}>
+      <List spacing={0}>
+{{#each navSections}}        <Text fontSize="xs" fontWeight={600} color="chakra-subtle-text" px={4} py={1} textTransform="uppercase">{{{labelText}}}</Text>
 {{#each entries}}{{#if requiresJs}}        {({{{requiresJs}}}) ? (
           <ListItem>
             <Box
@@ -122,7 +120,7 @@ function AppShellLayout() {
               fontWeight={isActive({{{activeArgs}}}) ? 600 : 400}
               bg={isActive({{{activeArgs}}}) ? "brand.50" : "transparent"}
               color={isActive({{{activeArgs}}}) ? "brand.600" : "inherit"}
-              _hover=\{{ bg: "gray.100" }}
+              _hover=\{{ bg: "chakra-subtle-bg" }}
               onClick={() => navigate("{{to}}")}
               data-testid="{{testId}}"
             >
@@ -140,7 +138,7 @@ function AppShellLayout() {
             fontWeight={isActive({{{activeArgs}}}) ? 600 : 400}
             bg={isActive({{{activeArgs}}}) ? "brand.50" : "transparent"}
             color={isActive({{{activeArgs}}}) ? "brand.600" : "inherit"}
-            _hover=\{{ bg: "gray.100" }}
+            _hover=\{{ bg: "chakra-subtle-bg" }}
             onClick={() => navigate("{{to}}")}
             data-testid="{{testId}}"
           >
@@ -152,7 +150,7 @@ function AppShellLayout() {
   );
 
   return (
-    <Flex>
+    <Flex direction="column" minH="100vh">
       {/* Skip link (WCAG 2.4.1 Bypass Blocks) — first focusable element,
           off-screen until focused, jumps to the <main> landmark. */}
       <a href="#main-content" className="loom-skip-link">{{{skipToContentText}}}</a>
@@ -167,70 +165,72 @@ function AppShellLayout() {
         </DrawerContent>
       </Drawer>
 
-      {/* Desktop sidebar */}
-      <Box
-        as="nav"
-        {{{primaryNavAria}}}
-        display=\{{ base: "none", md: "block" }}
-        w={DRAWER_WIDTH}
-        minH="100vh"
-        borderRight="1px"
-        borderColor="gray.200"
+      {/* App header — one full-width bar across the top on EVERY
+          breakpoint (the burger only appears below `md`, where the
+          sidebar collapses into the Drawer above).  It is a real
+          <header> landmark, so assistive tech and the rendered-DOM
+          gate both find it; `position: sticky` keeps it in view while
+          a long page scrolls. */}
+      <Flex
+        as="header"
+        position="sticky"
+        top={0}
+        zIndex={20}
         flexShrink={0}
+        h="64px"
+        px={4}
+        gap={3}
+        alignItems="center"
+        bg="brand.600"
+        color="white"
       >
+        <IconButton
+          {{{openMenuAria}}}
+          icon={<HamburgerIcon />}
+          variant="ghost"
+          color="white"
+          display=\{{ base: "inline-flex", md: "none" }}
+          onClick={onOpen}
+          data-testid="nav-burger"
+        />
         <Box
-          position="sticky"
-          top={0}
-          h="64px"
-          bg="brand.600"
+          as={RouterLink as React.ElementType}
+          to="/"
+          color="white"
+          textDecoration="none"
           display="flex"
           alignItems="center"
-          px={4}
+          gap={2}
         >
-          <Box
-            as={RouterLink as React.ElementType}
-            to="/"
-            color="white"
-            textDecoration="none"
-            display="flex"
-            alignItems="center"
-            gap={2}
-          >
-            <Box w={7} h={7} borderRadius="md" bg="brand.300" aria-hidden="true" />
-            <Text fontWeight={600} fontSize="md" color="white">{{systemNameHuman}}</Text>
-          </Box>
+          <Box w={7} h={7} borderRadius="md" bg="brand.300" aria-hidden="true" />
+          <Text fontWeight={600} fontSize="md" color="white">{{systemNameHuman}}</Text>
         </Box>
-        {drawerContent}
-      </Box>
+      </Flex>
 
-      {/* Main content */}
-      <Box flex={1} minW={0}>
-        {/* Top bar (mobile only) */}
-        <HStack
-          display=\{{ base: "flex", md: "none" }}
-          h="64px"
-          px={4}
-          bg="brand.600"
-          color="white"
-          justifyContent="space-between"
+      <Flex flex={1} minH={0}>
+        {/* Desktop sidebar */}
+        <Box
+          as="nav"
+          {{{primaryNavAria}}}
+          display=\{{ base: "none", md: "block" }}
+          w={DRAWER_WIDTH}
+          borderRightWidth="1px"
+          borderColor="chakra-border-color"
+          flexShrink={0}
         >
-          <IconButton
-            {{{openMenuAria}}}
-            icon={<HamburgerIcon />}
-            variant="ghost"
-            color="white"
-            onClick={onOpen}
-            data-testid="nav-burger"
-          />
-          <Text fontWeight={600}>{{systemNameHuman}}</Text>
-          <Box w={8} />
-        </HStack>
-        <Box as="main" id="main-content" p={6}>
+          {drawerContent}
+        </Box>
+
+        {/* Main content.  `minW={0}` is load-bearing: without it a wide
+            table would stretch this flex item past the viewport and
+            scroll the whole document sideways instead of scrolling
+            inside its own container. */}
+        <Box as="main" id="main-content" flex={1} minW={0} p={6}>
           <AppErrorBoundary>
             <Outlet />
           </AppErrorBoundary>
         </Box>
-      </Box>
+      </Flex>
     </Flex>
   );
 }
