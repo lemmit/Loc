@@ -10,18 +10,18 @@ import { DomainError, AggregateNotFoundError, DisallowedError, ForbiddenError, E
 import { Money } from "../domain/value-objects";
 
 const MoneySchema = z.object({
-  amount: z.number().min(0),
-  currency: z.string().refine((s) => [...s].length === 3).openapi({ minLength: 3, maxLength: 3 }),
+  amount: z.number().min(0, { message: "Amount must be at least 0" }),
+  currency: z.string().refine((s) => [...s].length === 3, { message: "Currency must be exactly 3 characters" }).openapi({ minLength: 3, maxLength: 3 }),
 }).openapi("Money");
 
 const CreateProductRequest = z.object({
-  sku: z.string().refine((s) => [...s].length >= 1).openapi({ minLength: 1 }),
+  sku: z.string().refine((s) => [...s].length >= 1, { message: "Sku must be at least 1 character" }).openapi({ minLength: 1 }),
   price: MoneySchema,
 }).openapi("CreateProductRequest");
 const CreateProductResponse = z.object({ id: z.string() }).openapi("CreateProductResponse");
 
 const UpdateProductRequest = z.object({
-  sku: z.string().refine((s) => [...s].length >= 1).openapi({ minLength: 1 }),
+  sku: z.string().refine((s) => [...s].length >= 1, { message: "Sku must be at least 1 character" }).openapi({ minLength: 1 }),
   price: MoneySchema,
 }).openapi("UpdateProductRequest");
 

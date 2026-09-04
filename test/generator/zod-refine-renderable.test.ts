@@ -171,20 +171,22 @@ describe("zod-refine — non-collection method calls follow the same rule", () =
 
 describe("zod-refine — regex hardening is shared (C4)", () => {
   it('matches("") no longer emits `.regex(//)`', () => {
-    const chained = chainSingleFieldNative("z.string()", { kind: "regex", pattern: "" });
+    const chained = chainSingleFieldNative("z.string()", { kind: "regex", pattern: "" }, "code");
     expect(chained).not.toContain(".regex(//)");
-    expect(chained).toBe('z.string().regex(new RegExp(""))');
-  });
-
-  it("a trailing-backslash pattern falls back to the RegExp constructor", () => {
-    expect(chainSingleFieldNative("z.string()", { kind: "regex", pattern: "a\\" })).toContain(
-      "new RegExp(",
+    expect(chained).toBe(
+      'z.string().regex(new RegExp(""), { message: "Code is not in the expected format" })',
     );
   });
 
+  it("a trailing-backslash pattern falls back to the RegExp constructor", () => {
+    expect(
+      chainSingleFieldNative("z.string()", { kind: "regex", pattern: "a\\" }, "code"),
+    ).toContain("new RegExp(");
+  });
+
   it("an ordinary pattern still renders as a literal, slashes escaped", () => {
-    expect(chainSingleFieldNative("z.string()", { kind: "regex", pattern: "^a/b$" })).toBe(
-      "z.string().regex(/^a\\/b$/)",
+    expect(chainSingleFieldNative("z.string()", { kind: "regex", pattern: "^a/b$" }, "code")).toBe(
+      'z.string().regex(/^a\\/b$/, { message: "Code is not in the expected format" })',
     );
   });
 

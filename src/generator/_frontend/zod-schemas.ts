@@ -113,7 +113,7 @@ export function emitObjectWithRefines(
     const patterns = chainByField.get(f.name);
     if (patterns) {
       for (const p of orderSingleFieldPatterns(patterns))
-        schema = chainSingleFieldNative(schema, p);
+        schema = chainSingleFieldNative(schema, p, f.name);
     }
     out.push(`  ${f.name}: ${schema},`);
   }

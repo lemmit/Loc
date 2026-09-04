@@ -125,7 +125,9 @@ describe("string .length is code points — node/Hono", () => {
       [...all.keys()].find((k) => k.endsWith("node_api/http/person.routes.ts"))!,
     )!;
     expect(routes).toContain(
-      "email: z.string().regex(/^[^@]+@[^@]+$/).refine((s) => [...s].length <= 120).openapi({ maxLength: 120 })",
+      'email: z.string().regex(/^[^@]+@[^@]+$/, { message: "Email is not in the expected format" })' +
+        '.refine((s) => [...s].length <= 120, { message: "Email must be at most 120 characters" })' +
+        ".openapi({ maxLength: 120 })",
     );
   });
 });

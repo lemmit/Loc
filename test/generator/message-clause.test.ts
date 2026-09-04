@@ -77,7 +77,9 @@ describe("message clause — wire refine carrier", () => {
     // `invariant sku.length > 0` (no message) stays on the chain rather than
     // becoming a messaged refine.  A string LENGTH bound is a code-point
     // predicate, not zod's code-unit `.min` (RS-31).
-    expect(reactApi).toContain("sku: z.string().refine((s) => [...s].length >= 1)");
+    expect(reactApi).toContain(
+      'sku: z.string().refine((s) => [...s].length >= 1, { message: "Sku must be at least 1 character" })',
+    );
   });
 });
 

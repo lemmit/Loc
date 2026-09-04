@@ -288,6 +288,14 @@ export const CORPUS: readonly CorpusFeature[] = [
     note: "minted by the 2026-08-23 numeric-types audit (F7 / M-T6.44): the validator admits every one of these, but the TS and Elixir binary renderers gated money/decimal dispatch on `leftType` ALONE — node emitted native `*` on a decimal.js Decimal (TS2363, uncompilable), elixir emitted native arithmetic on a %Decimal{} (runtime ArithmeticError) and native `<` (Erlang TERM ordering: number < map is ALWAYS true, silently).  No corpus fixture had a right-hand money/decimal operand, so no compile gate could reach the arms.  The `test` block is the runtime value proof on every backend's unit tier; no `test e2e` — the derived decimal values sit inside the un-ruled F11/M-T5.22 cross-backend arithmetic divergence, so a wire golden here would pre-empt that owner ruling (literals are binary-exact so the unit assertions agree everywhere regardless)",
   },
   {
+    id: "absent-optional",
+    title:
+      "a null-guard rule over an OPTIONAL field (`estimate == null || estimate >= 0`) + a create body that OMITS the field",
+    doc: "language",
+    backends: ALL,
+    note: "minted by the Fable field test (A1): node's zod refine rendered `==` as JS `===`, so an omitted optional key — `undefined`, the wire's OTHER spelling of absent — failed the guard and `POST /api/tasks` answered 422 where .NET and Python answered 201.  No corpus fixture omitted an optional field a rule then referenced, so the five-way wire golden could not see the divergence at all",
+  },
+  {
     id: "validation-messages",
     title:
       "authored `message \"…\"` on invariant / field check / precondition / VO invariant + the per-backend message CATALOG the wire `code` resolves against",

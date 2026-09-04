@@ -748,16 +748,18 @@ describe("react generator", () => {
       const { files } = generateSystems(model);
       const productApi = files.get("web_app/src/api/product.ts")!;
       // acme Money: invariant amount >= 0 + invariant currency.length == 3
-      expect(productApi).toMatch(/amount: z\.number\(\)\.min\(0\)/);
+      expect(productApi).toMatch(
+        /amount: z\.number\(\)\.min\(0, \{ message: "Amount must be at least 0" \}\)/,
+      );
       // A LENGTH bound is a code-point predicate, not zod's code-unit
       // `.length(3)` (RS-31).  The frontend schema carries no `.openapi()`
       // metadata — only the backend routes publish a JSON Schema.
       expect(productApi).toMatch(
-        /currency: z\.string\(\)\.refine\(\(s\) => \[\.\.\.s\]\.length === 3\)/,
+        /currency: z\.string\(\)\.refine\(\(s\) => \[\.\.\.s\]\.length === 3, \{ message: "Currency must be exactly 3 characters" \}\)/,
       );
       // No leftover object-level refine on MoneySchema.
       const moneyBlock = productApi.match(
-        /export const MoneySchema = z\.object\(\{[\s\S]*?\}\)([^;]*);/,
+        /export const MoneySchema = z\.object\(\{[\s\S]*?\n\}\)([^;]*);/,
       )!;
       expect(moneyBlock[1]).toBe("");
     });
@@ -770,10 +772,10 @@ describe("react generator", () => {
       // bound, which is a CODE-POINT predicate rather than zod's code-unit
       // `.min(1)` (RS-31).
       expect(productApi).toMatch(
-        /CreateProductRequest = z\.object\(\{[\s\S]*sku: z\.string\(\)\.refine\(\(s\) => \[\.\.\.s\]\.length >= 1\)/,
+        /CreateProductRequest = z\.object\(\{[\s\S]*sku: z\.string\(\)\.refine\(\(s\) => \[\.\.\.s\]\.length >= 1, \{ message: "Sku must be at least 1 character" \}\)/,
       );
       const createBlock = productApi.match(
-        /export const CreateProductRequest = z\.object\(\{[\s\S]*?\}\)([^;]*);/,
+        /export const CreateProductRequest = z\.object\(\{[\s\S]*?\n\}\)([^;]*);/,
       )!;
       // Single-field rule absorbed into chain → no .refine().
       expect(createBlock[1]).toBe("");
@@ -785,7 +787,7 @@ describe("react generator", () => {
       const orderApi = files.get("web_app/src/api/order.ts")!;
       // acme Order.addLine: precondition qty > 0 (int qty).
       expect(orderApi).toMatch(
-        /AddLineOrderRequest = z\.object\(\{[\s\S]*qty: z\.number\(\)\.int\(\)\.min\(1\)/,
+        /AddLineOrderRequest = z\.object\(\{[\s\S]*qty: z\.number\(\)\.int\(\)\.min\(1, \{ message: "Qty must be at least 1" \}\)/,
       );
     });
 
@@ -797,7 +799,7 @@ describe("react generator", () => {
       // Order.invariants reference `lines.count` (containment, not in body).
       // The classifier correctly skips it; schema has no .refine().
       const createBlock = orderApi.match(
-        /export const CreateOrderRequest = z\.object\(\{[\s\S]*?\}\)([^;]*);/,
+        /export const CreateOrderRequest = z\.object\(\{[\s\S]*?\n\}\)([^;]*);/,
       )!;
       expect(createBlock[1]).toBe("");
       // ConfirmRequest is empty: `isMutable()` + `lines.count > 0`
@@ -847,7 +849,9 @@ describe("react generator", () => {
       );
       const { files } = generateSystems(doc.parseResult.value as Model);
       const userApi = files.get("web/src/api/user.ts")!;
-      expect(userApi).toMatch(/email: z\.string\(\)\.regex\(\/\^\[\^@\]\+@\.\+\$\/\)/);
+      expect(userApi).toMatch(
+        /email: z\.string\(\)\.regex\(\/\^\[\^@\]\+@\.\+\$\/, \{ message: "Email is not in the expected format" \}\)/,
+      );
     });
 
     it("mirrors create wire constraints onto the client Update<Agg>Request schema (SYS-1)", async () => {
@@ -883,7 +887,9 @@ describe("react generator", () => {
       // create (create-path already emitted it — this closes the same gap here).
       const updateBlock = userApi.slice(userApi.indexOf("export const UpdateUserRequest"));
       expect(userApi).toContain("export const UpdateUserRequest");
-      expect(updateBlock).toMatch(/email: z\.string\(\)\.regex\(\/\^\[\^@\]\+@\.\+\$\/\)/);
+      expect(updateBlock).toMatch(
+        /email: z\.string\(\)\.regex\(\/\^\[\^@\]\+@\.\+\$\/, \{ message: "Email is not in the expected format" \}\)/,
+      );
     });
 
     it("desugars `field: T check <expr>` to an invariant on the parent", async () => {
@@ -918,10 +924,10 @@ describe("react generator", () => {
       // predicates, not zod's code-unit `.min`/`.max` (RS-31).  The `>= 1 &&
       // <= 32` pair folds into ONE refine (the `len-range` shape).
       expect(productApi).toMatch(
-        /sku: z\.string\(\)\.refine\(\(s\) => \[\.\.\.s\]\.length >= 1 && \[\.\.\.s\]\.length <= 32\)/,
+        /sku: z\.string\(\)\.refine\(\(s\) => \[\.\.\.s\]\.length >= 1 && \[\.\.\.s\]\.length <= 32, \{ message: "Sku must be 1 to 32 characters" \}\)/,
       );
       expect(productApi).toMatch(
-        /name: z\.string\(\)\.refine\(\(s\) => \[\.\.\.s\]\.length <= 120\)/,
+        /name: z\.string\(\)\.refine\(\(s\) => \[\.\.\.s\]\.length <= 120, \{ message: "Name must be at most 120 characters" \}\)/,
       );
     });
 
