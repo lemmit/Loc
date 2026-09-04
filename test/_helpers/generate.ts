@@ -25,7 +25,7 @@ export { HONO_V4_PINS };
  * was `generateHono` below: at the 2026-09 census that wrapper was one line with
  * no checks at all, and its **66 call sites across 37 files** were the last
  * corner of the tree that could assert on emitted output from an IR nothing had
- * ever looked at (M-T9.44).
+ * ever looked at (M-T9.48).
  */
 export function assertModelVerifies(model: Model, context = ".ddd fixture"): void {
   // Phases ⑤/⑥ — the IR the backends will consume must hold its own contract
@@ -70,7 +70,7 @@ export const generateHono = (model: Model): Map<string, string> => {
  * Generate the single-context .NET project file map from an AST Model.
  *
  * The .NET twin of `generateHono` above, and it was the same hole: until
- * M-T9.45 this name was RE-EXPORTED straight from
+ * M-T9.49 this name was RE-EXPORTED straight from
  * `src/generator/dotnet/index.js`, so the helper wrapped it with nothing.  Its
  * call sites asserted on emitted C# from an IR nothing had ever inspected —
  * and most of them did not even reach the helper, importing the generator

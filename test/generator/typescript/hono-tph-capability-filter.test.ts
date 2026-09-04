@@ -24,7 +24,7 @@ import { describe, expect, it } from "vitest";
 import { generateSystemFiles } from "../../_helpers/index.js";
 
 // These fixtures used to ride the legacy `generateHono` helper on a BARE loose
-// context.  Once that path asserts phase ⑦ (M-T9.44) the shape is refused, and
+// context.  Once that path asserts phase ⑦ (M-T9.48) the shape is refused, and
 // correctly: TPH is a HOSTED capability — `validateInheritanceStorage` reports
 // `loom.tph-backend-unsupported` ("no TPH-capable backend deployable hosts this
 // context") — and the legacy path cannot host anything, because declaring a

@@ -37,7 +37,7 @@ async function generate(file: string): Promise<Map<string, string>> {
 }
 
 // This fixture used to ride the legacy single-context `generateDotnet` helper
-// on a BARE loose context.  Once that path asserts phase ⑦ (M-T9.45) the shape
+// on a BARE loose context.  Once that path asserts phase ⑦ (M-T9.49) the shape
 // is refused, and correctly: `audited` is a HOSTED capability —
 // `loom.audited-backend-unsupported` ("no audit-capable backend deployable
 // hosts this context") — and the legacy path cannot host anything, because

@@ -124,7 +124,7 @@ describe("typescript generator — retrieval loadPlan (whole/explicit parity)", 
     // this test's subject: the guarantee under test is that the emitter never
     // grows a narrowing branch while the refusal stands, so when `loads:`
     // eventually ships there is a pinned before-picture.  Hence the `Unchecked`
-    // helper rather than a weakened phase-⑦ assertion (M-T9.44).
+    // helper rather than a weakened phase-⑦ assertion (M-T9.48).
     const repo = (
       await generateSystemFilesUnchecked(
         LOADS_SRC,

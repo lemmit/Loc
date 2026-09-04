@@ -200,7 +200,7 @@ const LOADS_SRC = `
  * these two tests' subject: the guarantee is that the emitter never grows a
  * narrowing branch while the refusal stands, so when `loads:` eventually ships
  * there is a pinned before-picture.  Hence the `Unchecked` helper rather than a
- * weakened phase-⑦ assertion (M-T9.45, mirroring M-T9.44's Hono twin).  The map
+ * weakened phase-⑦ assertion (M-T9.49, mirroring M-T9.48's Hono twin).  The map
  * is re-keyed to drop the deployable directory.
  */
 async function loadsFiles(): Promise<Map<string, string>> {

@@ -13,7 +13,7 @@ import { describe, expect, it } from "vitest";
 import { generateSystemFiles } from "../../_helpers/generate.js";
 
 // `audited` is a HOSTED capability, and this fixture used to be a bare loose
-// context emitted through the legacy `generateHono` path (M-T9.44).  Once that
+// context emitted through the legacy `generateHono` path (M-T9.48).  Once that
 // path asserts phase ⑦, the fixture fails: `validateAuditedOperationSupport`
 // refuses an audited lifecycle action that no audit-capable backend deployable
 // hosts, and the legacy path CANNOT host one — declaring a `system` re-parents

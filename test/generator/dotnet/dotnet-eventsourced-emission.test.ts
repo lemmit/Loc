@@ -46,7 +46,7 @@ context Accounts {
 `;
 
 // This fixture used to ride the legacy single-context `generateDotnet` helper
-// on a BARE loose context.  Once that path asserts phase ⑦ (M-T9.45) the shape
+// on a BARE loose context.  Once that path asserts phase ⑦ (M-T9.49) the shape
 // is refused, and correctly: event-sourced storage is a HOSTED capability —
 // `loom.event-sourcing-backend-unsupported` ("no event-sourcing-capable backend
 // deployable hosts this context") — and the legacy path cannot host anything,

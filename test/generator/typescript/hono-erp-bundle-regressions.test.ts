@@ -22,7 +22,7 @@ async function gen(src: string): Promise<Map<string, string>> {
  * loose context into it, emptying the `loom.contexts` list that path emits
  * from.  So these two fixtures carry the deployable they always implied and go
  * through the orchestrator, which the phase-⑦ assertion on `generateHono`
- * (M-T9.44) forced into the open.  The map is re-keyed to drop the deployable
+ * (M-T9.48) forced into the open.  The map is re-keyed to drop the deployable
  * directory, so the assertions read the same paths as the rest of the file.
  */
 async function genHosted(src: string): Promise<Map<string, string>> {

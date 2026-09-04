@@ -70,7 +70,7 @@
       "packets": [
         {
           "name": "2.1-legacy-generate-path",
-          "mint": "M-T9.44 after #2759 merges (M-T9.43 reserved by M-T9.42's text)",
+          "mint": "M-T9.48 (renumbered from M-T9.44 on rebase: #2771 landed M-T9.44-M-T9.47 first); .NET twin M-T9.49; M-T9.43 also minted",
           "fileTrees": ["test/_helpers/generate.ts", "test/generator/typescript/**", "test/generator/hono/**", "test/system/legacy-generate-ratchet.test.ts"],
           "rows": [{ "id": "generateHono-bypasses-phases", "size": "M", "confidence": "proven", "P": 1, "title": "66 call sites / 37 files bypass ⑤⑥⑦ + verifier; 25 files also bypass ①④" }],
           "mutationProof": "re-seed enumName: undefined in enum-value lowering; the four silent test/generator/hono tests fail with IR verification failed"

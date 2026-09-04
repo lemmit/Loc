@@ -5,7 +5,7 @@ import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
 // ---------------------------------------------------------------------------
-// Legacy single-context `generate` ratchet (M-T9.44 Hono, M-T9.45 .NET).
+// Legacy single-context `generate` ratchet (M-T9.48 Hono, M-T9.49 .NET).
 //
 // The sibling ratchet (`direct-generate-systems-ratchet.test.ts`) pins the
 // tests that import the SYSTEM orchestrator directly.  This one pins the other
@@ -25,7 +25,7 @@ import { describe, expect, it } from "vitest";
 // helper merely RE-EXPORTED it, so only 9 of its 39 caller files reached the
 // helper at all — 14 of the 150 call sites.  The other 30 files imported the
 // generator straight from `src/generator/dotnet/index.js` and sat outside every
-// gate this helper module has, present or future.  M-T9.45 turned it into a
+// gate this helper module has, present or future.  M-T9.49 turned it into a
 // real wrapper and routed those files back through the helper, which is why the
 // .NET column below is the bigger one.  (`generateDotnetForContexts`, the
 // system-mode entry one rung below, is deliberately NOT gated — same reason the
@@ -112,7 +112,7 @@ const PINNED_HONO: Readonly<Record<string, number>> = {
 };
 
 /**
- * The same backlog for the legacy single-context .NET path (M-T9.45).
+ * The same backlog for the legacy single-context .NET path (M-T9.49).
  *
  * Bigger than the Hono column because it went uncounted for longer: the helper
  * re-exported `generateDotnet` verbatim, so a caller could import it from `src/`
@@ -287,14 +287,14 @@ function census(gate: string): { rows: Row[]; scanned: number } {
 const GATES = [
   {
     gate: "generateHono",
-    mission: "M-T9.44",
+    mission: "M-T9.48",
     pinned: PINNED_HONO,
     parseStringAlongside: PARSE_STRING_ALONGSIDE_HONO,
     minRows: 20,
   },
   {
     gate: "generateDotnet",
-    mission: "M-T9.45",
+    mission: "M-T9.49",
     pinned: PINNED_DOTNET,
     parseStringAlongside: PARSE_STRING_ALONGSIDE_DOTNET,
     minRows: 25,
