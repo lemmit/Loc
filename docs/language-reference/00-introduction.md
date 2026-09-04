@@ -2,11 +2,12 @@
 
 Loom is a declarative DSL for Domain-Driven Design. A `.ddd` source
 describes a **system** of bounded contexts — aggregates, value objects,
-events, repositories, workflows, views, APIs, storage, and UI — and the
-toolchain compiles it into a runnable multi-project tree wired together
+events, repositories, projections, workflows, APIs, storage, and UI — and
+the toolchain compiles it into a runnable multi-project tree wired together
 as one `docker compose` stack. Five backends (TypeScript/Hono,
-.NET/ASP.NET, Phoenix LiveView, Python/FastAPI, Java/Spring Boot) and four
-frontends (React, Vue, Svelte, Angular) consume the same source.
+.NET/ASP.NET, Phoenix LiveView on plain Ecto, Python/FastAPI, Java/Spring
+Boot) and six frontends (React, Vue, Svelte, Angular, Feliz F#/Fable,
+Flutter) consume the same source.
 
 This reference documents **the language surface**, feature by feature.
 It is not a tutorial and not a generator internals guide — for those see
@@ -31,7 +32,7 @@ picker** — choose the platform you care about; your choice follows you
 across the page and across the reference.
 
 Here is the convention itself, shown on a trivial aggregate. The same
-`.ddd` declaration, lowered to three backends:
+`.ddd` declaration, lowered on three of the five backends (pick any tab — the choice sticks):
 
 ```ddd
 context Catalog {
@@ -45,37 +46,42 @@ context Catalog {
 ::: tabs backend
 == node
 ```ts
-// One row in the emitted Drizzle schema (excerpt)
-export const products = pgTable("products", {
-  id: uuid("id").primaryKey().defaultRandom(),
+// db/schema.ts — the emitted Drizzle table (excerpt)
+export const products = catalogSchema.table("products", {
+  id: uuid("id").primaryKey(),
   name: text("name").notNull(),
-  price: numeric("price").notNull(),
+  price: numeric("price", { precision: 19, scale: 4 }).notNull(),
+  version: integer("version").notNull(),
 });
 ```
 == dotnet
 ```csharp
-// EF Core entity (excerpt)
+// Domain/Products/Product.cs — the aggregate entity (excerpt)
 public sealed class Product
 {
-    public Guid Id { get; set; }
-    public string Name { get; set; } = default!;
-    public decimal Price { get; set; }
+    public ProductId Id { get; private set; }
+    public string Name { get; private set; } = default!;
+    public decimal Price { get; private set; } = default!;
+    public int Version { get; private set; } = default!;
+    // …
 }
 ```
 == python
 ```python
-# SQLAlchemy model (excerpt)
-class Product(Base):
+# app/db/schema.py — the SQLAlchemy row (excerpt)
+class ProductRow(Base):
     __tablename__ = "products"
-    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid7)
-    name: Mapped[str]
-    price: Mapped[Decimal]
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True)
+    name: Mapped[str] = mapped_column(Text)
+    price: Mapped[Decimal] = mapped_column(Numeric(19, 4))
+    version: Mapped[int] = mapped_column(Integer)
 ```
 ::: end
 
-> The tabs above are illustrative of the *format*. Each chapter's
-> examples are sourced by actually running the generator — see
-> [`AUTHORING.md`](AUTHORING.md).
+> Every example in the reference — this one included — is sourced by
+> actually running the generator, never hand-waved; see
+> [`AUTHORING.md`](AUTHORING.md). (The `version` column is the optimistic-
+> concurrency token every state-based aggregate carries.)
 
 When a feature is backend-only (a repository query) or frontend-only (a
 page primitive), only the relevant tabs appear. When backends diverge —
@@ -107,7 +113,8 @@ strictly one-directional compiler. Knowing the shape helps you predict
 ```
 
 - **Phases ①–④** are the *language* surface — syntax, names, AST-level
-  rules. Chapters 1–9 mostly live here.
+  rules. Chapters 1–9 mostly live here. Macros (`with …`, `scaffold`)
+  expand in phase ② — they emit final AST, so `unfold` ejects real source.
 - **Phase ⑤–⑦** lower the AST to the platform-neutral, fully-resolved
   **Loom IR** (`src/ir/types/loom-ir.ts`). Every name carries a kind,
   every expression a type. Backends never re-resolve.
@@ -118,4 +125,5 @@ strictly one-directional compiler. Knowing the shape helps you predict
 
 The full walk-through is in [`../technical.md`](../technical.md). You do
 not need it to use the language — but it explains why the same `.ddd`
-produces structurally compatible output across five backends.
+produces structurally compatible output across five backends and six
+frontends.

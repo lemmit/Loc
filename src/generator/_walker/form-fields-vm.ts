@@ -144,7 +144,15 @@ export function prepareFormFieldVM(
         // Row sub-fields carry a BARE sub-path (`sku`, not `items.sku`) so a
         // dynamic-row template splices the runtime index; numeric sub-fields
         // flag `valueAsNumber` so their register coerces the string input.
-        const NUMERIC = new Set(["field-input-int", "field-input-decimal", "field-input-money"]);
+        //
+        // `money` is deliberately NOT numeric here: a money value is a string
+        // (or a `Decimal`) in form state and on the wire — never a JS number.
+        // `valueAsNumber` would coerce the row input to a number, which fails
+        // the `moneySchema` union (`Decimal | string`) and, were it to pass,
+        // would put a JSON number on a wire the backends parse as a decimal
+        // string.  Same contract the flat money field already honours via
+        // `Controller` + `Decimal`.
+        const NUMERIC = new Set(["field-input-int", "field-input-decimal"]);
         const rowFields = vo.fields.map((vf) => {
           const vm = prepareFormFieldVM(
             vf.name,
@@ -156,11 +164,10 @@ export function prepareFormFieldVM(
           return NUMERIC.has(vm.template) ? { ...vm, valueAsNumber: true } : vm;
         });
         // A fresh-row default for `append(...)` — zero value per sub-field kind.
+        // Money seeds the STRING "0", not `""`: `moneySchema`'s string arm is
+        // `/^-?\d+(\.\d+)?$/`, so an empty seed can never parse.
         const defaultRowJson = `{ ${rowFields
-          .map(
-            (f) =>
-              `${f.path}: ${f.valueAsNumber ? "0" : f.template === "field-input-bool" ? "false" : '""'}`,
-          )
+          .map((f) => `${f.path}: ${defaultRowValue(f)}`)
           .join(", ")} }`;
         return {
           template: "field-input-array",
@@ -179,6 +186,16 @@ export function prepareFormFieldVM(
   }
 
   return { template: "field-input-string", path, label, testId, errorExpr };
+}
+
+/** The zero value a freshly-appended dynamic row seeds one sub-field with.
+ *  Keyed off the field's TEMPLATE (not `valueAsNumber`), so `money` — which is
+ *  no longer numeric — still gets a parseable seed rather than falling into the
+ *  `""` bucket that `moneySchema` rejects. */
+function defaultRowValue(f: FormFieldVM): string {
+  if (f.template === "field-input-money") return '"0"';
+  if (f.template === "field-input-bool") return "false";
+  return f.valueAsNumber ? "0" : '""';
 }
 
 /** RHF errors live at `errors.foo.bar.baz?.message` — translate a dot-

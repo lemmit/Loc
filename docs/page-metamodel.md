@@ -1,26 +1,38 @@
-# Page metamodel — final v0
+# Page metamodel
 
-> Supersedes the v22 React generator's hardcoded subdomain-to-CRUD scaffolder
-> with a declarative page metamodel: pages, components, scaffolding, state,
-> menus. Six declaration keywords, two expression-level reserved tokens,
-> one tiny grammar lift on `Lambda` and `Property`. No macro system, no
-> record algebra, no per-archetype keywords.
+> The UI half of the language: `ui` blocks holding pages, components, stores,
+> areas, layouts and menus, with the CRUD baseline recovered as a `scaffold`
+> macro that desugars into the same metamodel.
+>
+> **Status (audited 2026-09-03 against `main`).**  This began as the v0 RFC and
+> is now the shipped surface, so the "v0" scoping notes below are kept only
+> where they still describe today's behaviour; every §14 non-goal that has since
+> shipped is marked *resolved* in place.  The chaptered reference is
+> [`language-reference/15-ui-pages-structure.md`](language-reference/15-ui-pages-structure.md)
+> (declarations) and
+> [`language-reference/16-ui-walker-primitives.md`](language-reference/16-ui-walker-primitives.md)
+> (the primitive library, with generated output per primitive); this page is the
+> narrative rationale behind them.
 
 ---
 
 ## 1. Vision
 
-Today's React generator is a procedural emitter that prints TSX from the
-domain IR. There is no source representation of "a page", so any UI choice
-that diverges from the implicit list/new/detail-per-aggregate shape requires
-forking the generator in TypeScript. This RFC promotes the page to a
-first-class language construct, with the existing CRUD behaviour recovered
-as a `scaffold` macro that desugars into the same metamodel.
+Before the metamodel, the React generator was a procedural emitter that printed
+TSX straight from the domain IR.  There was no source representation of "a
+page", so any UI choice diverging from the implicit list/new/detail-per-aggregate
+shape meant forking the generator in TypeScript.  This document promoted the page
+to a first-class language construct, with the CRUD behaviour recovered as a
+`scaffold` macro that desugars into the same metamodel — and the same `ui`
+source now drives **six frontends** (react, vue, svelte, angular, feliz, flutter)
+plus Phoenix LiveView on `platform: elixir`.
 
 Three rules:
 
-1. **Closed and minimal.** Six declaration keywords. No user-extensible
-   macros. The standard component library is closed in v0.
+1. **Closed and minimal.** A small declaration vocabulary and a closed
+   primitive library (56 primitives + 2 sub-elements).  Extension happens at
+   the edges — user `component`s, `extern` components/functions, and the macro
+   API — never by adding primitives.
 2. **Reuse the existing IR for typing.** Data sources resolve to repository
    finds, operations, workflows, external APIs — every name typed
    via the existing signature. No parallel type system.
@@ -32,27 +44,43 @@ Three rules:
 
 ## 2. New keywords
 
-**Declaration-level (6):**
+The original RFC promised "six declaration keywords".  The shipped surface is
+wider — these are the productions in `src/language/ddd.langium` today.
+
+**Declaration-level:**
 
 | Keyword | Role |
 |---|---|
-| `ui` | Top-level block; `SystemMember`, peer to `subdomain`, `deployable`, `theme`, `user`. |
-| `page` | Declares a route + body. |
-| `component` | Parameterised region tree — typed function from params (and optional state) to a body expression. |
-| `scaffold` | Single fixed multi-page rewrite from a domain selector to pages.  Mix it with hand-written pages via override-by-name / unfold — see [`customization-gradient.md`](customization-gradient.md). |
-| `state` | Block of reactive local fields. |
-| `menu` | Optional `ui`-level block declaring sidebar structure. |
+| `ui` | The block itself.  A `SystemMember` (peer to `subdomain`, `deployable`, `theme`, `user`, `api`, `layout`) *and* a root-level `ModelMember`, so a `.ddd` file can be a pure UI library. |
+| `framework:` | Optional first clause inside `ui` — `react`, `vue`, `svelte`, `angular`, `feliz`, `flutter`, `phoenixLiveView`.  The UI's own technical identity; omitted, it is derived from the hosting deployable's platform (§3). |
+| `page` | Route + params + body (§4). |
+| `component` | Parameterised region tree — typed function from params (and optional state / derived / actions) to a body expression (§5).  `extern from "<path>"` hands rendering to a hand-written file. |
+| `store` | Shared client-side state container: named `state {}` + `action`s, referenced by dotted name (`Cart.lines`).  Optional `persist: memory\|local\|session\|url` lifetime (§6). |
+| `area` | Groups pages (and nested areas); the path is half of a page's identity (§10b). |
+| `menu` | Two productions: the `ui`-level sidebar block (§11) and per-page metadata (`section`/`label`/`order`/`hidden`). |
+| `state` | Block of reactive local fields, in a `page`, `component` or `store` (§6). |
+| `derived` | Named computed binding over params / state / other deriveds — `derived label: string = …`. |
+| `action` | Named, typed effect handler — the only place a body may write state or call a mutation (§8). |
+| `api` / `channel` / `on` / `function` | `ui`-level members: a handle on a system `api`, a realtime `channel` subscription, its `on <chan>.<Event>(e) { … }` handler, and an `extern` frontend function. |
+| `layout` | A **system**-level declaration (not a `ui` member) with `header` / `sidebar` / `footer` slots plus exactly one `main`; a page opts in with `layout: <Name>` (presets `default` / `none`). |
 
-**Expression-level (2):**
+`scaffold` is **not** a keyword.  It is a macro applied through the universal
+`with` clause (`ui WebApp with scaffold(aggregates: [Order]) { … }`) — see §10
+and [`scaffold-macros.md`](scaffold-macros.md).  Mix it with hand-written pages
+via override-by-name / unfold — see
+[`customization-gradient.md`](customization-gradient.md).
+
+**Expression-level:**
 
 | Keyword | Role |
 |---|---|
-| `match` | Predicate-arms expression; first true arm wins; usable anywhere expressions appear. |
+| `match` | Two shapes: predicate arms (first true arm wins) and **variant** arms over a union subject.  An expression *and* a statement (§7). |
 | `else` | Fallthrough arm of `match`. |
+| `await` | Marks the awaited remote command in `match await <op>(…) { … }` (§8, [`actions.md`](actions.md)).  A soft keyword — a field named `await` still parses. |
 
-**Reused without change:** `requires` (auth gate), `let` (in flows / event-handler blocks), all existing operators, `:=` (state mutation, already in operations).
+**Reused without change:** `requires` (auth gate), `let`, all existing operators, `:=` / `+=` / `-=` (state mutation, already in operations).
 
-**Soft keywords inside their parent block:** `section`, `link` (inside `menu`).
+**Soft keywords inside their parent block:** `section`, `link` (inside `menu`), `framework` and `persist` (inside `ui` / `store`) — all still usable as ordinary identifiers elsewhere.
 
 **Channel subscription (channels.md Part I):** two further `ui` members —
 `channel <name>: <Ctx>.<Channel>` subscribes the UI to a context's
@@ -108,8 +136,9 @@ system Acme {
   theme { primary: "#3b82f6", neutral: "#9ca3af" }
   user  { id: string, permissions: string[] }
 
-  ui SalesAdmin {
-    scaffold subdomains: [Sales]
+  ui SalesAdmin with scaffold(subdomains: [Sales]) {
+    framework: react
+    api Sales: SalesApi
     page OrderConsole(customerId: Customer id) { ... }
     menu { ... }
   }
@@ -122,16 +151,36 @@ system Acme {
 }
 ```
 
+A `ui` may equally be declared at the **file root**, outside any `system { … }`
+— it is a `ModelMember` as well as a `SystemMember` — so a `.ddd` file can be a
+pure UI library pulled in by `import`.
+
 The deployable references the ui via `ui: SalesAdmin`, mirroring how it
-already references hosted contexts. One ui can be served by multiple react
-deployables.
+already references hosted contexts.  Two binding forms parse:
+
+- **sugar** — `ui: SalesAdmin` (the ui's `api` handles bind to the deployable's
+  `targets`);
+- **compose** — `ui: SalesAdmin { Sales: api, Billing: billingApi }`, binding
+  each `api <name>:` handle to a named backend deployable, so one ui can be fed
+  by several backends.  `hosts: [A, B]` is the inverse spelling (a host naming
+  the uis it serves).
+
+One ui can be served by **many** frontend deployables at once — the same
+`ui SalesAdmin` mounts on react, vue, svelte, angular, feliz and flutter
+deployables, and on `platform: elixir` it renders as Phoenix LiveView
+(§16).  That is the point of the metamodel being framework-neutral.
 
 **Validator obligations**
 
-- Every `react` deployable **must** declare `ui: <Name>`. No implicit
-  default; the absence is a hard error.
+- Every **UI-mounting** deployable must declare `ui:` / `hosts:` — not just
+  react.  The absence is a hard error (`… deployable '<n>' must declare a 'ui:'
+  binding`).
 - `deployable.ui` must reference an existing `ui` block.
-- Only `react` deployables may set `ui:`.
+- Only a platform that mounts a UI may set `ui:` — a `platform: node` API
+  deployable may not (`loom.ui-binding-unmountable-platform`).
+- The host must be able to *run* the ui's framework: a `framework: phoenixLiveView`
+  ui only mounts on `platform: elixir`, and a JS-bundle framework only on a host
+  that serves bundles (`loom.ui-framework-unhostable`).
 - Every `scaffold` selector and every page-data binding inside the `ui` must
   resolve to a subdomain reachable through the deployable's `targets` chain.
 
@@ -144,32 +193,45 @@ metadata. Body is a single expression. Properties use Loom's existing
 colon-separator idiom (matches `Deployable`, `ThemeProp`, `EmitField`).
 
 ```ddd
-page OrderList {
-  route: "/orders"
-  body:  scaffoldList { of: Order }
-}
-
 page OrderDetail(id: Order id) {
   route: "/orders/:id"
-  body:  scaffoldDetails { of: Order }
+  title: "Order detail"
+  body: QueryView {
+    of: Sales.Order.byId(id),
+    single: true,
+    loading: Loader {},
+    empty: Empty { "Order not found" },
+    data: o => Stack { KeyValueRow { "Status", o.status } }
+  }
 }
 ```
 
-List/detail pages are normally produced wholesale by `scaffold(aggregates:
-[…])`; the `scaffoldList`/`scaffoldDetails` body sentinels above are the
-hand-writable form — useful when you want a list or detail *embedded* in a
-larger custom page body (a `Stack` alongside other components), or to declare
-a page the scaffold selector didn't cover. They expand at lowering time into
-the full Breadcrumbs · Toolbar · QueryView · Table tree.
+List/detail pages are normally produced wholesale by `with scaffold(aggregates:
+[…])` (§10).  **There is no `scaffoldList { … }` / `scaffoldDetails { … }` body
+sentinel** — earlier drafts of this doc described one, but the macro emits each
+page's *full* walker body up front (so `unfold` ejects real `.ddd`), and a page
+body naming `scaffoldList` is now a parse-level error:
+
+```ddd
+// ✗ error: Unknown builder type 'scaffoldList'.
+page OrderList { route: "/orders"  body: scaffoldList { of: Order } }
+```
+
+To embed a list in a larger custom body, compose `QueryView` + `Table` directly
+(§9.2), or scaffold the page and edit the unfolded source.
 
 | Property | Meaning |
 |---|---|
 | `route:` | Path-with-`:params`. Path params bind to typed parameters. |
 | `title:` | String expression, may interpolate page data. |
-| `requires` | Auth predicate — same syntax as on operations. On a React frontend with `auth: ui`, the page renders a client-side `<Forbidden/>` guard (evaluated against `useSession().user`) — the mirror of the backend's 403. Gates are `currentUser`-only (see [auth.md](auth.md)). |
-| `state { … }` | Reactive local fields (see §6). At most one, multiples merge. |
+| `requires` | Auth predicate — same syntax as on operations. On a frontend with `auth: ui`, the page renders a client-side `<Forbidden/>` guard (evaluated against the session user) — the mirror of the backend's 403. Gates are `currentUser`-only (see [auth.md](auth.md)). |
+| `state { … }` | Reactive local fields (see §6). Multiple blocks merge. |
+| `derived <n>: T = <expr>` | Named computed binding over params / state (§6). |
+| `action <n>(…) { … }` | Named effect handler — the only place effects may live (§8). |
 | `body:` | Single expression. May be a `match`, a ternary, a component invocation, anything. |
-| `menu { … }` | Per-page menu metadata (`section`, `label`, `order`, `hidden`). |
+| `layout:` | `default`, `none`, or the name of a system-level `layout <Name> { … }`. |
+| `menu { … }` | Per-page menu metadata (`section`, `label`, `order`, `hidden` — validated key set). |
+| `description:` / `ogImage:` / `canonical:` | Static SEO / social-graph metadata (string literals), projected into the generated `index.html` shell. |
 
 ---
 
@@ -180,22 +242,35 @@ to a body expression. They never declare a route.
 
 ```ddd
 component OrderPanel(order: Order) {
-  body: Stack {[
-    Heading { "Order " + order.id, level: 2 },
-    Badge { order.status },
-    Table { order.lines, columns: [productId, quantity, unitPrice, subtotal] },
-    Toolbar {[
-      Action(confirm, then: navigate(OrderConsole, { customerId: order.customerId })),
-      Action(cancel,  then: toast("Cancelled"))
-    ]}
-  ]}
+  body: Stack {
+    Heading { `Order {order.id}`, level: 2 },
+    EnumBadge { order.status },
+    Money { order.total, decimals: 2 },
+    Table { rows: order.lines,
+      Column { "Product", l => l.productName },
+      Column { "Qty",     l => l.quantity } },
+    Toolbar {
+      Action { order.confirm, then: navigate(Home) },
+      Action { order.cancel,  then: toast("Cancelled") }
+    }
+  }
 }
 ```
 
-The compiler enforces parameter relationships at every call site:
-`Form { creates: Order }` binds form fields to `wireShape(Order.create)`;
-`scaffoldDetails { of: Order }` resolves the `of:` aggregate and exposes its
-operations as actions.
+Two things that example pins down and earlier drafts got wrong:
+
+- **A user-visible slot may not be built by `+` concatenation.**
+  `Heading { "Order " + order.id }` is rejected (`loom.user-visible-concat`) —
+  word order, plural rules and formatting don't survive translation.  Use a
+  backtick template (`` `Order {order.id}` ``), which the extractor turns into
+  one ICU catalog message.
+- **Every named argument is read by name, so an invented one is an error.**
+  `Table { …, columns: [ … ] }` raises `loom.page-primitive-unknown-arg`
+  (`Table` has no `columns:` argument) — columns are `Column { … }` children.
+
+The compiler enforces parameter relationships at every call site: `CreateForm
+{ of: Order }` binds form fields to `wireShape(Order.create)`; `OperationForm
+{ of: <record>.<op> }` resolves the operation and its payload.
 
 User-defined components are pure functions over their parameters and local
 state — they cannot synthesise pages, routes, or menu entries.
@@ -209,6 +284,13 @@ same emission path (one component per ui that references them: react
 in `lib/components.dart`, and **feliz** — which has no per-component file — an F#
 props function in App.fs's nested `Components` module).  Per-target deferrals are
 listed in [`generators.md`](generators.md).
+
+A component body admits the same declarations a page does *except* routing
+metadata: `state { … }`, `derived …`, `action …`, then one `body:` expression.
+`component X(…) extern from "./X.tsx"` declares only the typed param contract —
+Loom emits a re-export shim plus a typed `<Name>.props.ts` and the user owns the
+module (`loom.extern-component-has-body` if such a declaration also carries a
+body; `loom.component-missing-body` if a non-extern one doesn't).
 
 - **`ui`-scope** (`ui WebApp { component X(…) { … } }`) — visible only to
   pages and other components inside the same ui block. Use when the
@@ -294,10 +376,65 @@ state {
 
 Each field is `name: TypeRef ('=' init=Expression)?`. Init optional;
 omitted fields default to `null` for optionals, zero/empty for non-optionals.
-Writes use `:=` (already a Loom statement form).
+Writes use `:=` (already a Loom statement form), and only inside an `action`
+(§8).
 
-URL synchronisation deferred to a later revision. v0 state is in-memory
-only.
+A sibling `derived <name>: <T> = <expr>` declares a computed binding over
+params / state / other deriveds — it is read-only, so it needs no action.
+
+### `store` — shared state across pages, and its lifetime
+
+A `store` is a `ui`-level member holding the same `state { }` + `action`s a page
+does, referenced from any page or component by **dotted name** — there is no
+`use` clause and no per-page binding; the dependency is derived from the refs.
+
+```ddd
+store Cart persist: local {
+  state { lines: string[] = [ ]  step: int = 0 }
+  action add(id: string) { lines += id }
+  action clear() { lines := [ ] }
+}
+
+page Home {
+  route: "/"
+  body: Stack { Text { Cart.step }, Button { "Clear cart", onClick: Cart.clear } }
+}
+```
+
+generates (React, `src/stores/cart.ts` — zustand + the `persist` middleware):
+
+```ts
+export const useCart = create<CartState>()(
+  persist(
+    (set) => ({
+      lines: [],
+      step: 0,
+      add: (id) => set((s) => ({ lines: [...s.lines, id] })),
+      clear: () => set(() => ({ lines: [] })),
+    }),
+    { name: "loom.store.Cart", storage: createJSONStorage(() => localStorage) },
+  ),
+);
+```
+
+**`persist:` is the lifetime ladder** — `memory` (default), `local`, `session`,
+`url`.  It answers the v0 "URL synchronisation deferred" note: URL-synced state
+ships, as `persist: url`.  The value is parsed as an identifier, not a keyword,
+so `url` / `local` / `session` stay usable as ordinary field names.
+
+Its gates, all in the catalog:
+
+| Rule | Diagnostic |
+|---|---|
+| The lifetime must be one of the four | `loom.store-lifetime-invalid` |
+| `persist: url` fields must be scalar (string/number/bool/enum/id) — structural state needs `persist: local` | `loom.store-url-field-invalid` |
+| A page/component action may not write store state inline (`Cart.step := 1`) — mutate through a store action | `loom.store-state-inline-write` |
+| A store action may not run a view effect (`navigate` / `toast`) — a store has no router | `loom.store-action-view-effect` |
+| Store actions must compose acyclically | `loom.store-action-cycle` |
+| On `phoenixLiveView` a store is a server-side per-process struct: no browser storage, no URL ownership | `loom.store-lifetime-liveview-invalid`, `loom.store-cross-store-on-liveview-invalid` |
+| Feliz / Flutter persist through a typed codec, so a field of an uncovered type can't cross | `loom.store-lifetime-target-unsupported` |
+
+Stores emit on all six `walkBody` frontends (react/vue/svelte/angular/feliz/flutter).
 
 ---
 
@@ -308,12 +445,21 @@ the expression engine and is usable anywhere an expression appears.
 
 ```ddd
 body: match {
-  step == 0 => Form { fields: [customerId], onSubmit: toItems }
-  step == 1 => Form { fields: [items],      onSubmit: toReview }
-  step == 2 => Review(draft,              onSubmit: submitOrder)
-  else      => Empty {}
+  step == 0 => Stack { Field { "Customer", bind: customerName },
+                       Button { "Continue", onClick: toReview } }
+  step == 1 => Stack { KeyValueRow { "Customer", customerName },
+                       Button { "Place order", onClick: submit } }
+  else      => Empty { "Unknown step" }
 }
 ```
+
+> **Known emitter gap (2026-09-03).**  A page whose `body:` is a *top-level*
+> `match { … }` is silently **dropped** by the React and Svelte page emitters —
+> no file, no route, no diagnostic — because `isWalkableLayoutBody`
+> (`src/generator/_walker/walker-core.ts`) admits only a `call` or `ternary`
+> body, even though the walker itself renders `match` fine.  Vue, Angular and
+> the other targets emit the page.  Until that is fixed, wrap the `match` in a
+> layout container (`body: Stack { match { … } }`) or use a ternary.
 
 Reusable across the language, not just in page bodies:
 
@@ -326,7 +472,29 @@ derived display: string = match {
 }
 ```
 
-Validator may warn on non-exhaustive matches that lack `else`.
+### Variant `match` — over a union subject
+
+The second shape discriminates a union (an operation's `T or E` result, a
+`payload` union, a `T option`) by **variant arms**:
+
+```ddd
+match outcome {
+  Order o    => Text { o.status }
+  Rejected r => Alert { r.reason }
+  else       => Empty { "unknown" }
+}
+```
+
+- The subject must be a simple ref or let-bound name, not a call
+  (`loom.match-subject-not-simple`) — the one exception being the `await`-marked
+  call of `match await` (§8).
+- Arms name variants of the subject's union (`loom.match-unknown-variant`,
+  `loom.match-duplicate-variant`, `loom.match-non-union-subject`); a variant
+  match that covers neither every variant nor an `else` is
+  `loom.match-non-exhaustive`.
+
+`match` is also a **statement** (`MatchStmt`, with statement-block arms), which
+is what an `action` body uses (§8).
 
 ---
 
@@ -349,10 +517,10 @@ page PlaceOrderWizard {
     tags  -= oldTag                    // collection remove
     count += 1                         // scalar increment
   }
-  body: match {
-    step == 0 => Form { fields: [customerId], onSubmit: toItems }
-    else      => Empty {}
-  }
+  body: Stack { match {
+    step == 0 => Field { "Customer", bind: customerName }
+    else      => Empty { "done" }
+  } }
 }
 ```
 
@@ -362,6 +530,36 @@ composition (§8.1). The split is **read vs write** — a render-tree lambda may
 read `state`/`store`/props and compute freely, but only an `action` may write —
 tabulated allowed/rejected in
 [`docs/actions.md` → "What belongs in a lambda vs an action"](actions.md).
+
+### `match await` and the effect marker
+
+A **remote, mutating** command called bare in an action body has an invisible
+async boundary, so the validator rejects it — `loom.missing-effect-marker`,
+raised at severity **error** (`src/ir/validate/checks/ui-checks.ts`) — pointing
+at the `match await` form that handles the returned union:
+
+```ddd
+page OrderDetail(id: Order id) {
+  route: "/orders/:id"
+  state { message: string = "" }
+  action confirmOrder() {
+    match await Sales.Order.confirm() {
+      Order o    => { message := o.status }
+      Rejected r => { message := r.reason }
+    }
+  }
+  body: Stack { Button { "Confirm", onClick: confirmOrder } }
+}
+```
+
+Reads (`byId`, finders), sibling-action calls, and the view effects `navigate` /
+`toast` are not flagged — and there is **no** "spurious marker" diagnostic in
+the catalog, so an `await` you didn't strictly need is never an error.  An
+instance-op `match await` needs the page's route `:id` record
+(`loom.instance-effect-needs-route-id`); the arg list must match the operation
+signature (`loom.match-await-arg-mismatch` / `loom.match-await-arg-type`).
+Full treatment, with the generated client- and LiveView-side output, in
+[`actions.md`](actions.md).
 
 State-mutation lowering across the frontends (inside an `action` body):
 
@@ -452,14 +650,22 @@ index). Before the table was shared, a page body emitted the raw JS spelling
 and those two were **silently wrong**: the same expression computed one thing
 in an aggregate `derived` and another in the page.
 
-Two limits:
+Two earlier limits are now closed, and one rule is worth knowing:
 
-- **`money.min` / `money.max` / `money.round`** need `decimal.js`'s `Decimal`
-  constructor in scope, which the page emitters don't yet import — they still
-  emit verbatim. Every other intrinsic (including `money.abs` / `.floor()` /
-  `.ceil()`, which are methods on the value) renders.
-- **Feliz and Flutter** have no intrinsic table on the walker path yet, so a
-  page-body intrinsic still emits verbatim there.
+- **`money.min` / `money.max` / `money.round` render.**  The page shells detect
+  a `Decimal`-binding intrinsic (`usesDecimalBinding`, `_expr/js-intrinsics.ts`)
+  and pull `decimal.js` into scope, so `Money { amount.min(money("2.00")) }`
+  emits `<MoneyValue value={ Decimal.min(amount, new Decimal("2.00")) } />`.
+- **Feliz and Flutter have their own intrinsic tables** on the walker path —
+  `renderIntrinsic` is a `WalkerTarget` seam, fed by `feliz/fs-expr.ts`
+  (`"string.toUpper": recv => (recv.ToUpper())`) and `flutter/dart-expr.ts`.  A
+  page-body intrinsic no longer emits verbatim there.
+- **A nullable receiver is rejected** (#2711, `loom.intrinsic-nullable-receiver`):
+  every backend emits a bare dereference, so `nick.toUpper()` on a `string?` is
+  an error — guard it with a null-narrowing ternary
+  (`nick != null ? nick.toUpper() : ""`), which the checker treats as narrowing.
+  Arity and argument types are checked too (`loom.intrinsic-arity`,
+  `loom.intrinsic-arg-type`, `loom.intrinsic-unknown`).
 
 ### 8.2 Dependent / conditional form validation — use `state`
 
@@ -526,17 +732,25 @@ Split the problem by where the rule lives:
 
 ---
 
-## 9. Builtin component library — closed v0
+## 9. Builtin component library — closed
+
+The set is **closed**: 56 top-level primitives (`WALKER_LAYOUT_PRIMITIVES`) plus
+two sub-elements (`Tab`, `Column`), all declared in
+`src/util/walker-primitive-names.ts` and dispatched from
+`src/generator/_walker/registry.ts`.  Users compose them into their own
+`component`s; they cannot add primitives.  The per-primitive reference, with
+generated output for each, is
+[`language-reference/16-ui-walker-primitives.md`](language-reference/16-ui-walker-primitives.md);
+the table below is the map.
 
 | Component | Purpose |
 |---|---|
-| `scaffoldList { of: T }`, `scaffoldDetails { of: T }` | Canonical list / single-record page bodies (Breadcrumbs · Toolbar · QueryView · Table; field card · operation actions). Emitted by `scaffold(aggregates: […])`; also hand-writable to embed a list/detail in a custom page body. *(The earlier `List` / `Detail` / `MasterDetail` archetype names were inert, never-rendered duplicates of these and were **removed** — see [decisions.md → D-NO-PAGE-ARCHETYPES](decisions.md#d-no-page-archetypes).)* |
-| `Form { creates: T \| runs: workflow \| into: state, fields, onSubmit, then? }` | Input form bound to a typed request slice. |
-| `Dashboard(items: […])` | Composite read-only page; grid layout. |
-| `Review(of: T, onSubmit)` | Read-only summary view of a typed value, with a submit action. |
+| `CreateForm { of: T }`, `OperationForm { of: <record>.<op> }`, `WorkflowForm { runs: <wf> }`, `DestroyForm { of: T }` | The four named-leaf forms (the old polymorphic `Form { creates: \| runs: \| into: }` split into these). `DestroyForm`'s `of:` names the **aggregate**, not a loaded record — the emitter resolves it through the aggregate map, and anything else degrades to a comment on every target with no diagnostic (an honest gap to know about). |
 | `Stack`, `Group`, `Grid`, `Tabs` (+ `Tab`), `Card`, `Toolbar`, `Container`, `Paper`, `Breadcrumbs`, `Divider`, `Section`, `Sticky` | Layout primitives. `Section` is a semantic anchor target; `Sticky` a sticky-position wrapper; `Tab` is the sub-element of `Tabs` — `Tab { <label>, …children }`, a children container like `Card`: every positional after the label renders in the panel. |
-| `Heading`, `Text`, `Bold`, `Italic`, `InlineCode`, `Badge`, `Stat`, `Empty`, `Anchor`, `Image`, `Avatar`, `Loader`, `Skeleton`, `Alert`, `KeyValueRow`, `Icon` | Display primitives. `Bold`/`Italic`/`InlineCode` are inline-emphasis spans; `Icon` is a builtin-name or `svg:` literal, decorative-by-default (`aria-hidden`) unless `label:` gives it meaning — which makes it a named `role="img"` and makes that name a user-visible slot, translated through the message catalog. |
-| `Field`, `NumberField`, `PasswordField`, `MultilineField`, `Toggle`, `SelectField { label, bind, options }`, `Select`, `Fieldset` | Bindable inputs. `MultilineField` is the textarea twin of `Field`; `SelectField` is a controlled single-select over a string-array `options:` expression. All accept an optional `error:` expression rendered in the pack's inline error slot (§8.2). |
+| `Heading`, `Text`, `Bold`, `Italic`, `InlineCode`, `Badge`, `Stat`, `Empty`, `Anchor`, `Image`, `Avatar`, `Loader`, `Skeleton`, `Alert`, `KeyValueRow`, `Icon`, `Slot` | Display primitives. `Bold`/`Italic`/`InlineCode` are inline-emphasis spans; `Slot { }` renders the children a caller passed (component bodies only — `loom.slot-outside-component`); `Icon` is a builtin-name or `svg:` literal, decorative-by-default (`aria-hidden`) unless `label:` gives it meaning — which makes it a named `role="img"` and makes that name a user-visible slot, translated through the message catalog. |
+| `Field`, `NumberField`, `PasswordField`, `MultilineField`, `Toggle`, `SelectField { label, bind, options }`, `FileUpload` | Bindable inputs, each `bind:`-bound to a `state` field. `MultilineField` is the textarea twin of `Field`; `SelectField` is a controlled single-select over a string-array `options:` expression; `FileUpload` binds a `File` state field (`loom.file-upload-not-file-field`). All accept an optional `error:` expression rendered in the pack's inline error slot (§8.2). |
+| `Chart { of:, kind:, x:, y: }` | Line / bar series over a **grouped** query-time `projection` — `kind:` is `"line"` or `"bar"` (`loom.chart-kind-invalid`), `of:` must be a grouped projection (`loom.chart-of-not-grouped`), and the accessors must be simple row fields (`loom.chart-accessor-not-field`). Ships on every frontend, LiveView included (inline SVG there — no JS charting library). |
+| `Timeline { of: <entries> }` | An `audited` aggregate's history (the `AuditEntry[]` served at `GET /<agg>/{id}/history`) as an ordered action / time / actor / field-change list. |
 | `Action(operation, then?)`, `Button { label, on? }` | Action primitives. |
 | `Modal { trigger, … }` | Disclosure surface — hosts an `OperationForm` (scaffold detail pages) or a state-controlled `open:` body. The state-controlled form ships on **all six frontends**. Flutter's dialogs are imperative (`showDialog` pushes a route), so there is no widget to conditionally render: it bridges through a generated `LoomModalHost` that drives `showDialog` on the flag's rising edge and reports dismissal back, keeping the page's state the single source of truth. `title:` is a user-visible slot on both shapes — it is the dialog's title, translated through the message catalog. The two shapes do not COMBINE on every target: `Modal { open: <stateBool>, OperationForm { … } }` renders on Angular, Feliz and HEEx (which drive the dialog from their own trigger) and collapses the whole modal to a comment on React/Vue/Svelte/Flutter, so it is a compile error there (`loom.modal-controlled-op-form-unsupported`) — use the trigger shape, which drives the dialog itself. |
 | `Money(value, currency?, decimals?)`, `DateDisplay`, `EnumBadge`, `IdLink`, `FileLink` | Formatter primitives. `Money` renders the wire value **verbatim** by default — its own digits, locale-neutral, with no `Number()` coercion, no grouping separators, no currency symbol and no re-scaling, so a `NUMERIC(19,4)` value's 4th decimal is visible (Loom `money` has no currency dimension, so nothing may be invented for it). `decimals: n` re-scales the digit string to exactly *n* fraction digits, half away from zero — the backends' own rounding family, never through a float. `currency: "EUR"` prefixes **the code you passed**, verbatim (`EUR 12.3456`). The contract is one shared implementation across all 15 design packs (`src/generator/_frontend/money-format.ts`; [design-packs.md](design-packs.md) § the money-display contract). Feliz already rendered the raw string and prefixes only a declared currency, so it matches by construction — it ignores `decimals:`; Flutter still formats through `NumberFormat.decimalPattern()` (M-T1.21). |
@@ -547,16 +761,14 @@ Split the problem by where the rule lives:
 | `For { each: T[], empty?: markup, item => markup }` | List comprehension — emits the item lambda's markup once per element. TSX lowers to a keyed `.map` + `<Fragment>`, Vue to `<template v-for :key>`, Svelte to a keyed `{#each}`, Angular to an `@for (… ; track …)` block, Phoenix LiveView to a `for … do … end` block. A child primitive (nest inside a layout container — it isn't a standalone page body); the list key is the loop index. The optional `empty:` arm is rendered when the collection is empty — Svelte's native `{:else}`, a TSX `length === 0 ? … : .map(…)` ternary, a Vue `v-if` sibling `<template>`, Angular's `@for`/`@empty` block, a HEEx `Enum.empty?/1` guard. |
 | `QueryView { of:, loading:, error:, empty:, data:, single?:, paged?: }` | 4-arm query-state branching (collection or single-record). The `data:` binding also exposes the paged envelope's page metadata — see §9.2. |
 
-The set is closed in v0. **Removed from earlier drafts:** `Wizard`, `Stage`,
-`Switch`, `Case`, `When`, `Sequence` — all subsumed by `match` plus the
-state/transition primitives. The polymorphic `Form { creates: | runs: |
-into: | <instance>.<op> }` dispatcher is also gone: it split into the four
-named-leaf forms above (`CreateForm` / `OperationForm` / `WorkflowForm` /
-`DestroyForm`), each a distinct primitive rather than one overloaded name.
-The narrative `Form { … }` snippets in §7 and the §12 wizard sketches
-predate that split — read them as the corresponding named-leaf form (the
-`into:` / `fields:` draft-binding shapes remain illustrative; multi-step
-draft forms are a §14 non-goal, not a shipped primitive).
+**Removed from earlier drafts:** `Wizard`, `Stage`, `Switch`, `Case`, `When`,
+`Sequence` — all subsumed by `match` plus the state/transition primitives.  The
+polymorphic `Form { creates: | runs: | into: | <instance>.<op> }` dispatcher is
+also gone: it split into the four named-leaf forms above.  The `Form { … }`
+snippets that remain in the §12 wizard sketches predate that split — read them
+as the corresponding named-leaf form (the `into:` / `fields:` draft-binding
+shapes are illustrative only; multi-step draft forms are a §14 non-goal, not a
+shipped primitive).
 
 **Containers vs fixed slots.** A layout primitive (`Stack`, `Group`, `Card`,
 `Tab`, `Section`, `Toolbar`, `Container`, …) renders *every* positional as a
@@ -576,6 +788,19 @@ or use the state-controlled `Modal { …children, open: <stateBool> }`, which *i
 a children container.
 
 
+**Accessibility is part of the primitive contract, not a pack concern.**  Each
+registry entry declares its role / naming obligation, and three gates fire at
+validation time: `loom.a11y-missing-alt` (an `Image` / `Avatar` with neither
+`alt:` nor `decorative: true` — alt text is human content Loom cannot derive),
+`loom.a11y-icon-only-no-name` (an icon-only `Button`, which a screen reader
+would announce as the meaningless default), and `loom.a11y-theme-contrast` (a
+`theme { … }` pair whose contrast ratio fails WCAG).
+
+**Named arguments are read by name, so an unknown one is an error**
+(`loom.page-primitive-unknown-arg`) — the vocabulary per primitive lives in
+`src/util/walker-primitive-args.ts` and is tabulated in
+[`language-reference/16`](language-reference/16-ui-walker-primitives.md).
+
 A bare name in a rendered slot must resolve to a route parameter, a `state`
 field, a `derived` binding, an enclosing lambda's parameter, or a store field.
 An unresolved one (`Text { nosuchthing }`) has nothing to read and used to emit
@@ -585,22 +810,21 @@ rejected as `loom.unresolved-page-ref`, the ref-spelling twin of
 
 `List` / `Detail` / `MasterDetail` were also retired: they were legacy
 archetype names that never had walker renderers (they silently degraded to a
-`// not supported` comment), so they're gone as standalone primitives. The
-list / detail use case is served by `scaffoldList { of: T }` /
-`scaffoldDetails { of: T }` (the scaffold archetypes, usable as explicit
-bodies — `List { of: T }` is now spelled `scaffoldList { of: T }`) or by
-composing `QueryView` + `Table` directly. The `List`/`Detail`/`MasterDetail`
-snippets in §4, §5, and §12 predate that removal — read them as the
-`scaffold*` archetypes (`MasterDetail`'s split-pane has no built-in
-archetype; compose it from a list + selection `state {}` + a detail panel).
+`// not supported` comment), so they're gone as standalone primitives — see
+[decisions.md → D-NO-PAGE-ARCHETYPES](decisions.md#d-no-page-archetypes).  The
+list / detail use case is served by the `scaffold` macro (§10), or by composing
+`QueryView` + `Table` directly.  The **`scaffoldList { of: T }` /
+`scaffoldDetails { of: T }` body sentinels earlier drafts of this doc described
+never shipped either** — a page body naming one is a parse error (§4).
 
-Four further names from earlier drafts of this table never shipped as
-primitives at all: `Dashboard` and `Review` (composite read-only pages —
-express them as a `Stack`/`Grid` of the display primitives; the `Review(…)`
-calls in the §12 wizard sketches are illustrative, like the draft-form
-shapes above), `Select` (use `SelectField`), and `Fieldset` (an internal
-value-object render shape, not a hand-writable input). The closed set is
-exactly the rows above.
+Six further names from earlier drafts of this table are not primitives:
+`Dashboard` and `Review` (composite read-only pages — express them as a
+`Stack`/`Grid` of the display primitives; the `Review(…)` calls in the §12
+wizard sketches are illustrative, like the draft-form shapes above), `Select`
+(use `SelectField`), `Fieldset` (an internal value-object render shape, not a
+hand-writable input), and `Switch` (control flow is `match`; the boolean input
+is `Toggle`).  A body naming any of them raises `loom.unknown-page-element`.
+The closed set is exactly the rows above.
 
 Users freely define their own `component`s, which compose these builtins.
 
@@ -665,7 +889,7 @@ one thing a sibling ("Delete selected (3)") has a real need for, so it lives in
 field (which the walker would otherwise silently drop).
 
 The grid's **chrome** comes from the active design pack
-(`primitive-data-grid.hbs` — all eleven JS packs ship one); the TanStack wiring above it is framework-level. The checkbox column
+(`primitive-data-grid.hbs` — all 15 JS design packs ship one); the TanStack wiring above it is framework-level. The checkbox column
 is walker-emitted as a plain `<input type="checkbox">` rather than a pack
 component: it is the one cell whose *behaviour* is load-bearing, so keeping it
 out of the packs means selection needs no template change anywhere.
@@ -837,19 +1061,43 @@ the same page render blank on the JSX frontends and raise on LiveView.
 
 ---
 
-## 10. `scaffold` — the one macro
+## 10. `scaffold` — the macro family
 
-Single fixed pre-codegen pass. Not user-extensible. Hierarchical:
+Scaffolding is **not** a `ui` member keyword.  It is a macro applied through the
+universal `with` clause, expanded in AST phase ② — either on the `ui`
+declaration or as a `with …` line inside it:
+
+```ddd
+ui SalesAdmin with scaffold(aggregates: [Customer], workflows: [placeOrder]) {
+  api Sales: SalesApi
+  page Home { route: "/"  body: Heading { "Welcome", level: 1 } }
+}
+```
+
+The four selector arguments are `subdomains:`, `contexts:`, `aggregates:`,
+`workflows:` (ref-lists; a wrong-kind ref is `loom.macro-arg-kind-mismatch`, a
+wrong host is `loom.macro-target-mismatch`).  There is no `modules:` selector —
+the subdomain-level spelling is `subdomains:`.  It fans out hierarchically:
 
 ```
-scaffold subdomains: A, B, …    →  ∪  scaffold contexts:   <each context in each subdomain>
-scaffold contexts:   X, Y, …    →  ∪ {
-                                       scaffold aggregates: <each aggregate in X>,
-                                       scaffold workflows:  <each workflow in X>
-                                     }
-scaffold aggregates: Order, …   →  page <Order>List + <Order>New + <Order>Detail
-scaffold workflows:  placeOrder, … → page PlaceOrderWorkflow  (+ shared WorkflowsIndex)
+scaffold(subdomains: [A])   →  scaffoldSubdomain(of: A)  → one scaffoldContext per context
+scaffold(contexts:   [X])   →  scaffoldContext(of: X)    → scaffoldAggregate / scaffoldWorkflow per member
+scaffold(aggregates: [Order]) →  area Order { page List, page New, page Detail }
+scaffold(workflows: [placeOrder]) → page PlaceOrderWorkflow (+ the shared WorkflowsIndex)
 ```
+
+Siblings in the family, documented in [`scaffold-macros.md`](scaffold-macros.md):
+`scaffoldSubdomain` / `scaffoldContext` / `scaffoldAggregate` / `scaffoldWorkflow`
+(the ui-side composers and leaves), `scaffoldApi` / `scaffoldHandlers` /
+`scaffoldPaged` / `scaffoldPagedApi` (the api/context side), and
+**`scaffoldDashboard`** (target `context`), which emits one singleton query-time
+`projection` per aggregate — a row count plus a sum per numeric/money field,
+aggregated in SQL — while the ui-side `scaffold` grows `Home` a matching row of
+`Stat` tiles bound to it (a money tile through `Money`).  Both halves derive the
+projection name in `_dashboard-shared.ts`.
+
+`scaffoldView` is **gone** with the `view` declaration it scaffolded (#2200);
+read models are `projection`s now.
 
 ### What each scaffolded page contains
 
@@ -859,7 +1107,7 @@ identical to one the user could hand-write. The contract per page:
 
 | Page | Body |
 |---|---|
-| `<Agg>List` | Breadcrumbs · Toolbar (heading + "New" button) · `QueryView { of: api.<Agg>.all }` → `Table` with one `Column` per **non-collection** scalar field (`IdLink` / `EnumBadge` / `DateDisplay` / text by type), per-row testid. |
+| `<Agg>List` | Breadcrumbs · Toolbar (heading + "New" button) · optional **filter bar** · `QueryView { of: api.<Agg>.all(page, size, sortKey, sortDir), paged: true }` → server-paged `Table` with one `Column` per **non-collection** scalar field (`IdLink` / `EnumBadge` / `DateDisplay` / text by type), per-row testid. The filter bar binds one input per parameter of the aggregate's parameterised finds — `string` / `guid` / `datetime` / `bool` / enum / id params all render; a parameter shape with no input is the honest gate `loom.scaffold-filter-param-unsupported` rather than a silently dropped filter. |
 | `<Agg>New` | Breadcrumbs · heading · `Card { CreateForm { of: <Agg> } }` — RHF + Zod + `useCreate<Agg>`, one input per required field. A field's declared default (`field: T = <expr>`) seeds that input when it is client-evaluable (constant / enum member); otherwise the input starts at the type-zero placeholder. |
 | `<Agg>Detail` | Breadcrumbs · heading · `QueryView { of: api.<Agg>.byId(id), single: true }` whose data card holds **three** sections: ① `KeyValueRow` per scalar field; ② one **operation control** per `public operation` — a button that opens a `Modal` hosting an auto-generated `OperationForm { data.<operation> }` (the operation referenced through the loaded record) bound to the `use<Op><Agg>` mutation hook (params dispatched by the same type rules as `CreateForm { of: }`); ③ one **related-entity list** per `contains` collection — a titled `Card { Table }` over `data.<containment>` with a `Column` per part field. |
 | `<Workflow>Workflow` | Breadcrumbs · heading · `Card { WorkflowForm { runs: <wf> } }`. |
@@ -869,16 +1117,15 @@ platform-completeness proof for the modal/disclosure and nested-table
 primitives: if `scaffold` can emit them, an explicit `page` can too
 (see `examples/acme-order-explicit.ddd`).
 
-Multiple `scaffold` directives stack. No `except` clause — list what you
-want, not what you don't.
+Multiple `scaffold` calls stack (`with a(...), b(...)`, or several `with` lines).
+No `except` clause — list what you want, not what you don't.
 
 ```ddd
-ui SalesAdmin {
-  scaffold subdomains: [Catalog]             // bulk
-  scaffold aggregates: Customer, Product     // a la carte
-  scaffold workflows:  placeOrder
+ui SalesAdmin with scaffold(subdomains: [Catalog]),
+                   scaffold(aggregates: [Customer, Product], workflows: [placeOrder]) {
+  api Sales: SalesApi
   page OrderList   { ... }                   // custom
-  page OrderDetail { ... }
+  page OrderDetail(id: Order id) { ... }
 }
 ```
 
@@ -895,8 +1142,10 @@ Three layered scales of override, all the same mechanism — explicit
 
 ### Validator obligations
 
-- Each `scaffold <kind>: <name>` resolves to an existing declaration of
-  that kind, reachable through the deployable's `targets`.
+- Each selector entry resolves to an existing declaration of that kind
+  (`loom.macro-arg-kind-mismatch`), reachable through the deployable's `targets`.
+- A `with scaffold(...)` clause that survives into lowering unexpanded is
+  `loom.scaffold-unexpanded`.
 - Stacked `scaffold` directives may not double-scaffold the same construct.
 - Two `scaffold` directives may not produce pages with identical generated
   names; explicit `page <Name>` overrides exactly one source.
@@ -954,7 +1203,7 @@ Pages carry `menu { … }` metadata; sidebar is derived. Optional `ui`-level
 ### Lowering
 
 ```
-1. Run scaffold → pages, each with default `menu { section, label }`
+1. Run the scaffold macro → pages, each with default `menu { section, label }`
    (defaults: aggregates → "Aggregates", workflows → "Workflows")
 2. Apply explicit `page X` overrides (by name)
 3. If `ui` has a `menu { … }` block:
@@ -1004,26 +1253,35 @@ state + match + block-body lambdas + navigation. Two shapes both work:
 ```ddd
 page PlaceOrderWizard {
   route: "/orders/new"
+  state { step: int = 0  customerName: string = ""  note: string = "" }
+  derived canContinue: bool = customerName != ""
 
-  state {
-    step:  int               = 0
-    draft: PlaceOrderRequest = {}
-  }
+  action toReview() { step := 1 }
+  action back()     { step := 0 }
+  action submit()   { toast("Draft saved")  navigate(Home) }
 
-  action toItems()  { step := 1 }
-  action toReview() { step := 2 }
-  action submitOrder() {
-    call placeOrder(draft)
-    navigate(OrderConsole, { customerId: draft.customerId })
-  }
-  body: match {
-    step == 0 => Form {into: draft, fields: [customerId], onSubmit: toItems}
-    step == 1 => Form {into: draft, fields: [items],      onSubmit: toReview}
-    step == 2 => Review(of: draft,                        onSubmit: submitOrder)
-    else      => Empty {}
-  }
+  body: Stack { match {
+    step == 0 => Stack {
+      Field         { "Customer", bind: customerName },
+      MultilineField { "Note",    bind: note },
+      Button { "Continue", onClick: toReview, disabled: !canContinue }
+    }
+    step == 1 => Stack {
+      KeyValueRow { "Customer", customerName },
+      KeyValueRow { "Note", note.toUpper() },
+      Button { "Back", onClick: back },
+      Button { "Place order", onClick: submit }
+    }
+    else => Empty { "Unknown step" }
+  } }
+  menu { section: "Sales", label: "New order", order: 2 }
 }
 ```
+
+Note the `Stack { match { … } }` wrapper — a bare top-level `match` body is
+currently dropped by the React and Svelte emitters (§7).  A real remote submit
+would go through `match await` (§8) on a page that has the route id, or through
+`CreateForm { of: Order }`.
 
 ### Multi-page wizard (URL-encoded state, deep-linkable)
 
@@ -1048,20 +1306,24 @@ page ReviewStep(customerId: Customer id, items: OrderLine[]) {
 }
 ```
 
-Both fall out of existing primitives. Type safety on the final
-`call placeOrder(…)` enforces draft completeness.
+Both fall out of existing primitives. Type safety on the final call enforces
+draft completeness.  The `Form { fields: … }` / `Review(of: …)` shapes in the
+multi-page sketch predate the named-leaf form split (§9) — read them as
+`CreateForm` / `WorkflowForm` plus a hand-composed summary `Stack`.
 
 ---
 
-## 13. Migration
+## 13. Migration *(historical — completed)*
 
-**Explicit `ui` is required for every `react` deployable.** No implicit
-defaults — every existing `.ddd` file with a `platform: react` deployable
-gains an explicit `ui` block. The minimum is a one-liner that recovers
-today's behaviour verbatim:
+This section records the one-time migration off the pre-metamodel React
+generator.  It is done; kept for the rationale.
+
+**Explicit `ui` is required for every UI-mounting deployable.** No implicit
+defaults — every `.ddd` file with a frontend deployable declares a `ui` block.
+The minimum is a one-liner that recovers the old behaviour:
 
 ```ddd
-ui WebApp { scaffold subdomains: [Catalog, Sales, CustomerMgmt] }
+ui WebApp with scaffold(subdomains: [Catalog, Sales, CustomerMgmt]) { }
 
 deployable webApp {
     platform: react
@@ -1071,77 +1333,92 @@ deployable webApp {
 }
 ```
 
-The `examples/acme.ddd` `webApp` deployable is updated to this form.
-Validator rejects a `react` deployable without `ui:` (HTTP analogue: the
-deployable is missing its mount point).
+`examples/acme.ddd` uses this form.  The validator rejects a UI-mounting
+deployable without `ui:` (HTTP analogue: the deployable is missing its mount
+point).
 
-**Generator changes** (this refactor has shipped — described in
-present tense here is historical; current reality is below):
+**Generator changes** (all landed):
 
-- The legacy archetype renderer (`pages-builder.ts`) is **removed**.
-  Page bodies — both hand-written and scaffolded — now route through
-  `src/generator/react/body-walker.ts`, which dispatches every
-  walker-stdlib primitive into the active design pack.
-- `workflow-builder.ts` still exists for
-  per-aggregate plumbing the walker calls into.
-- `pages-emitter.ts` is the shell emitter that wraps the walker's
-  body output with `useForm` / mutation hook / `useParams` / imports.
+- The legacy archetype renderer (`pages-builder.ts`) is **removed**.  Page
+  bodies — hand-written and scaffolded alike — route through the shared body
+  walker (`src/generator/_walker/walker-core.ts`; `react/body-walker.ts` is now
+  a thin re-export), which dispatches every walker primitive into the active
+  design pack.
+- `pages-emitter.ts` is the shell emitter that wraps the walker's body output
+  with `useForm` / mutation hooks / `useParams` / imports.
 - `page-objects-builder.ts` stays — driven by route + testid metadata.
-- `theme-builder.ts` stays — theme is a system concern.
+- The per-aggregate `workflow-builder.ts` and `theme-builder.ts` files named by
+  the original plan no longer exist: workflow plumbing moved into the walker's
+  form primitives, and the theme is emitted from the pack layer
+  (`react/templating/preparers/theme.ts`).
 
 ---
 
-## 14. Open questions / non-goals (v0)
+## 14. Open questions / non-goals *(v0 list, re-dispositioned 2026-09-03)*
 
-- **Per-page theming.** Today `theme { … }` is system-wide. Per-page
-  overrides not in v0.
-- **Internationalisation.** Strings in `title:` etc. likely want a `t("…")`
-  form. Not in v0.
-- **URL-synced state.** Deferred. v0 state is in-memory only.
-- **Multi-step named flows.** Not in v0; block-body lambdas + custom
-  components cover realistic cases. Add a `flow` keyword later only if
-  forced.
-- **User-extensible component library.** v0 stdlib is closed.
-- **App-shell beyond menu.** Header, footer, breadcrumb stay hardcoded.
-  Add `header { … }` / `footer { … }` later only if real cases force them.
+- **Per-page theming.** *Still open.*  `theme { … }` is system-wide; a page
+  picks a `layout:`, not a palette.
+- **Internationalisation.** **Resolved.**  The string-catalog layer ships: user-visible
+  literals extract to `.loom/messages.en.json`, emit as `t("<key>", "<default>")`
+  on every frontend, backtick templates lower to ICU messages, and
+  `ddd i18n {extract,init,sync,status,check,prune}` is the translator workflow
+  (`check --strict` is the CI gate).  Concatenation in a user-visible slot is now
+  an error (`loom.user-visible-concat`, §5).
+- **URL-synced state.** **Resolved.**  `store X persist: url` syncs scalar store
+  fields to the query string (`loom.store-url-field-invalid` for non-scalars);
+  `persist: local` / `session` cover the storage cases (§6).
+- **Multi-step named flows.** *Still open, and still a non-goal.*  `state` +
+  `match` + named `action`s cover the wizard cases (§12); no `flow` keyword.
+- **User-extensible component library.** *Partly resolved.*  The 56 walker
+  primitives stay closed, but the extension points around them shipped: user
+  `component`s, `component X(…) extern from "<path>"` for hand-written render
+  code, `function … extern` for hand-written logic, and the macro-authoring API
+  ([`macro-api.md`](macro-api.md)) for source-level expansion.
+- **App-shell beyond menu.** **Resolved.**  A system-level
+  `layout <Name> { header { … } sidebar { … } footer { … } main }` declares the
+  shell slots (bodies are ordinary walker expressions), and a page opts in with
+  `layout: <Name>` (presets `default` / `none`).
 
 ---
 
 ## 15. Grammar sketch (appendix)
 
-Productions added or extended in `src/language/ddd.langium`. Reuses
-existing `TypeRef`, `Expression`, `Parameter`, `Statement`, `Property`.
+A faithful (but abridged) transcription of the UI productions in
+`src/language/ddd.langium` as of 2026-09-03 — cross-references, soft-keyword
+unions and unrelated members elided.  The grammar file is the authority.
 
 ```langium
-// 1. Add Ui to SystemMember
+// 1. `ui` is BOTH a SystemMember and a root-level ModelMember
 SystemMember:
-    Module | Deployable | BoundedContext | TestE2E | UserBlock | ThemeBlock | Ui;
+    Subdomain | Deployable | BoundedContext | TestE2E | UserBlock | AuthBlock
+  | TenancyDecl | ThemeBlock | Ui | Api | Storage | Resource | ChannelSource
+  | TimerSource | Layout | Capability | FunctionDecl;
 
-// 2. Deployable gains optional ui reference
-Deployable:
-    'deployable' name=ID '{'
-        ...
-        ('ui' ':' ui=[Ui:ID] ','?)?           // new, react-only (validator)
-    '}';
+// 2. Deployable's ui binding — sugar or compose, plus `hosts:`
+UiSugarBinding:   'ui' ':' ref=[Ui:ID] ','?;
+UiComposeBinding: 'ui' ':' ref=[Ui:ID] '{' (bindings+=UiParamBinding (',' …)*)? '}' ','?;
+UiParamBinding:   name=LooseName ':' source=[Deployable:LooseName];
 
 // 3. Ui block
 Ui:
-    'ui' name=ID '{'
+    'ui' name=ID withClause=WithClause? '{'
+        ('framework' ':' framework=Framework ','?)?
         members+=UiMember*
     '}';
 
+Framework returns string:
+    'react' | 'svelte' | 'vue' | 'angular' | 'feliz' | 'flutter' | 'phoenixLiveView';
+
 UiMember:
-    UiApiParam | Page | Component | MenuBlock;
+    UiApiParam | UiChannelParam | UiNotification | UiFunction
+  | Page | Component | Store | Area | MenuBlock;
 
-// 3a. UI api parameter — local handle on a system-level `api` contract.
-UiApiParam:
-    'api' name=ID ':' contract=[Api:ID];
-
-// (An earlier draft also shipped `import helper <name> from "<path>"`
-//  (UiHelperImport) — a TS-function escape hatch.  It was removed
-//  (unused, untyped, and it overloaded the `import` keyword used for
-//  Loom-file imports); a future typed foreign-code hatch would live in
-//  the `extern` family, not under `import`.)
+UiApiParam:     'api' name=ID ':' apiRef=[Api:ID];
+UiChannelParam: 'channel' name=ID ':' context=[BoundedContext:ID] '.' channel=[Channel:ID];
+UiNotification: 'on' param=[UiChannelParam:ID] '.' event=[EventDecl:ID]
+                    '(' bind=ID ')' '{' body+=AssignOrCallStmt* '}';
+UiFunction:     'function' name=ID '(' params? ')' ':' returnType=TypeRef
+                    'extern' 'from' externPath=STRING;
 
 // 4. Page
 Page:
@@ -1150,127 +1427,177 @@ Page:
     '}';
 
 PageProp:
-      'route'    ':' route=STRING
-    | 'title'    ':' title=Expression
-    | 'requires'      auth=Expression
-    | StateBlock
-    | 'body'     ':' body=Expression
-    | PageMenuMeta;
+      RouteProp | TitleProp | RequiresProp | StateBlock | DerivedProp | ActionDecl
+    | BodyProp | PageMenuMeta | LayoutProp | DescriptionProp | OgImageProp | CanonicalProp;
 
-PageMenuMeta:
-    'menu' '{' (entries+=MenuMetaEntry (',' entries+=MenuMetaEntry)* ','?)? '}';
+RouteProp:  'route' ':' value=STRING;
+TitleProp:  'title' ':' value=Expression;
+BodyProp:   'body'  ':' expr=Expression;
+LayoutProp: 'layout' ':' value=ID;          // `default` | `none` | a Layout name
+RequiresProp: 'requires' expr=Expression;
 
-MenuMetaEntry:
-    name=('section' | 'label' | 'order' | 'hidden') ':' value=Expression;
+PageMenuMeta:  'menu' '{' (entries+=MenuMetaEntry (','? …)* ','?)? '}';
+MenuMetaEntry: name=LooseName ':' value=Expression;   // section|label|order|hidden (validator)
 
-// 5. Component
+// 5. Component — `extern from` replaces the body
 Component:
-    'component' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')' '{'
-        decls+=ComponentDecl*
-        'body' ':' body=Expression
-    '}';
+    'component' name=ID '(' (params+=Parameter (',' …)*)? ')'
+        (extern?='extern' 'from' externPath=STRING)?
+        ('{' decls+=ComponentDecl* ('body' ':' body=Expression)? '}')?;
 
-ComponentDecl:
-    StateBlock;
+ComponentDecl: StateBlock | DerivedProp | ActionDecl;
 
-// 6. State block
-StateBlock:
-    'state' '{'
-        fields+=StateField*
-    '}';
+// 6. State / derived / action — shared by page, component and store
+StateBlock:  'state' '{' fields+=StateField* '}';
+StateField:  name=StateFieldName ':' type=TypeRef ('=' init=Expression)?;
+DerivedProp: 'derived' name=ID ':' type=TypeRef '=' expr=Expression;
+ActionDecl:  'action' name=(ID | 'write') '(' (params+=Parameter (',' …)*)? ')'
+                 '{' stmts+=Statement* '}';
 
-StateField:
-    name=ID ':' type=TypeRef ('=' init=Expression)?;
+// 7. Store — shared client state, referenced by dotted name
+Store:     'store' name=ID ('persist' ':' lifetime=LooseName)? '{' decls+=StoreDecl* '}';
+StoreDecl: StateBlock | ActionDecl;
 
-// 7. Scaffold — NOTE: no longer a grammar rule.  Earlier versions of
-// the page metamodel parsed `scaffold modules: A, B` as a first-class
-// UiMember.  The shipping grammar removes that production; scaffolding
-// is now an AST-phase macro applied via the universal `with` clause on
-// the host UI block:
-//
-//   ui WebApp with scaffold(subdomains: [Sales, Catalog]) { ... }
-//
-// The macro expands to the same set of Page nodes the old grammar rule
-// produced.  See docs/scaffold-macros.md for the full surface
-// (scaffold / scaffoldModule / scaffoldContext / scaffoldAggregate /
-// scaffoldWorkflow) and the `with` syntax in
-// docs/language.md.
+// 8. Area — page grouping by containment
+Area:       'area' name=ID '{' members+=AreaMember* '}';
+AreaMember: Page | Area;
 
-// 8. Menu
-MenuBlock:
-    'menu' '{'
-        sections+=MenuSection*
-    '}';
+// 9. Layout — a SYSTEM member, not a ui member
+Layout:          'layout' name=ID '{' slots+=LayoutSlot+ '}';
+LayoutSlot:      LayoutNamedSlot | LayoutMainSlot;
+LayoutNamedSlot: name=LayoutSlotName '{' body=Expression '}';
+LayoutMainSlot:  'main';
+LayoutSlotName returns string: 'header' | 'sidebar' | 'footer';
 
-MenuSection:
-    'section' name=STRING '{'
-        (links+=MenuLink (',' links+=MenuLink)* ','?)?
-    '}';
-
+// 10. Menu
+MenuBlock:   'menu' '{' sections+=MenuSection* '}';
+MenuSection: 'section' label=STRING '{' (links+=MenuLink (','? …)* ','?)? '}';
 MenuLink:
-      'link' page=[Page:ID] ('{' (props+=MenuLinkProp (',' props+=MenuLinkProp)* ','?)? '}')?
-    | 'link' label=STRING '->' url=STRING;
+      'link' page=[Page:QualifiedPageName] ('{' (props+=MenuLinkProp …)? '}')?
+    | 'link' externalLabel=STRING '->' externalUrl=STRING;
+MenuLinkProp: name=LooseName ':' value=Expression;      // label|order (validator)
 
-MenuLinkProp:
-    name=('label' | 'order') ':' value=Expression;
+// 11. Scaffolding is a MACRO, not a production
+WithClause: 'with' calls+=MacroCall (',' calls+=MacroCall)*;
+MacroCall:  name=ID ('(' (args+=MacroArg (',' args+=MacroArg)*)? ')')?;
+MacroArg:   name=LooseName ':' value=MacroArgValue;     // e.g. aggregates: [Order]
 
-// 9. Match expression — slots into the expression precedence ladder
-Expression:
-    MatchExpr | TernaryExpr;
+// 12. `match` — predicate arms OR variant arms, expression AND statement
+Expression: Lambda | MatchExpr | TernaryExpr;
 
 MatchExpr:
-    'match' '{'
-        arms+=MatchArm (','? arms+=MatchArm)* ','?
-        ('else' '=>' elseExpr=Expression)?
-    '}';
+    'match' (subject=MatchSubject '{' varArms+=VariantArm* ('else' '=>' elseExpr=Expression)? '}'
+           | '{' arms+=MatchArm* ('else' '=>' elseExpr=Expression)? '}');
 
-MatchArm:
-    cond=Expression '=>' value=Expression;
+MatchArm:     cond=Expression '=>' value=Expression;
+VariantArm:   varType=TypeAtom (binding=ID)? '=>' value=Expression;
+MatchSubject: {infer AwaitExpr} 'await' inner=MatchScrutinee | MatchScrutinee;
 
-// 10. Lambda gains block body — for multi-statement event handlers
-Lambda:
-    param=ID '=>' (body=Expression | block=BlockBody);
+MatchStmt:       'match' subject=MatchSubject '{' varArms+=VariantStmtArm* … '}';
+VariantStmtArm:  varType=TypeAtom (binding=ID)? '=>' ('{' body+=Statement* '}' | body+=Statement);
 
-BlockBody:
-    '{' stmts+=Statement* '}';
+// 13. Lambda — expression body or statement block
+Lambda: param=ID '=>' (body=Expression | '{' stmts+=Statement* '}');
+
+// 14. Primitive/component invocation — one brace-form builder call
+BuilderCall:  type=ID '{' (entries+=BuilderEntry (',' entries+=BuilderEntry)* ','?)? '}';
+BuilderEntry: name=LooseName ':' value=Expression | value=Expression;
+
+// 15. `slot` / `action` parameter types
+SlotType:   name='slot';
+ActionType: name='action' ('(' arg=TypeRef ')')?;
 ```
 
-`navigate(<Page>, { params })` and `toast(<msg>)` reuse the existing
-`CallExpr` rule — looked up in the page-language standard library at
-lowering time, lowered to typed router calls / notifications.
+`navigate(<Page>, { params })` and `toast(<msg>)` are ordinary calls — resolved
+in the page-language standard library at lowering time and lowered to typed
+router calls / notifications (the walker's `navigate` arm,
+`src/generator/_walker/walker-core.ts`).  A primitive call also parses in the
+paren form (`Action(order.confirm)`); the brace form is the documented spelling.
 
 ---
 
 ## 16. LiveView lowering (`platform: elixir`)
 
-A deployable that picks `platform: elixir` consumes the same
-`ui { … }` source the React platform consumes — the metamodel is
-framework-neutral by design.  The generator (`src/generator/elixir/`)
-lowers the IR onto Phoenix LiveView semantics.  Per-construct mapping:
+A deployable that picks `platform: elixir` consumes the same `ui { … }` source
+every other platform consumes — the metamodel is framework-neutral by design.
+The generator (`src/generator/elixir/`) lowers the IR onto Phoenix LiveView
+semantics.  Per-construct mapping:
 
 | Metamodel construct | LiveView lowering |
 |---|---|
 | `page X { route: "/path", body: … }` | `lib/<app>_web/live/<page_snake>_live.ex` — a `Phoenix.LiveView` module with `mount/3`, `handle_params/3`, `handle_event/3`, `render/1`. |
-| `state { step: int = 0, draft: T = {} }` | `socket.assigns.step` / `socket.assigns.draft`; `mount/3` initialises via `assign(socket, :step, …)`. |
-| `step := 1` (inside a lambda body) | `assign(socket, :step, 1)` inside the corresponding `handle_event/3` clause. |
-| `match { p1 => v1, … else => fallback }` | `cond do p1 -> v1; … true -> fallback end` (expressions); `<%= cond do … end %>` in HEEx templates. |
-| `requires <expr>` (page-level) | guard in `handle_params/3` that `push_navigate`s home with a `flash` on failure (v0 stub: bind only — full guard is a follow-up). |
-| `navigate(<Page>, {…})` (in a lambda) | `push_navigate(socket, to: ~p"/route?…")` with the target page's route + interpolated args. |
-| `CreateForm { of: T }` (and the illustrative `into: state` draft binding) | `<.simple_form for={@form} phx-submit="save">` over `to_form(changeset)` (or a draft assign for wizard steps). |
-| Body of an aggregate-scaffolded page | `pack.render("page-list" | "page-new" | "page-detail", vm)` → HEEx inline in the LiveView's `render/1` — the same framework-neutral preparer VMs the React generator uses (`src/generator/react/templating/preparers/`). |
-| `Sales.Customer.create.mutate(args)` (api binding) | direct context call `<App>.Sales.create_customer!(args)` — no hook hoisting, since LiveView reads in `mount/3` / `handle_event/3`. |
+| `state { step: int = 0 }` | `socket.assigns.step`; `mount/3` initialises via `assign(socket, :step, …)`. |
+| `step := 1` (inside an `action`) | `assign(socket, :step, 1)` inside the corresponding `handle_event/3` clause — every handler is a hoisted clause, never an inline closure. |
+| `store Cart { … }` | its own `lib/<app>_web/stores/<store_snake>.ex` module — a server-side per-process struct, so `persist:` beyond `memory` is rejected (`loom.store-lifetime-liveview-invalid`). |
+| `match { p1 => v1, … else => fallback }` | `cond do p1 -> v1; … true -> fallback end`; `<%= cond do … end %>` in template position. |
+| `requires <expr>` (page-level) | a guard in `handle_params/3` / the read-side predicate, rendered as Elixir. |
+| `navigate(<Page>, {…})` | `push_navigate(socket, to: ~p"/route?…")` with the target page's route + interpolated args. |
+| `CreateForm { of: T }` / `OperationForm` / `WorkflowForm` | `<.simple_form for={@form} phx-submit="save">` over `to_form(changeset)`. |
+| Scaffolded page bodies | the same macro-emitted walker body every other frontend gets, rendered through the HEEx engine into `render/1`. |
+| `Sales.Customer.create(args)` | a direct context call `<App>.Sales.create_customer!(args)` — no hook hoisting, since LiveView reads in `mount/3` / `handle_event/3`. |
 | Page object emission | unchanged — Playwright drives any rendered HTML, including LiveView, via the same testid-keyed page objects. |
 
-The framework-specific seams (state read/write, `match` lowering,
-api-call lowering, navigation, helper imports) live behind the
-`WalkerTarget` interface in `src/generator/_walker/target.ts`.  v0
-covers scaffold-driven pages end-to-end; pages with explicit `body:`
-expressions emit a TODO stub pending the HEEx walker.
+**HEEx does not ride the shared walker.**  Six frontends (react, vue, svelte,
+angular, feliz, flutter) drive `walkBody` through the `WalkerTarget` seam
+(`src/generator/_walker/target.ts`); LiveView runs a **parallel engine**,
+`src/generator/elixir/heex-walker-core.ts` (+ `heex-primitives.ts`), because its
+output topology diverges — hoisted `handle_event` clauses instead of inline
+lambdas, `for … do` comprehensions instead of `.map`, `if`-blocks instead of
+ternaries.  `heex-target.ts` remains as a conformance shim over the same seams.
+
+Both engines dispatch per primitive off the **same** registry
+(`src/generator/_walker/registry.ts`), where a primitive carries a `tsx`
+renderer and optionally a `heex` one — so coverage has one source of truth and
+`test/generator/elixir/heex-parity.test.ts` freezes the gap:
+
+- **The pinned gap list holds exactly one entry today: `DataGrid`** — a TanStack
+  client row model has no LiveView analogue (`loom.datagrid-unsupported-target`;
+  use `Table`, which is server-driven with real sort + pagination on HEEx).
+- Everything else the TSX walker renders now has a HEEx renderer, including the
+  standalone input family (which writes bound page state back through a hoisted
+  `handle_event`), `ProvenanceInfo` (a `<details>` disclosure over the
+  co-located `<field>_provenance` jsonb column) and `Chart` (inline SVG — no JS
+  charting library).
+- Adding a TSX-only primitive fails that test until it gets a `heex` renderer or
+  is pinned with a reason; closing a gap fails it too (delete the entry).
 
 ## 17. See also
 
-- [`examples/sales-ui.ddd`](../examples/sales-ui.ddd) — concrete example
-  exercising every construct above.
-- `experience_gathered.md` slice 10 — page-object lessons the new
-  metamodel must continue to honour (1:1 page ↔ route, chainable methods,
-  testid-driven, no abstraction over Mantine quirks).
+**Chaptered reference (the normative surface):**
+
+- [`language-reference/15-ui-pages-structure.md`](language-reference/15-ui-pages-structure.md)
+  — `ui` / `page` / `component` / `state` / `derived` / `action` / `area` / `menu` /
+  `with scaffold(...)`, each with generated output.
+- [`language-reference/16-ui-walker-primitives.md`](language-reference/16-ui-walker-primitives.md)
+  — the full primitive inventory (slots, named args, per-target coverage) and the
+  arity / argument / placement gates.
+
+**Feature docs:**
+
+- [`actions.md`](actions.md) — named `action`s, lambda-vs-action, `match await`,
+  the effect marker, error variants.
+- [`scaffold-macros.md`](scaffold-macros.md) — the macro stdlib (`scaffold`
+  family incl. `scaffoldDashboard`, `crudish`, `softDelete`) and what `unfold`
+  writes back.
+- [`customization-gradient.md`](customization-gradient.md) — the no-code →
+  full-code override path.
+- [`design-packs.md`](design-packs.md) — how a pack renders these primitives;
+  [`generators.md`](generators.md) — the per-target feature matrix.
+- [`auth.md`](auth.md) (page `requires`, `auth: ui`), [`channels.md`](channels.md)
+  (the `channel` / `on` ui members), [`provenance.md`](provenance.md)
+  (`ProvenanceInfo`), [`architecture.md`](architecture.md) (deployable binding).
+
+**Examples:**
+
+- [`examples/acme.ddd`](../examples/acme.ddd) and
+  [`examples/acme-order-explicit.ddd`](../examples/acme-order-explicit.ddd) —
+  scaffolded and hand-written spellings of the same pages.
+- [`web/src/examples/action-showcase.ddd`](../web/src/examples/action-showcase.ddd)
+  — aggregate-typed component params and `Action`.
+- [`examples/sales-ui.ddd`](../examples/sales-ui.ddd) — the original prototype
+  for this document.  **Historical: it does not parse** (it uses the withdrawn
+  `Dashboard` / `Review` / `Stat { api … }` shapes); read it as the design
+  sketch it is, not as working source.
+- `experience_gathered.md` — page-object lessons the metamodel continues to
+  honour (1:1 page ↔ route, chainable methods, testid-driven, no abstraction
+  over pack quirks).
