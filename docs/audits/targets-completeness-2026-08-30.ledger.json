@@ -30,41 +30,19 @@
       ],
       "related_to": [],
       "securityClass": false,
-      "P": 1
-    },
-    {
-      "id": "F2-CFE-9",
-      "title": "Flutter's `Money` / `DateDisplay` / `EnumBadge` primitives do not null-guard an OPTIONAL field — two produce Dart that fails static analysis, the third renders the literal text \"null\"",
-      "kind": "silent",
-      "class": null,
-      "confidence": "proven",
-      "targets": [
-        "flutter"
-      ],
-      "fileTrees": [
-        "web/lib/models.dart",
-        "web/lib/pages/p_page.dart",
-        "src/generator/flutter/pack.ts",
-        "web/src/pages/p.tsx"
-      ],
-      "evidence": [
-        {
-          "fleet": 2,
-          "id": "F2-CFE-9",
-          "bucket": "probe-combos-frontend",
-          "text": "Fixture optenum.ddd / oe2-flutter.ddd — `total: money?`, `at: datetime?`, `kind: St?` rendered as `Money { r.total }`, `DateDisplay { r.at }`, `EnumBadge { r.kind }`.\nModel types (out-oe-flutter/web/lib/models.dart:9-10; out-oe2-flutter/web/lib/models.dart:11): `final String? kind;`, `final double? total;`, `final DateTime? at;`.\nEmitted page (out-oe-flutter/web/lib/pages/p_page.dart:54; out-oe2-flutter/web/lib/pages/p_page.dart):\n  DataCell(Text(NumberFormat.decimalPattern().format(row.total)))   ← intl `String format(num number)`; `double?` is not assignable to `num` → Dart compile error\n  Text(DateFormat.yMMMd().format(row.at))                            ← `String format(DateTime date)`; `DateTime?` → Dart compile error\n  DataCell(Chip(label: Text(row.kind.toString()), visualDensity: VisualDensity.compact))  ← renders \"null\" when absent\nROOT: src/generator/flutter/pack.ts:428 (`primitiveMoney` → `.format(${value})`), :434 (`primitiveDateDisplay`), :440 (`primitiveEnumBadge` → `${value}.toString()`) — none consults the field's optionality.\nCross-target contrast on the same fixture: react out-oe-react/web/src/pages/p.tsx:37-38 `<Badge tt=\"none\">{ row.kind }</Badge>` / `<MoneyValue value={ row.total } />` (renders nothing when absent)."
-        }
-      ],
-      "repro": "scratchpad/fe-combos/oe-flutter.ddd, oe2-flutter.ddd",
-      "impact": "A page displaying any optional money or datetime column makes the Flutter project fail to compile; an optional enum shows the word \"null\" to end users.",
-      "fix": "Thread the field's optionality into the pack Ctx and emit `row.total == null ? const SizedBox.shrink() : Text(...format(row.total!))` (and `row.kind ?? ''`), mirroring what the JSX targets get for free.",
-      "size": "S",
-      "sources": [
-        "fleet2:probe-combos-frontend"
-      ],
-      "related_to": [],
-      "securityClass": false,
-      "P": 1
+      "P": 1,
+      "verified": {
+        "date": "2026-09-03",
+        "against": "bd7aaeedc",
+        "method": "each row's own repro re-run; emitted output read",
+        "verdict": "partial",
+        "note": "dotnet emits the using (#2708); elixir was always fully-qualified. node/java/python still emit `Rules.…` with no import — TS2304 / cannot-find-symbol / NameError",
+        "remainingTargets": [
+          "node",
+          "java",
+          "python"
+        ]
+      }
     },
     {
       "id": "F2-MT640-SORT-DEAD",
@@ -97,7 +75,17 @@
       ],
       "related_to": [],
       "securityClass": false,
-      "P": 1
+      "P": 1,
+      "verified": {
+        "date": "2026-09-03",
+        "against": "bd7aaeedc",
+        "method": "each row's own repro re-run; emitted output read",
+        "verdict": "open",
+        "note": "TITLE IS WRONG: the non-paged list page emits NO sort headers at all — no `phx-click` anywhere — alongside dead `sort_key`/`sort_dir` assigns and a zero-arg `list_orders()`. Not 'a no-op refetch'. The paged twin threads all four arguments correctly",
+        "remainingTargets": [
+          "elixir"
+        ]
+      }
     },
     {
       "id": "F2-CB-C1-paged-nonrelational",
@@ -133,7 +121,19 @@
       "related_to": [],
       "securityClass": false,
       "P": 1,
-      "note": "Wave 1 packet 1c: all four node shapes carry the paged arm on both adapters; dotnet/python/elixir arms open."
+      "note": "Wave 1 packet 1c: all four node shapes carry the paged arm on both adapters; dotnet/python/elixir arms open.",
+      "verified": {
+        "date": "2026-09-03",
+        "against": "bd7aaeedc",
+        "method": "each row's own repro re-run; emitted output read",
+        "verdict": "partial",
+        "note": "embedded fixed everywhere; node and java fully correct. eventLog + document still arity-mismatched on dotnet/python/elixir (interface vs impl, 5-arg call into 1-arg def, defdelegate/impl arity skew)",
+        "remainingTargets": [
+          "dotnet",
+          "python",
+          "elixir"
+        ]
+      }
     },
     {
       "id": "F2-CFE-1",
@@ -179,7 +179,17 @@
         "adjacent to #2667 §A12 (computed `to:` dropped) — different construct: the `navigate(<Page>)` STATEMENT in an action body"
       ],
       "securityClass": false,
-      "P": 1
+      "P": 1,
+      "verified": {
+        "date": "2026-09-03",
+        "against": "bd7aaeedc",
+        "method": "each row's own repro re-run; emitted output read",
+        "verdict": "partial",
+        "note": "react/vue/svelte/angular/feliz/heex all navigate. Flutter action bodies never reach the fixed `walker-core` arm — they are emitted by `riverpod-emit.ts`, whose `case \"call\"` still returns a TODO comment. `flutterTarget.renderNavigate` exists and nothing calls it",
+        "remainingTargets": [
+          "flutter"
+        ]
+      }
     },
     {
       "id": "F2-XB-4",
@@ -217,7 +227,20 @@
       ],
       "related_to": [],
       "securityClass": false,
-      "P": 1
+      "P": 1,
+      "verified": {
+        "date": "2026-09-03",
+        "against": "bd7aaeedc",
+        "method": "each row's own repro re-run; emitted output read",
+        "verdict": "partial",
+        "note": "the impure-fold half is now an honest gate on all five (`loom.projection-fold-impure`). The `let` half — which that gate explicitly blesses — still drops the declaration while keeping its use on four backends",
+        "remainingTargets": [
+          "dotnet",
+          "java",
+          "python",
+          "elixir"
+        ]
+      }
     },
     {
       "id": "G2644-M-T6.48-numeric-ingress",
@@ -254,7 +277,19 @@
       ],
       "related_to": [],
       "securityClass": false,
-      "P": 1
+      "P": 1,
+      "verified": {
+        "date": "2026-09-03",
+        "against": "bd7aaeedc",
+        "method": "each row's own repro re-run; emitted output read",
+        "verdict": "partial",
+        "note": "dotnet wraps every money parse in `decimal.TryParse … : throw WireFormatException` → 422. java/python/elixir still parse bare and fall to the 500 catch-all; elixir additionally passes int/bool uncoerced into `force_change`",
+        "remainingTargets": [
+          "java",
+          "python",
+          "elixir"
+        ]
+      }
     },
     {
       "id": "flutter-form-field-drops",
@@ -287,38 +322,17 @@
       ],
       "related_to": [],
       "securityClass": false,
-      "P": 1
-    },
-    {
-      "id": "flutter-modal-instance-operationform",
-      "title": "Flutter drops the ENTIRE operations row of every scaffolded Detail page — `renderModal` only matches `OperationForm { of:, op: }`",
-      "kind": "silent",
-      "class": null,
-      "confidence": "proven",
-      "targets": [
-        "flutter"
-      ],
-      "fileTrees": [
-        "src/generator/flutter/flutter-target.ts",
-        "src/generator/_walker/primitives/controls.ts"
-      ],
-      "evidence": [
-        {
-          "fleet": 1,
-          "id": "flutter-modal-instance-operationform",
-          "text": "Reproduced on main: generating examples/showcase.ddd with `deployable feCell { platform: flutter targets: honoApi ui: Admin }` emits `const SizedBox.shrink() /* Modal: OperationForm child must name of: <Agg> and op: <public op> */` as the SOLE child of the ops `Wrap` in fe_cell/lib/pages/engineer_detail_page.dart:35 and fe_cell/lib/pages/squad_detail_page.dart:32 — every write action on a scaffolded Flutter app is missing, with no diagnostic. The same ui on react renders the real dialog (`openUpdateModal` / `<UpdateForm>` / the Update button at fe_cell/src/pages/engineers/detail.tsx:13,16,113). Root cause: src/generator/flutter/flutter-target.ts:568-595 `renderModal` resolves only `namedArg(formChild, \"of\")` + `namedArg(formChild, \"op\")` as `ref`s (:586-590) and otherwise emits the comment at :593-595, while `scaffoldOperations` (src/macros/stdlib/scaffold/_body-builders.ts) emits the INSTANCE-QUALIFIED `OperationForm { data.<op> }` inside the Detail QueryView's data lambda — the shape the shared walker handles via `ctx.paramTypes` (src/generator/_walker/primitives/forms.ts:668-674). Documented (not fixed) as frozen GAPS entry `flutter:Admin` \"F2\" in open PR #2660."
-        }
-      ],
-      "repro": null,
-      "impact": null,
-      "fix": "Add an instance-qualified arm to flutterTarget.renderModal: when the `OperationForm` child's single positional is a `member` whose receiver is a `ref` bound in `ctx.paramTypes` (the same resolution forms.ts:668-671 does), resolve `{agg, op}` from that map instead of from `of:`/`op:`, and thread the instance id expression into `operationFormWidgetName(...)`'s id argument the way the by-name arm threads `ctx.usesRouteId`. Prefer delegating to the shared `emitFormOfOperation` path rather than re-implementing the lookup. Mutation-proof it with a scaffolded-Admin flutter fixture asserting the emitted `_detail_page.dart` contains the op dialog and NO `/* Modal:` comment, and delete #2660's F2 entry in the same PR.",
-      "size": "M",
-      "sources": [
-        "fleet1:plan-residue"
-      ],
-      "related_to": [],
-      "securityClass": false,
-      "P": 1
+      "P": 1,
+      "verified": {
+        "date": "2026-09-03",
+        "against": "bd7aaeedc",
+        "method": "each row's own repro re-run; emitted output read",
+        "verdict": "open",
+        "note": "all four `TODO(flutter form-field)` comments still emitted; the parity freeze is unchanged since the audit base; no `loom.*` code",
+        "remainingTargets": [
+          "flutter"
+        ]
+      }
     },
     {
       "id": "G2646-open-projection-on-event-no-channel",
@@ -352,42 +366,20 @@
       ],
       "related_to": [],
       "securityClass": true,
-      "P": 2
-    },
-    {
-      "id": "M-T3.15-C3-nav-vs-requires",
-      "title": "C3 — the default sidebar shows links to routes the backend refuses (react/vue/svelte)",
-      "kind": "silent",
-      "class": null,
-      "confidence": "likely",
-      "targets": [
-        "react",
-        "vue",
-        "svelte"
-      ],
-      "fileTrees": [
-        "src/generator/react/",
-        "src/generator/vue/",
-        "src/generator/svelte/",
-        "src/generator/_frontend/"
-      ],
-      "evidence": [
-        {
-          "fleet": 1,
-          "id": "M-T3.15-C3-nav-vs-requires",
-          "text": "src/generator/react/templating/preparers/app-shell.ts:40-127 takes `aggregates`/`workflows` and NO `PageIR[]`, and its own comment at :101-107 states 'The default hardcoded sidebar entries (aggregates/workflows) are scaffold pages with no `requires`, so they never carry `requiresJs`' — an assumption invalidated by src/macros/stdlib/scaffold/_pages.ts:103-114, which now clones the `find all … requires` gate onto the scaffolded List page. Vue's default builder src/generator/vue/index.ts:856-880 constructs `NavEntryVM`s with no `requiresJs` even though it iterates the pages that carry `requires`; svelte's src/generator/svelte/routes-emitter.ts:282-312 builds from aggregates. Only the menu-derived path gates (src/generator/_frontend/menu-emitter.ts:148-152, :204-207). NOT affected: angular's default branch gates (src/generator/angular/index.ts:410-419) and elixir gates by route (src/generator/elixir/vanilla/../sidebar-emit.ts:113-130 `buildGatesByRoute`). PR #2628 is docs-only, so the bug itself is unclaimed."
-        }
-      ],
-      "repro": null,
-      "impact": null,
-      "fix": "Thread the ui's `PageIR[]` into `prepareAppShellVM` and the vue/svelte default builders, resolve each default entry to its page by route, and set `requiresJs` with `renderGateExpr(page.requires, \"currentUser\")` exactly as `navEntryForLink` does — angular's default branch is the reference implementation.",
-      "size": "M",
-      "sources": [
-        "fleet1:t3-t5-auth-lang"
-      ],
-      "related_to": [],
-      "securityClass": true,
-      "P": 2
+      "P": 2,
+      "verified": {
+        "date": "2026-09-03",
+        "against": "bd7aaeedc",
+        "method": "each row's own repro re-run; emitted output read",
+        "verdict": "open",
+        "note": "`deriveEventSubscriptions` still early-returns when no channel carries the event",
+        "remainingTargets": [
+          "dotnet",
+          "java",
+          "python",
+          "elixir"
+        ]
+      }
     },
     {
       "id": "M-T3.8-sensitivity-phases-2-4",
@@ -423,7 +415,14 @@
       "related_to": [],
       "securityClass": true,
       "P": 2,
-      "note": "Wave 1 packet 1a landed the diagnostic slice only: loom.sensitive-wire-unsupported warns when a sensitive field reaches the wire unmasked. Masking itself unbuilt."
+      "note": "Wave 1 packet 1a landed the diagnostic slice only: loom.sensitive-wire-unsupported warns when a sensitive field reaches the wire unmasked. Masking itself unbuilt.",
+      "verified": {
+        "date": "2026-09-03",
+        "against": "bd7aaeedc",
+        "method": "each row's own repro re-run; emitted output read",
+        "verdict": "partial",
+        "note": "SILENT → HONEST: `loom.sensitive-wire-unsupported` shipped (`sensitivity-checks.ts`), the ledger's option (b). Wire masking is still unbuilt and `inspect-emit.ts` is still the only generator consumer, so the row survives as an honest gap, not a silent one"
+      }
     },
     {
       "id": "dapper-no-schema-evolution",
@@ -456,43 +455,17 @@
       "related_to": [],
       "securityClass": true,
       "P": 2,
-      "note": "Packet 1b (dotnet-adapters): premise partly stale -- a second dapper run exits 1 via the M-T2.2 baseline guard with a misdirected error, not silently. The silent half is the CREATE-only runtime schema (no ALTER path); the gate belongs in src/system/migrations-builder.ts (phase 9). Handed off from packet 1b; the gate-vs-build decision is still pending."
-    },
-    {
-      "id": "F2-FFE-8",
-      "title": "Flutter and Feliz persisted stores write a FLAT JSON blob under the same `loom.store.<Name>` key the JS frontends use for zustand's `{state,version}` envelope",
-      "kind": "silent",
-      "class": null,
-      "confidence": "suspected",
-      "targets": [
-        "feliz",
-        "flutter"
-      ],
-      "fileTrees": [
-        "src/generator/flutter/store-persist.ts",
-        "web/src/App.fs",
-        "web/src/stores/prefs.ts"
-      ],
-      "evidence": [
-        {
-          "fleet": 2,
-          "id": "F2-FFE-8",
-          "bucket": "fix-frontends",
-          "text": "src/generator/flutter/store-persist.ts header states the `SharedPreferences.setPrefix('')` choice exists \"so the key on web is the bare `loom.store.<Name>` the JS frontends write\", i.e. deliberate key interop. The payloads differ: emitted `out/web_flutter/lib/stores.dart` `_persist` writes `LoomStorePersist.write('loom.store.Prefs', <String, dynamic>{'mode': s.mode, 'seen': s.seen})` (flat) and `out_feliz/web/src/App.fs:61` builds `\"{\" + … \"\\\"label\\\":\" … + \"}\"` (flat), while `out_react/web/src/stores/prefs.ts` uses zustand `persist` + `createJSONStorage(() => localStorage)`, whose on-disk shape is `{\"state\":{…},\"version\":0}`."
-        }
-      ],
-      "repro": "st_react.ddd vs st_flutter.ddd / st_feliz.ddd in the scratchpad dir; compare `out_react/web/src/stores/loc.ts` with `out_flutter/web/lib/stores.dart` and `out_feliz/web/src/App.fs` StorePersist.",
-      "impact": "If a Flutter-web build and a JS build are ever served from the same origin (the documented reason for the `setPrefix('')` choice), each reads the other's blob, finds none of its keys, and silently falls back to defaults — and each overwrites the other's saved state on the next transition. Degrades gracefully rather than crashing, so it is low severity, but the stated interop intent is not met.",
-      "fix": "Pick one on-disk envelope and share it — either have flutter/feliz read+write `{\"state\":{…},\"version\":n}`, or drop the interop claim from the header comment and namespace the flutter/feliz keys distinctly (`loom.store.dart.<Name>`).",
-      "size": "S",
-      "sources": [
-        "fleet2:fix-frontends"
-      ],
-      "related_to": [
-        "fleet1 `feliz-flutter-persist-codec-asymmetry` is the honest-gate twin of the same persist surface"
-      ],
-      "securityClass": false,
-      "P": 2
+      "note": "Packet 1b (dotnet-adapters): premise partly stale -- a second dapper run exits 1 via the M-T2.2 baseline guard with a misdirected error, not silently. The silent half is the CREATE-only runtime schema (no ALTER path); the gate belongs in src/system/migrations-builder.ts (phase 9). Handed off from packet 1b; the gate-vs-build decision is still pending.",
+      "verified": {
+        "date": "2026-09-03",
+        "against": "bd7aaeedc",
+        "method": "each row's own repro re-run; emitted output read",
+        "verdict": "open",
+        "note": "the SILENT half of the premise is stale — a second generate exits 1. But it fails on snapshot drift, which names neither the dapper limitation nor a remedy, and `--allow-rebaseline` does not clear it. No ALTER path, `hasMigrations` still gated off, no dapper CI leg",
+        "remainingTargets": [
+          "dotnet"
+        ]
+      }
     },
     {
       "id": "F2-W-06",
@@ -524,7 +497,17 @@
       "related_to": [],
       "securityClass": false,
       "P": 2,
-      "w1bElixir": "OPEN, BUT MIS-SIZED — verified reproducing on a current build (W1b elixir, PR #2704): `field :released_at, :utc_datetime` + `add :released_at, :utc_datetime` against the shared MigrationsIR's `TIMESTAMP WITH TIME ZONE`, so a write silently truncates to second precision. NOT an \"S\": moving declared datetime columns to `:utc_datetime_usec` also requires deleting the truncation machinery that exists ONLY because of the old type (`__truncate_dt/1` in context-emit.ts, `stampFieldIsDatetime` in stamp-emit.ts, the operation-returns `force_change` wrap) — leaving it would truncate on the wider column and half-fix the row — and it moves the SERIALIZED precision too (`DateTime.to_iso8601` gains fractional seconds where node emits milliseconds), which is a five-backend wire decision, not an elixir-local one. Its correct home is a dedicated slice gated by generated-stack-verifier (migrations apply + a real datetime round-trip) and the wire-golden differential. Deferred deliberately, not dropped."
+      "w1bElixir": "OPEN, BUT MIS-SIZED — verified reproducing on a current build (W1b elixir, PR #2704): `field :released_at, :utc_datetime` + `add :released_at, :utc_datetime` against the shared MigrationsIR's `TIMESTAMP WITH TIME ZONE`, so a write silently truncates to second precision. NOT an \"S\": moving declared datetime columns to `:utc_datetime_usec` also requires deleting the truncation machinery that exists ONLY because of the old type (`__truncate_dt/1` in context-emit.ts, `stampFieldIsDatetime` in stamp-emit.ts, the operation-returns `force_change` wrap) — leaving it would truncate on the wider column and half-fix the row — and it moves the SERIALIZED precision too (`DateTime.to_iso8601` gains fractional seconds where node emits milliseconds), which is a five-backend wire decision, not an elixir-local one. Its correct home is a dedicated slice gated by generated-stack-verifier (migrations apply + a real datetime round-trip) and the wire-golden differential. Deferred deliberately, not dropped.",
+      "verified": {
+        "date": "2026-09-03",
+        "against": "bd7aaeedc",
+        "method": "each row's own repro re-run; emitted output read",
+        "verdict": "open",
+        "note": "still `:utc_datetime`. Deliberately deferred in #2734: flipping the column while `__truncate_dt/1`, `stampFieldIsDatetime` and the operation-returns `force_change` wrap all still truncate to `:second` would silently zero a STAMPED datetime into a column claiming microseconds — worse than the honest second-precision it replaces",
+        "remainingTargets": [
+          "elixir"
+        ]
+      }
     },
     {
       "id": "G2667-D3-projection-join-unguarded-index",
@@ -559,39 +542,17 @@
       ],
       "securityClass": false,
       "P": 2,
-      "note": "Packet 1b (dotnet-adapters, claude/wave-1, NOT YET on main): the dotnet arm is fixed on that branch. node/python/java/elixir arms remain open; needs an RS-rule for LEFT-JOIN semantics. Row stays open pending that branch's merge. | Wave 1: dotnet (1b), node (1c) and python (1e) arms LEFT-JOIN (source row survives, joined field absent); elixir and java arms open; the cross-backend RS rule for the absent value (node null vs .NET default!) is still to be ruled. | Wave 1 packet 1d: elixir arm LEFT-JOINs too (total __joined/2). Only the java arm is open."
-    },
-    {
-      "id": "M-T6.2-s14-audit-wiresnapshot",
-      "title": "Elixir audit before/after snapshots still dump the raw snake_case Ecto struct while the other four record the wireShape",
-      "kind": "silent",
-      "class": null,
-      "confidence": "likely",
-      "targets": [
-        "elixir"
-      ],
-      "fileTrees": [
-        "src/generator/elixir/vanilla/"
-      ],
-      "evidence": [
-        {
-          "fleet": 1,
-          "id": "M-T6.2-s14-audit-wiresnapshot",
-          "text": "src/generator/elixir/vanilla/audit-emit.ts:218-223 `wireSnapshot()` returns `(<rec> |> Map.from_struct() |> Map.drop([:__meta__, :__struct__]))` for a relational aggregate; its own docstring at :210-212 claims it is \"the SAME wire projection the controller's serialize/1 uses\", which is now FALSE — src/generator/elixir/vanilla/controller-serialize.ts:80-93 routes every hosted aggregate struct through `renderWireSerialize` (camelCase wireShape) and leaves `%_{}` (:116) only as a non-aggregate fallback. Node's twin writes the wire projection: src/platform/hono/v4/routes-builder.ts:1761 `const before = repoTx.toWire(aggregate);`. So an elixir audit row's before/after JSON carries snake_case keys plus leaked inserted_at/updated_at where the other four carry the wire shape. No loom.* gate; no wire golden reaches an audit row's snapshot body."
-        }
-      ],
-      "repro": null,
-      "impact": null,
-      "fix": "Replace `wireSnapshot`'s relational arm with a call into the aggregate's `renderWireSerialize` projection (the same suffix-scoped `serialize_<ctx>_<agg>/1` controller-serialize.ts already emits), exposing it from the context module / returning-op fn where `serialize/1` is out of scope. Then extend an audit-history conformance pin to compare the elixir snapshot KEY SET against the node oracle's `toWire` keys.",
-      "size": "S",
-      "sources": [
-        "fleet1:t6-backend"
-      ],
-      "related_to": [
-        "M-T3.9-dotnet-audit-masked-snapshot (t3-t5) — same family"
-      ],
-      "securityClass": false,
-      "P": 2
+      "note": "Packet 1b (dotnet-adapters, claude/wave-1, NOT YET on main): the dotnet arm is fixed on that branch. node/python/java/elixir arms remain open; needs an RS-rule for LEFT-JOIN semantics. Row stays open pending that branch's merge. | Wave 1: dotnet (1b), node (1c) and python (1e) arms LEFT-JOIN (source row survives, joined field absent); elixir and java arms open; the cross-backend RS rule for the absent value (node null vs .NET default!) is still to be ruled. | Wave 1 packet 1d: elixir arm LEFT-JOINs too (total __joined/2). Only the java arm is open.",
+      "verified": {
+        "date": "2026-09-03",
+        "against": "bd7aaeedc",
+        "method": "each row's own repro re-run; emitted output read",
+        "verdict": "partial",
+        "note": "node/dotnet/python/elixir all LEFT-JOIN to null on a miss; java still `customerById.get(...).name()` unguarded → NPE/500",
+        "remainingTargets": [
+          "java"
+        ]
+      }
     },
     {
       "id": "G2646-open-heex-layout-inert",
@@ -622,7 +583,17 @@
       "related_to": [],
       "securityClass": false,
       "P": 2,
-      "w1bElixir": "PARTIALLY STALE — verified on a current build (W1b elixir, PR #2704). The \"Grid ≡ Stack\" arm is STALE: `renderGrid` emits real `grid-cols-N` (heex-primitives.ts) and did at the ledger's own base. The two arms that remain OPEN and untouched are the i18nFormat wrapper drop and the missing pager on a non-server-paged Table."
+      "w1bElixir": "PARTIALLY STALE — verified on a current build (W1b elixir, PR #2704). The \"Grid ≡ Stack\" arm is STALE: `renderGrid` emits real `grid-cols-N` (heex-primitives.ts) and did at the ledger's own base. The two arms that remain OPEN and untouched are the i18nFormat wrapper drop and the missing pager on a non-server-paged Table.",
+      "verified": {
+        "date": "2026-09-03",
+        "against": "bd7aaeedc",
+        "method": "each row's own repro re-run; emitted output read",
+        "verdict": "partial",
+        "note": "the Grid arm is STALE — `renderGrid` reads the shared `gridCols` and emits real `grid-cols-N md:… lg:…`. The non-server-paged Table pager arm and the i18nFormat arm remain open",
+        "remainingTargets": [
+          "elixir"
+        ]
+      }
     },
     {
       "id": "M-T1.16-invariant-validation-feliz-flutter",
@@ -657,7 +628,18 @@
       ],
       "related_to": [],
       "securityClass": false,
-      "P": 2
+      "P": 2,
+      "verified": {
+        "date": "2026-09-03",
+        "against": "bd7aaeedc",
+        "method": "each row's own repro re-run; emitted output read",
+        "verdict": "open",
+        "note": "react derives `.refine(...)`/`.min(1)` from invariants; Feliz emits only `Some \"Required\"` and Flutter only `'Required'` / `'Enter a number'`",
+        "remainingTargets": [
+          "feliz",
+          "flutter"
+        ]
+      }
     },
     {
       "id": "M-T5.14-reading-service-readport-not-threaded",
@@ -696,45 +678,20 @@
       ],
       "securityClass": false,
       "P": 2,
-      "note": "Wave 1 packet 1c: node arm verified fixed; python/java/.NET/elixir arms open — see handoffs/wave-1-node-ts.md for the per-backend shape."
-    },
-    {
-      "id": "provenanced-bare-read-in-page-body",
-      "title": "Provenanced<T> (#2653, merged 2026-08-24) changed the wire shape of a `provenanced` field under every page-body read; only the scaffold macro was taught `.value`, so a hand-written body reading the field bare now emits an object into a text slot with no gate",
-      "kind": "silent",
-      "class": null,
-      "confidence": "likely",
-      "targets": [
-        "react",
-        "vue",
-        "svelte",
-        "angular",
-        "feliz",
-        "flutter"
-      ],
-      "fileTrees": [
-        "src/ir/enrich/wire-projection.ts",
-        "src/ir/validate/checks/ui-checks.ts",
-        "src/generator/_walker/",
-        "src/macros/stdlib/scaffold/_body-builders.ts"
-      ],
-      "evidence": [
-        {
-          "fleet": 1,
-          "id": "provenanced-bare-read-in-page-body",
-          "text": "src/ir/enrich/wire-projection.ts:406 `return f.provenanced ? { kind: \"genericInstance\", ctor: \"provenanced\", arg: f.type } : f.type;` — landed in the range (04072d6, 2026-08-24). The `.value` hop is appended in exactly one place, the SCAFFOLD macro: src/macros/stdlib/scaffold/_body-builders.ts:705 and :922 (`memberAccess(memberAccess(nameRefExpr(cellVar), name), PROVENANCE_VALUE_FIELD)`). PROBE on this checkout — `aggregate Order with crudish { name: string  total: int provenanced }` and a hand-written `page Detail(id: Order id) { body: QueryView { of: A.Order.byId(id), data: o => Stack { Text { o.total }, Text { string(o.total.value) } } } }`: `ddd parse` → `0 error(s), 0 warning(s)`, and `web/src/pages/detail.tsx` emits `<Text>{orderById.data.total}</Text>` while `web/src/api/order.ts:32` now types that field `total: z.object({ value: z.number().int(), lineage: provLineageSchema.nullish() })`. That is TS2322 under `tsc --noEmit` (object not assignable to ReactNode) and 'Objects are not valid as a React child' at runtime. HEEx is NOT affected — src/generator/elixir/heex-walker-core.ts:63 imports `PROVENANCE_VALUE_FIELD` to DROP the hop, so both spellings render correctly there; the divergence is JS-frontends + Feliz/Flutter vs HEEx. No `loom.*` code mentions this shape (grep for `provenanced` in src/ir/validate/checks/ returns nothing)."
-        }
-      ],
-      "repro": null,
-      "impact": null,
-      "fix": "Either (a) auto-unwrap: when a page-body member access resolves to a `provenanced` field in a scalar/text position, have the walker append `.value` itself (one arm in `emitExpr`'s member case, keyed off the same `wireShape` carrier the api-type emitter reads) so hand-written and scaffolded bodies agree; or (b) gate it: a new `loom.provenanced-bare-read` in ui-checks.ts telling the author to write `.value` / `.lineage`. (a) is the better contract since the field's DECLARED type is still `int`. Pin with a walker test on all six frontends plus a HEEx case asserting the hop stays dropped there.",
-      "size": "M",
-      "sources": [
-        "fleet1:fresh-gate-probe"
-      ],
-      "related_to": [],
-      "securityClass": false,
-      "P": 2
+      "note": "Wave 1 packet 1c: node arm verified fixed; python/java/.NET/elixir arms open — see handoffs/wave-1-node-ts.md for the per-backend shape.",
+      "verified": {
+        "date": "2026-09-03",
+        "against": "bd7aaeedc",
+        "method": "each row's own repro re-run; emitted output read",
+        "verdict": "partial",
+        "note": "node constructs and threads the port. The other four emit a non-compiling call (static call on an instance class, no import, arity-short, or a module that is never emitted)",
+        "remainingTargets": [
+          "dotnet",
+          "java",
+          "python",
+          "elixir"
+        ]
+      }
     },
     {
       "id": "queryview-lambda-int-plus-literal-concat",
@@ -770,7 +727,22 @@
         "queryview-single-lambda-paramtypes (plan-residue) — suspected same root (QueryView `data:` lambda param typing); that probe itself asks to dedupe"
       ],
       "securityClass": false,
-      "P": 2
+      "P": 2,
+      "verified": {
+        "date": "2026-09-03",
+        "against": "bd7aaeedc",
+        "method": "each row's own repro re-run; emitted output read",
+        "verdict": "open",
+        "note": "BROADER AND MORE SEVERE than filed: silently wrong on the four JS targets (`o.qty + 1` → \"51\"), and a HARD BUILD BREAK on feliz (`int + string`) and flutter (`int + String`). `o.qty * 2` and `o.qty + o.qty` are correct, isolating it to the literal operand",
+        "remainingTargets": [
+          "react",
+          "vue",
+          "svelte",
+          "angular",
+          "feliz",
+          "flutter"
+        ]
+      }
     },
     {
       "id": "schemathesis-F11-int32-range",
@@ -810,7 +782,14 @@
       ],
       "related_to": [],
       "securityClass": false,
-      "P": 2
+      "P": 2,
+      "verified": {
+        "date": "2026-09-03",
+        "against": "bd7aaeedc",
+        "method": "each row's own repro re-run; emitted output read",
+        "verdict": "open",
+        "note": "W11/W12 still present in `test/behavioral/schemathesis-waivers.json`"
+      }
     },
     {
       "id": "sourcemap-feliz-flutter-not-emitted",
@@ -847,7 +826,18 @@
         "M-T8.2-sourcemap-fanout (t3-t5) — the backend half of the same `--sourcemap` fan-out gap"
       ],
       "securityClass": false,
-      "P": 2
+      "P": 2,
+      "verified": {
+        "date": "2026-09-03",
+        "against": "bd7aaeedc",
+        "method": "each row's own repro re-run; emitted output read",
+        "verdict": "open",
+        "note": "react's map carries `web/src/pages/*.tsx`; the feliz and flutter maps carry backend files only. Neither the honest landing nor the real one happened — no `loom.sourcemap-target-unsupported`, and `docs/debugging.md` never mentions either target",
+        "remainingTargets": [
+          "feliz",
+          "flutter"
+        ]
+      }
     },
     {
       "id": "static-subpath-405-node-only",
@@ -884,7 +874,17 @@
       ],
       "related_to": [],
       "securityClass": false,
-      "P": 2
+      "P": 2,
+      "verified": {
+        "date": "2026-09-03",
+        "against": "bd7aaeedc",
+        "method": "each row's own repro re-run; emitted output read",
+        "verdict": "partial",
+        "note": "#2764 closed node/python/java/dotnet. elixir emits no guard at all — `DELETE /api/customers/by_email` answers 422 from `:__cast_path_id`, not 405 + Allow. TITLE IS NOW WRONG: it is elixir-only, not node-only",
+        "remainingTargets": [
+          "elixir"
+        ]
+      }
     },
     {
       "id": "M-T1.11-domain-floor-message-code",
@@ -924,7 +924,20 @@
       ],
       "related_to": [],
       "securityClass": false,
-      "P": 2
+      "P": 2,
+      "verified": {
+        "date": "2026-09-03",
+        "against": "bd7aaeedc",
+        "method": "each row's own repro re-run; emitted output read",
+        "verdict": "partial",
+        "note": "elixir now emits `code:` on preconditions and `loom_code:` on invariants; its value-object floor still carries raw text only. The other four keep a `(message)`-only DomainError/DomainException",
+        "remainingTargets": [
+          "node",
+          "dotnet",
+          "java",
+          "python"
+        ]
+      }
     },
     {
       "id": "F2-CFE-11",
@@ -5697,6 +5710,39 @@
       "related_to": [],
       "securityClass": false,
       "P": 5
+    },
+    {
+      "id": "feliz-navbar-ignores-page-requires",
+      "title": "Feliz's default navbar advertises routes the backend refuses — `renderNavbar` never reads `page.requires`",
+      "kind": "silent",
+      "class": null,
+      "confidence": "proven",
+      "P": 2,
+      "size": "S",
+      "targets": [
+        "feliz"
+      ],
+      "fileTrees": [
+        "src/generator/feliz/index.ts"
+      ],
+      "sources": [
+        "verify-2026-09-03"
+      ],
+      "related_to": [
+        "M-T3.15-C3-nav-vs-requires"
+      ],
+      "evidence": [
+        {
+          "fleet": 0,
+          "id": "feliz-navbar-ignores-page-requires",
+          "bucket": "verify-2026-09-03",
+          "text": "Same fixture that proves C3 fixed on react/vue/svelte/angular/heex: `repository Tickets for Ticket { find all(): Ticket[] requires currentUser.role == \"agent\" }`, scaffolded ui, `auth: ui`. Every other target gates its default entry; `web/src/App.fs:490` emits `Html.li [ Html.a [ prop.href \"/tickets\"; prop.text \"List\" ] ]` unconditionally. `renderNavbar` (src/generator/feliz/index.ts:700-729) takes `readonly PageIR[]` and reads only `p.route` / `p.name`."
+        }
+      ],
+      "fix": "Thread `page.requires` into `renderNavbar` and gate the entry, the way the other five targets' shells already do. C3's own sizing note applies: the preparers are a per-frontend signature, not a shared one.",
+      "impact": "Under `auth: ui` a Feliz app shows every principal a link to a route the backend answers 403 for.",
+      "repro": "See evidence.",
+      "securityClass": null
     }
   ],
   "checkedOk": [
@@ -7404,6 +7450,48 @@
       "pr": "#2752 (wave 1, sweeper)",
       "sha": "6a0a6cd",
       "note": "Wave 1 sweeper: <DomainService>.<op>(...) arm added to typeOfPostfixChain; test/language/type-system/domainservice-requires-typing.test.ts."
+    },
+    {
+      "id": "F2-CFE-9",
+      "title": "Flutter's `Money` / `DateDisplay` / `EnumBadge` primitives do not null-guard an OPTIONAL field — two produce Dart that fails static analysis, the third renders the literal text \"null\"",
+      "source": "fleet2:probe-combos-frontend",
+      "closedBy": "verified 2026-09-03 against bd7aaeedc",
+      "note": "all three primitives route through `nullSafe(...)` (#2734)"
+    },
+    {
+      "id": "flutter-modal-instance-operationform",
+      "title": "Flutter drops the ENTIRE operations row of every scaffolded Detail page — `renderModal` only matches `OperationForm { of:, op: }`",
+      "source": "fleet1:plan-residue",
+      "closedBy": "verified 2026-09-03 against bd7aaeedc",
+      "note": "scaffolded flutter Detail pages emit `showDialog(… <Op>Form(id: id))`; no `/* Modal:` comments (#2734)"
+    },
+    {
+      "id": "F2-FFE-8",
+      "title": "Flutter and Feliz persisted stores write a FLAT JSON blob under the same `loom.store.<Name>` key the JS frontends use for zustand's `{state,version}` envelope",
+      "source": "fleet2:fix-frontends",
+      "closedBy": "verified 2026-09-03 against bd7aaeedc",
+      "note": "Feliz and Flutter both write the zustand `persist` envelope and both readers still unwrap a bare object (#2734)"
+    },
+    {
+      "id": "provenanced-bare-read-in-page-body",
+      "title": "Provenanced<T> (#2653, merged 2026-08-24) changed the wire shape of a `provenanced` field under every page-body read; only the scaffold macro was taught `.value`, so a hand-written body reading the field bare now emits an object into a text slot with no gate",
+      "source": "fleet1:fresh-gate-probe",
+      "closedBy": "verified 2026-09-03 against bd7aaeedc",
+      "note": "bare read auto-appends `.value` on all six frontends; explicit `.value` not double-hopped; HEEx drops the hop (#2734)"
+    },
+    {
+      "id": "M-T6.2-s14-audit-wiresnapshot",
+      "title": "Elixir audit before/after snapshots still dump the raw snake_case Ecto struct while the other four record the wireShape",
+      "source": "fleet1:t6-backend",
+      "closedBy": "verified 2026-09-03 against bd7aaeedc",
+      "note": "all 8 `wireSnapshot(...)` call sites pass `appModule`, routing through `Audit.Wire.wire/1`; the raw `Map.from_struct` branches are dead fallbacks"
+    },
+    {
+      "id": "M-T3.15-C3-nav-vs-requires",
+      "title": "C3 — the default sidebar shows links to routes the backend refuses (react/vue/svelte)",
+      "source": "fleet1:t3-t5-auth-lang",
+      "closedBy": "verified 2026-09-03 against bd7aaeedc",
+      "note": "react/vue/svelte gated in #2734; angular and heex verified gated too. Feliz's ungated navbar is a DIFFERENT target this row never named — filed as `feliz-navbar-ignores-page-requires`"
     }
   ],
   "conflicts": [
@@ -7675,7 +7763,7 @@
     }
   ],
   "counts": {
-    "open": 161,
+    "open": 156,
     "byPriority": {
       "P0": 1,
       "P1": 11,
@@ -7715,6 +7803,13 @@
     "conflicts": 10,
     "checkedOk": 146,
     "waveRows": 134,
-    "packets": 13
+    "packets": 13,
+    "reverified_2026_09_03": {
+      "rowsChecked": 26,
+      "shipped": 6,
+      "partial": 11,
+      "open": 9,
+      "newRows": 1
+    }
   }
 }
