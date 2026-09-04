@@ -180,8 +180,16 @@ interface MikroColumn {
   tsType: string; // Row class field TS type
   nullable: boolean;
   primary: boolean;
-  /** Explicit columnType for precise numerics (money/decimal). */
+  /** Explicit columnType for precise numerics (money/decimal), or the
+   *  element's own columnType with a trailing `[]` for a scalar array. */
   columnType?: string;
+  /** A root SCALAR/ENUM collection (`tags: string[]`, `kinds: Status[]`) —
+   *  emits MikroORM's `array: true` alongside `type: <element type>`, which
+   *  `MetadataDiscovery` wraps in an element-typed `ArrayType` and, on
+   *  Postgres (native array support), resolves the column to
+   *  `<element column type>[]` — mirrors drizzle's own `.array()` (see
+   *  `emit/schema.ts`, `case "array"`). */
+  array?: boolean;
 }
 
 function unwrapOptional(t: TypeIR): { type: TypeIR; nullable: boolean } {
@@ -252,6 +260,44 @@ function columnsForType(
         const { type: st, nullable: sn } = unwrapOptional(sub.type);
         return columnsForType(`${prop}_${sub.name}`, st, nullable || sn, ctx);
       });
+    }
+    case "array": {
+      // A root SCALAR collection (`tags: string[]`, `kinds: Status[]`) — the
+      // one shape mikroorm was genuinely behind drizzle on (M-T6.23,
+      // `#scalar-array`, drained here).  `X id[]` (pivot table) and `<VO>[]`
+      // (inline jsonb) are filtered out before `columnsOf` ever calls
+      // `fieldColumns` (see the ref-/value-collection filters there and in
+      // `tphSharedColumns`), so only a PRIMITIVE / ENUM element reaches this
+      // arm; anything else still falls through to the throw below.
+      //
+      // Mirrors drizzle's own native array column (`emit/schema.ts`,
+      // `case "array"`): the ELEMENT's own scalar mikro type plus MikroORM's
+      // `array: true` flag.  `MetadataDiscovery` wraps that in an
+      // element-typed `ArrayType` (so a `money[]`/`decimal[]` element still
+      // round-trips through the SAME string conversion its scalar twin uses
+      // — `projectFieldEntries` / `arrayElementHydrate`, shared with drizzle)
+      // and, on Postgres (native array support), resolves the column to
+      // `<element column type>[]` rather than the cross-platform
+      // comma-joined fallback a bare `type: "array"` gets on a non-native
+      // driver.
+      if (type.element.kind === "primitive" || type.element.kind === "enum") {
+        const elem =
+          type.element.kind === "enum"
+            ? { mikro: "string", ts: "string", columnType: undefined as string | undefined }
+            : primTypes(type.element.name);
+        return [
+          {
+            prop,
+            mikroType: elem.mikro,
+            tsType: `${elem.ts}[]`,
+            nullable,
+            primary: false,
+            columnType: elem.columnType ? `${elem.columnType}[]` : undefined,
+            array: true,
+          },
+        ];
+      }
+      throw new Error(`mikroorm: unsupported field kind 'array' on '${prop}' (validator gap)`);
     }
     default:
       throw new Error(
@@ -415,6 +461,20 @@ function collectionFieldColumn(f: FieldIR, ctx: EnrichedBoundedContextIR): Mikro
  *  fields (scalar / enum / VO-flattened / id; a collection field folds into one
  *  jsonb column).  MikroORM owns the schema, so no explicit FK/index — the
  *  parent-scoped reads carry the relationship. */
+
+/** One MikroORM EntitySchema property descriptor line for a {@link MikroColumn}
+ *  — the single point every Row-entity emitter below builds its `properties:`
+ *  block from, so a column concern (e.g. `array: true`) is added once rather
+ *  than re-added at each duplicate call site. */
+function mikroPropertyLine(c: MikroColumn): string {
+  const parts = [`type: "${c.mikroType}"`];
+  if (c.primary) parts.push("primary: true");
+  if (c.columnType) parts.push(`columnType: "${c.columnType}"`);
+  if (c.array) parts.push("array: true");
+  if (c.nullable) parts.push("nullable: true");
+  return `    ${c.prop}: { ${parts.join(", ")} },`;
+}
+
 function renderPartRowEntity(
   part: EntityPartIR,
   ctx: EnrichedBoundedContextIR,
@@ -429,13 +489,7 @@ function renderPartRowEntity(
     ),
   ];
   const classFields = cols.map((c) => `  ${c.prop}!: ${c.tsType}${c.nullable ? " | null" : ""};`);
-  const propLines = cols.map((c) => {
-    const parts = [`type: "${c.mikroType}"`];
-    if (c.primary) parts.push("primary: true");
-    if (c.columnType) parts.push(`columnType: "${c.columnType}"`);
-    if (c.nullable) parts.push("nullable: true");
-    return `    ${c.prop}: { ${parts.join(", ")} },`;
-  });
+  const propLines = cols.map(mikroPropertyLine);
   return {
     schemaName,
     block: lines(
@@ -520,13 +574,7 @@ function renderRecordRowEntity(
 ): { block: string; schemaName: string } {
   const schemaName = `${cls}Schema`;
   const classFields = cols.map((c) => `  ${c.prop}!: ${c.tsType}${c.nullable ? " | null" : ""};`);
-  const propLines = cols.map((c) => {
-    const parts = [`type: "${c.mikroType}"`];
-    if (c.primary) parts.push("primary: true");
-    if (c.columnType) parts.push(`columnType: "${c.columnType}"`);
-    if (c.nullable) parts.push("nullable: true");
-    return `    ${c.prop}: { ${parts.join(", ")} },`;
-  });
+  const propLines = cols.map(mikroPropertyLine);
   return {
     schemaName,
     block: lines(
@@ -772,13 +820,7 @@ export function renderMikroEntities(
     const schemaName = `${cls}Schema`;
     schemaNames.push(schemaName);
     const classFields = cols.map((c) => `  ${c.prop}!: ${c.tsType}${c.nullable ? " | null" : ""};`);
-    const propLines = cols.map((c) => {
-      const parts = [`type: "${c.mikroType}"`];
-      if (c.primary) parts.push("primary: true");
-      if (c.columnType) parts.push(`columnType: "${c.columnType}"`);
-      if (c.nullable) parts.push("nullable: true");
-      return `    ${c.prop}: { ${parts.join(", ")} },`;
-    });
+    const propLines = cols.map(mikroPropertyLine);
     blocks.push(
       lines(
         `export class ${cls} {`,

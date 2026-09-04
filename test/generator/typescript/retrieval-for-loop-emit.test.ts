@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from "vitest";
 import { generateHono } from "../../_helpers/generate.js";
-import { parseString } from "../../_helpers/parse.js";
+import { parseValid } from "../../_helpers/parse.js";
 
 const SRC = `
   context Sales {
@@ -31,8 +31,7 @@ const SRC = `
 
 describe("typescript generator — workflow for-loop + Repo.run", () => {
   it("renders Repo.run as the run method call with a page argument", async () => {
-    const { model, errors } = await parseString(SRC);
-    expect(errors).toEqual([]);
+    const model = await parseValid(SRC);
     const wf = generateHono(model).get("http/workflows.ts")!;
     expect(wf).toMatch(
       /const matched = await \w+\.runByRegion\(rgn, \{ offset: 0, limit: 100 \}\);/,
@@ -40,7 +39,7 @@ describe("typescript generator — workflow for-loop + Repo.run", () => {
   });
 
   it("renders the loop as for…of with a per-iteration save inside the body", async () => {
-    const { model } = await parseString(SRC);
+    const model = await parseValid(SRC);
     const wf = generateHono(model).get("http/workflows.ts")!;
     // for (const c of matched) { c.deactivate(); await <repo>.save(c); }
     expect(wf).toMatch(/for \(const c of matched\) \{/);

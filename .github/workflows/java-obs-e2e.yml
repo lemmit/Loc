@@ -5,8 +5,21 @@ name: Java observability e2e
 # (server_starting → server_listening → request_start/request_end →
 # server_shutdown → server_drained).  Mirrors `dotnet-obs-e2e.yml`.
 #
-# Push-to-main only (regression net, not a PR gate) — docker pull +
-# gradle cold start cost ~3-5min.
+# TIER: per-PR, path-scoped, binding through `pr-gate` — with `push: main`
+# kept as the post-merge regression net.  Promoted out of push:main-only by
+# wave G1 packet 1.1 of docs/new-plan/verification-waves-2026-09.md: a runtime
+# gate that runs only after the merge can only ever report a red `main`, and
+# the docker pull + gradle cold start (~3-5min) buys a real runtime signal.
+# The `run-obs` label opt-in is removed; the draft guard on the job below
+# keeps draft PRs on the fast lane.
+#
+# The per-PR `paths:` block is deliberately NARROW — this gate's real blast
+# radius is `src/ir/**`, `src/generator/java/**`, `src/platform/java.ts` and
+# its own e2e test file.  Narrowness IS the anti-abuse answer: five obs boots
+# firing together on every PR would be the docker / runner burst anti-abuse
+# heuristics watch for on public repos, so the paths are cut so a typical PR
+# fires one or two of the five siblings, never all five.  The broader
+# generation path stays on the `push: main` block above.
 
 on:
   push:
@@ -29,26 +42,45 @@ on:
       - 'test/e2e/observability-events-java.test.ts'
   workflow_dispatch:
   merge_group:
-  # On-demand per-PR run: apply the `run-obs` label to a PR to run this
-  # otherwise push:main-only suite against that branch before merge.  The
-  # job-level `if` below restricts the labeled trigger to that one label.
+  # Per-PR, path-scoped: fires on this gate's real blast radius (below), and
+  # is binding because `pr-gate` fails on any non-passing check run present on
+  # the head SHA.  The `run-obs` label opt-in is gone -- a labeled trigger is
+  # `false` on opened/synchronize and exempts the file from draft-gate
+  # enforcement.  `ready_for_review` is what re-fires the leg when a draft
+  # flips.
   pull_request:
-    types: [labeled]
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      # DUPLICATED list, never a YAML anchor: the reader in
+      # test/system/workflow-path-coverage.test.ts does not resolve
+      # `&paths` / `*paths`, so an anchored list is silently outside that
+      # gate.  Deliberately narrower than the `push:` block above -- that one
+      # carries the whole generation path (language/macros/ir/system/util) as
+      # the post-merge net, and the coverage test unions globs across
+      # triggers, so this block only needs the per-PR blast radius.
+      - 'src/ir/**'
+      - 'src/generator/java/**'
+      - 'src/platform/java.ts'
+      - 'test/e2e/observability-events-java.test.ts'
+      - '.github/workflows/java-obs-e2e.yml'
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
+  # Keyed on the PR number when there is one so a superseded PR push cancels
+  # its own in-flight boot; `push: main` runs keep per-ref attribution and are
+  # never cancelled (cancel-in-progress is false off `pull_request`).
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   java-obs-e2e:
     runs-on: ubuntu-latest
-    # Skip the labeled trigger unless it's specifically `run-obs`; push,
-    # merge-queue, and manual (`workflow_dispatch`) runs always proceed.
-    if: >-
-      github.event_name != 'pull_request' ||
-      github.event.label.name == 'run-obs'
+    # Draft PRs run only the fast lane (test.yml, langium-generated,
+    # workflow-lint, pr-gate); this leg fires once the PR is marked ready for
+    # review -- see docs/ci-gating.md, "Draft PRs and the runner queue".
+    # Pinned verbatim by test/system/draft-gate.test.ts.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6

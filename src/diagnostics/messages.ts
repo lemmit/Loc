@@ -2005,28 +2005,18 @@ export const DIAGNOSTIC_MESSAGES = {
     `for is silently dropped and the tables land in 'public'. Use 'persistence: drizzle' ` +
     `on this deployable, or drop the clause.`,
   // (The generic `loom.mikroorm-unsupported` tail lived here — the one
-  // `validateMikroOrmSupport` used for its SHAPE rejects.  Its last surviving
-  // caller was the abstract-inheritance-base-with-`contains` shape, which is
-  // impossible on every target and so became the target-neutral
-  // `loom.abstract-aggregate-contains` above.  The CODE stays live through the
-  // `#migrations` variant just above and the `#scalar-array` reject below —
-  // the ONE shape where mikroorm is behind drizzle rather than at parity,
-  // which is why it carries its own message rather than a generic tail.)
-  "loom.mikroorm-unsupported#scalar-array": (p: {
-    name: unknown;
-    subject: unknown;
-    field: unknown;
-    element: unknown;
-  }) =>
-    `Deployable '${p.name}' selects 'persistence: mikroorm', but ${p.subject} declares the ` +
-    `scalar collection field '${p.field}: ${p.element}[]'. The MikroORM row emitter maps a ` +
-    `root aggregate field to a column per declared kind (primitive / enum / id / value ` +
-    `object) and has no arm for an array of primitives or enum values, so generation would ` +
-    `abort. Drizzle stores it as a native Postgres array — use 'persistence: drizzle' on ` +
-    `this deployable, move the collection onto a contained entity part (parts fold a ` +
-    `collection field into one jsonb column on this adapter), or model it as a value-object ` +
-    `collection ('<VO>[]') or a reference collection ('<Agg> id[]'), both of which mikroorm ` +
-    `already persists.`,
+  // `validateMikroOrmSupport` used for its SHAPE rejects.  Its last two
+  // callers: the abstract-inheritance-base-with-`contains` shape, impossible
+  // on every target and so promoted to the target-neutral
+  // `loom.abstract-aggregate-contains` above; and the root SCALAR/ENUM
+  // collection field (`#scalar-array`) — the one shape mikroorm was genuinely
+  // behind drizzle on — drained when `columnsForType` (typescript/emit/
+  // mikroorm.ts) grew an `"array"` arm mirroring drizzle's native Postgres
+  // array column (M-T6.23).  The CODE stays live through the three
+  // migration-checks.ts variants above (`#migrations`, `#schema-split`,
+  // `#schema-ignored`) — the self-provisioning limits this adapter's
+  // `orm.schema.updateSchema()` boot-time schema owner genuinely cannot
+  // express.)
   "loom.find-predicate-unsupported": (p: {
     name: unknown;
     adapter: unknown;

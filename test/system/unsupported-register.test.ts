@@ -192,6 +192,11 @@ function walk(dir: string, out: string[] = []): string[] {
   return out;
 }
 
+/** Matches an emission site: a `code:`/`code =` assignment naming a `loom.*`
+ *  diagnostic code, capturing the bare code (no `#slug`). Shared by the
+ *  existence scan below and the per-row site-resolution check. */
+const EMIT_RE = /code\s*[:=]\s*["'`](loom\.[a-zA-Z0-9-]+)["'`]/;
+
 /** Codes actually emitted from a `code:`/`code =` position in src/. */
 function emittedSuffixedCodes(): Map<string, string> {
   const found = new Map<string, string>();
@@ -199,7 +204,7 @@ function emittedSuffixedCodes(): Map<string, string> {
     if (path.resolve(file) === REGISTER_FILE) continue;
     const lines = fs.readFileSync(file, "utf8").split("\n");
     lines.forEach((line, i) => {
-      const m = line.match(/code\s*[:=]\s*["'`](loom\.[a-zA-Z0-9-]+)["'`]/);
+      const m = line.match(EMIT_RE);
       if (!m) return;
       const code = m[1];
       if (!/unsupported|-backend$/.test(code)) return;
@@ -265,6 +270,55 @@ describe("`*-unsupported` register (M-T9.27)", () => {
       (e) => e.code,
     );
     expect(bad, "Every row needs a `file:line` emission site for the reviewer.").toEqual([]);
+  });
+
+  // `site` used to be validated only by REGEX SHAPE (`^src\/.+:\d+$`) — never
+  // opened, so a raiser that MOVED (a sibling check grew/shrank above it in
+  // the same file, the check was extracted to a new file, …) left a
+  // perfectly-shaped, perfectly wrong citation and nothing caught it.  Six
+  // adapter rows drifted this way by 200+ lines apiece before a wholesale
+  // correction (see the mismatches this test found on the pre-fix tree,
+  // quoted in the mission hand-off).  This resolves the file and asserts the
+  // row's OWN code is actually raised near the cited line.
+  it("resolves every row's site to its own code nearby (the register cannot notice a moved raiser otherwise)", () => {
+    // N=20. Reading every row against the current tree (this PR's own
+    // wholesale re-verification) found two clusters: rows already accurate to
+    // within 0-9 lines (trivial reformatting — a comment grew, a blank line
+    // moved) and rows that had drifted 23 to 782 lines (a sibling check's body
+    // grew above the cited one, or the citation was never updated after the
+    // file reorganized). Nothing fell in between. N=20 sits above the first
+    // cluster with better than 2x headroom and far below the second, so it
+    // absorbs incidental reformatting while still catching a raiser that
+    // moved to a different function, a different file region, or was deleted
+    // outright — exactly the "moved raiser" shape this check exists to catch,
+    // proved below by seeding that shape and reverting the seed by file copy.
+    const N = 20;
+    const bad: string[] = [];
+    for (const e of UNSUPPORTED_REGISTER) {
+      const m = /^(src\/.+):(\d+)$/.exec(e.site);
+      if (!m) continue; // malformed shape is the previous assertion's job
+      const [, relPath, lineStr] = m;
+      const abs = path.join(repoRoot, relPath);
+      let fileLines: string[];
+      try {
+        fileLines = fs.readFileSync(abs, "utf8").split("\n");
+      } catch {
+        bad.push(`${e.code}: site file does not exist (${e.site})`);
+        continue;
+      }
+      const lineNo = Number(lineStr);
+      const lo = Math.max(0, lineNo - 1 - N);
+      const hi = Math.min(fileLines.length, lineNo - 1 + N + 1);
+      const resolved = fileLines.slice(lo, hi).some((line) => EMIT_RE.exec(line)?.[1] === e.code);
+      if (!resolved) {
+        bad.push(`${e.code}: no emission of its own code within ±${N} lines of ${e.site}`);
+      }
+    }
+    expect(
+      bad,
+      "Row(s) whose site does not resolve to their own code nearby — the citation has drifted " +
+        "from the raiser it names. Re-point `site` at the code's current file:line.",
+    ).toEqual([]);
   });
 
   // --- ownership (slice 3) -------------------------------------------------

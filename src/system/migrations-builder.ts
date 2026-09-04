@@ -926,6 +926,16 @@ function diffTable(
           to: nextCol.type,
         });
       }
+      if (c.default !== nextCol.default) {
+        buckets.rename.push({
+          op: "alterColumnDefault",
+          table: next.name,
+          schema,
+          name: target,
+          from: c.default,
+          to: nextCol.default,
+        });
+      }
       renamedPrev.add(c.name);
       renamedNext.add(target);
       colRenameMap.set(c.name, target);
@@ -971,6 +981,16 @@ function diffTable(
         name: c.name,
         from: p.type,
         to: c.type,
+      });
+    }
+    if (p.default !== c.default) {
+      buckets.alter.push({
+        op: "alterColumnDefault",
+        table: next.name,
+        schema,
+        name: c.name,
+        from: p.default,
+        to: c.default,
       });
     }
   }
@@ -2737,6 +2757,7 @@ function describeMigration(steps: MigrationStep[]): string {
         return `Remove${columnToPascal(s.name)}From${tableToPascal(s.table)}`;
       case "alterColumnNullable":
       case "alterColumnType":
+      case "alterColumnDefault":
         return `Alter${columnToPascal(s.name)}On${tableToPascal(s.table)}`;
       case "addIndex":
         return `AddIndex${columnToPascal(s.index.name)}`;

@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { generateDotnet } from "../../../src/generator/dotnet/index.js";
-import { parseString } from "../../_helpers/parse.js";
+import { generateSystemFiles } from "../../_helpers/generate.js";
 
 // ---------------------------------------------------------------------------
 // .NET (EF Core) event-sourcing emission (`persistedAs: eventLog`, A2.2b).
@@ -46,10 +45,33 @@ context Accounts {
 }
 `;
 
+// This fixture used to ride the legacy single-context `generateDotnet` helper
+// on a BARE loose context.  Once that path asserts phase ⑦ (M-T9.49) the shape
+// is refused, and correctly: event-sourced storage is a HOSTED capability —
+// `loom.event-sourcing-backend-unsupported` ("no event-sourcing-capable backend
+// deployable hosts this context") — and the legacy path cannot host anything,
+// because declaring a `system` re-parents every loose context into it and
+// empties the `loom.contexts` list `generateDotnet` emits from.  So the fixture
+// grows the `kind: eventLog` resource + deployable it always implied and emits
+// through the orchestrator.  The map is re-keyed to drop the deployable
+// directory, so every assertion below reads the same path it did before.
 async function generate(): Promise<Map<string, string>> {
-  const { model, errors } = await parseString(SRC);
-  expect(errors, errors.join("\n")).toEqual([]);
-  return generateDotnet(model);
+  const files = await generateSystemFiles(`
+    system Banking {
+      subdomain S {
+        ${SRC}
+      }
+      storage pg { type: postgres }
+      resource accountsLog { for: Accounts, kind: eventLog, use: pg }
+      deployable api {
+        platform: dotnet
+        contexts: [Accounts]
+        dataSources: [accountsLog]
+        port: 5000
+      }
+    }
+  `);
+  return new Map([...files].map(([k, v]) => [k.replace(/^api\//, ""), v]));
 }
 
 describe(".NET event-sourcing emission (persistedAs: eventLog)", () => {
@@ -73,7 +95,14 @@ describe(".NET event-sourcing emission (persistedAs: eventLog)", () => {
     const cfg = files.get(
       "Infrastructure/Persistence/Configurations/AccountsEventRecordConfiguration.cs",
     )!;
-    expect(cfg).toContain('builder.ToTable("accounts_events");');
+    // Schema-qualified now that the context is HOSTED on a deployable: a
+    // context inside a `system` owns a Postgres schema, so the log lands at
+    // `accounts.accounts_events` — the same shape
+    // `dotnet-multi-context-eventlog-naming.test.ts` pins.  The unqualified
+    // `ToTable("accounts_events")` this line used to assert was the LOOSE
+    // top-level context's emission, which no user can reach: `ddd parse`
+    // refuses that model with `loom.event-sourcing-backend-unsupported`.
+    expect(cfg).toContain('builder.ToTable("accounts_events", "accounts");');
     expect(cfg).toContain("builder.HasKey(x => new { x.StreamType, x.StreamId, x.Version });");
     expect(cfg).toContain('builder.Property(x => x.StreamType).HasColumnName("stream_type");');
     expect(cfg).toContain('builder.Property(x => x.StreamId).HasColumnName("stream_id");');

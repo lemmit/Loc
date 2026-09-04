@@ -4,8 +4,8 @@
 // `.limit()/.offset()`, returning the hydrated aggregate array.
 
 import { describe, expect, it } from "vitest";
-import { generateHono } from "../../_helpers/generate.js";
-import { parseString } from "../../_helpers/parse.js";
+import { generateHono, generateSystemFilesUnchecked } from "../../_helpers/generate.js";
+import { parseValid } from "../../_helpers/parse.js";
 
 const SRC = `
   context Sales {
@@ -23,8 +23,7 @@ const SRC = `
 
 describe("typescript generator — retrieval", () => {
   it("emits a runActiveInRegion method with where + sort + paging", async () => {
-    const { model, errors } = await parseString(SRC);
-    expect(errors).toEqual([]);
+    const model = await parseValid(SRC);
     const repo = generateHono(model).get("db/repositories/customer-repository.ts")!;
 
     // Method signature: retrieval params + optional page arg, returns array.
@@ -47,7 +46,7 @@ describe("typescript generator — retrieval", () => {
   });
 
   it("emits no run method for an aggregate with no retrieval", async () => {
-    const { model } = await parseString(`
+    const model = await parseValid(`
       context Sales {
         aggregate Order { total: decimal }
         repository Orders for Order { }
@@ -58,7 +57,7 @@ describe("typescript generator — retrieval", () => {
   });
 
   it("emits a paging-only run for a where-only retrieval (no orderBy)", async () => {
-    const { model, errors } = await parseString(`
+    const model = await parseValid(`
       context Sales {
         aggregate Customer { active: bool }
         repository Customers for Customer { }
@@ -66,7 +65,6 @@ describe("typescript generator — retrieval", () => {
         retrieval AllActive of Customer = ActiveCustomer
       }
     `);
-    expect(errors).toEqual([]);
     const repo = generateHono(model).get("db/repositories/customer-repository.ts")!;
     expect(repo).toMatch(/async runAllActive\(page\?: /);
     expect(repo).not.toMatch(/runAllActive[\s\S]*\.orderBy\(/);
@@ -81,18 +79,30 @@ describe("typescript generator — retrieval", () => {
 // invariant forbids dropping a part on one backend. Guards against a
 // future contributor "honouring" loads with a spurious narrowing branch.
 const LOADS_SRC = `
-  context Sales {
-    aggregate Order {
-      status: string
-      contains lines: Line[]
-      contains notes: Note[]
-      entity Line { sku: string }
-      entity Note { text: string }
+  system Sys {
+    subdomain D {
+      context Sales {
+        aggregate Order {
+          status: string
+          contains lines: Line[]
+          contains notes: Note[]
+          entity Line { sku: string }
+          entity Note { text: string }
+        }
+        repository Orders for Order { }
+        criterion Open(s: string) of Order = status == s
+        retrieval Recent(s: string) of Order { where: Open(s) }
+        retrieval Slim(s: string) of Order { where: Open(s) loads: [this.lines] }
+      }
     }
-    repository Orders for Order { }
-    criterion Open(s: string) of Order = status == s
-    retrieval Recent(s: string) of Order { where: Open(s) }
-    retrieval Slim(s: string) of Order { where: Open(s) loads: [this.lines] }
+    storage primary { type: postgres }
+    resource salesState { for: Sales, kind: state, use: primary }
+    deployable api {
+      platform: node
+      contexts: [Sales]
+      dataSources: [salesState]
+      port: 3000
+    }
   }
 `;
 
@@ -108,9 +118,20 @@ function runBody(repo: string, name: string): string {
 
 describe("typescript generator — retrieval loadPlan (whole/explicit parity)", () => {
   it("explicit `loads` does not narrow — both retrievals bulk-load every owned containment", async () => {
-    const { model, errors } = await parseString(LOADS_SRC);
-    expect(errors).toEqual([]);
-    const repo = generateHono(model).get("db/repositories/order-repository.ts")!;
+    // `loads:` is REFUSED outright — `loom.retrieval-loads-unsupported`, on
+    // every backend and with or without a hosting deployable (verified: `ddd
+    // parse` exits 1 on this exact source).  Emitting from the refused model IS
+    // this test's subject: the guarantee under test is that the emitter never
+    // grows a narrowing branch while the refusal stands, so when `loads:`
+    // eventually ships there is a pinned before-picture.  Hence the `Unchecked`
+    // helper rather than a weakened phase-⑦ assertion (M-T9.48).
+    const repo = (
+      await generateSystemFilesUnchecked(
+        LOADS_SRC,
+        "explicit `loads:` is refused by loom.retrieval-loads-unsupported; that the " +
+          "emitter still loads the WHOLE aggregate is the property under test",
+      )
+    ).get("api/db/repositories/order-repository.ts")!;
     // `Slim` declares `loads: [this.lines]` but still loads `notes` too —
     // owned containments are always materialised (no narrowing).
     const slim = runBody(repo, "runSlim");

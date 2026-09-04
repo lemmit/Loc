@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from "vitest";
 import { generateHono } from "../../_helpers/generate.js";
-import { parseString } from "../../_helpers/parse.js";
+import { parseValid } from "../../_helpers/parse.js";
 
 const SRC = `
   context Logistics {
@@ -29,8 +29,7 @@ const SRC = `
 
 describe("typescript generator — part-in-part containment", () => {
   it("FKs a nested part to its direct parent (schema + domain branding)", async () => {
-    const { model, errors } = await parseString(SRC);
-    expect(errors).toEqual([]);
+    const model = await parseValid(SRC);
     const files = generateHono(model);
 
     const schema = files.get("db/schema.ts")!;
@@ -48,8 +47,7 @@ describe("typescript generator — part-in-part containment", () => {
   });
 
   it("recursively saves + hydrates the nested level keyed by the direct parent", async () => {
-    const { model, errors } = await parseString(SRC);
-    expect(errors).toEqual([]);
+    const model = await parseValid(SRC);
     const files = generateHono(model);
     const repo = files.get("db/repositories/order-repository.ts")!;
 
@@ -68,7 +66,7 @@ describe("typescript generator — part-in-part containment", () => {
   });
 
   it("supports INLINE nested construction (parentId omitted, stamped on save)", async () => {
-    const { model, errors } = await parseString(`
+    const model = await parseValid(`
       context Logistics {
         aggregate Order {
           code: string
@@ -82,7 +80,6 @@ describe("typescript generator — part-in-part containment", () => {
         repository Orders for Order { }
       }
     `);
-    expect(errors).toEqual([]);
     const files = generateHono(model);
     const domain = files.get("domain/order.ts")!;
     // The nested Label is constructed WITHOUT parentId (no shipment id yet); the

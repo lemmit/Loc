@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from "vitest";
 import { generateHono } from "../../_helpers/generate.js";
-import { parseString } from "../../_helpers/parse.js";
+import { parseString, parseValid } from "../../_helpers/parse.js";
 
 const SRC = `
   context Sales {
@@ -28,7 +28,7 @@ describe("typescript generator — avg(λ) desugar", () => {
   });
 
   it("desugars a money `avg` to an empty-guarded decimal.js `.plus`/`.div` mean", async () => {
-    const { model } = await parseString(SRC);
+    const model = await parseValid(SRC);
     const domain = generateHono(model).get("domain/order.ts")!;
     const line = domain.split("\n").find((l) => l.includes("get a("))!;
     expect(line).toBeDefined();
@@ -42,7 +42,7 @@ describe("typescript generator — avg(λ) desugar", () => {
   });
 
   it("desugars a plain-numeric (int) `avg` to the native `+`/`/` mean", async () => {
-    const { model } = await parseString(SRC);
+    const model = await parseValid(SRC);
     const domain = generateHono(model).get("domain/order.ts")!;
     const line = domain.split("\n").find((l) => l.includes("get b("))!;
     expect(line).toBeDefined();

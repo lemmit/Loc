@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { validateLoomModel } from "../../../src/ir/validate/validate.js";
 import { generateHono } from "../../_helpers/generate.js";
 import { toLoomModel } from "../../_helpers/ir.js";
-import { parseString } from "../../_helpers/parse.js";
+import { parseString, parseValid } from "../../_helpers/parse.js";
 
 const SRC = `
   context Billing {
@@ -41,7 +41,7 @@ describe("typescript generator — A5 temporal", () => {
   });
 
   it("renders datetime ± absolute duration as getTime() ms arithmetic", async () => {
-    const { model } = await parseString(SRC);
+    const model = await parseValid(SRC);
     const domain = generateHono(model).get("domain/invoice.ts")!;
     expect(domain).toContain(
       "get due(): Date { return new Date((this._createdAt).getTime() + (((30) * 86400000))); }",
@@ -55,7 +55,7 @@ describe("typescript generator — A5 temporal", () => {
   });
 
   it("renders dt−dt as ms, duration algebra as plain numbers", async () => {
-    const { model } = await parseString(SRC);
+    const model = await parseValid(SRC);
     const domain = generateHono(model).get("domain/invoice.ts")!;
     expect(domain).toContain(
       "const span = ((this._deliveredAt).getTime() - (this._orderedAt).getTime());",
@@ -65,7 +65,7 @@ describe("typescript generator — A5 temporal", () => {
   });
 
   it("lowers column-side datetime ± duration to sql`make_interval` and imports sql", async () => {
-    const { model } = await parseString(SRC);
+    const model = await parseValid(SRC);
     const repo = generateHono(model).get("db/repositories/invoice-repository.ts")!;
     expect(repo).toContain("lt(sql`${schema.invoices.dueDate} + make_interval(days => ${30})`, q)");
     expect(repo).toContain(
@@ -84,8 +84,7 @@ describe("typescript generator — A5 temporal", () => {
         }
       }
     `;
-    const { model, errors } = await parseString(src);
-    expect(errors).toEqual([]);
+    const model = await parseValid(src);
     const repo = generateHono(model).get("db/repositories/invoice-repository.ts")!;
     expect(repo).toContain("lt(schema.invoices.dueDate, sql`${q} + make_interval(days => ${2})`)");
   });
@@ -99,8 +98,7 @@ describe("typescript generator — A5 temporal", () => {
         }
       }
     `;
-    const { model, errors } = await parseString(src);
-    expect(errors).toEqual([]);
+    const model = await parseValid(src);
     // The queryable gate is IR-level (phase ⑦) — only DIRECT constructor
     // operands are admitted; a `duration + duration` composite is honestly
     // rejected (matching exactly what lowerToDrizzle lowers).

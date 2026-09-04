@@ -243,7 +243,7 @@ const ELIXIR_IMAGE = "hexpm/elixir:1.17.2-erlang-27.0.1-debian-bookworm-20240722
 
 function dockerAvailable(): boolean {
   try {
-    execSync("docker info", { stdio: "ignore" });
+    execSync('docker version --format "{{.Server.Version}}"', { stdio: "ignore" });
     return true;
   } catch {
     return false;

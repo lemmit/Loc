@@ -7,8 +7,8 @@
 // document path (load the `<Agg>Document` row by id and `Remove` it).
 
 import { describe, expect, it } from "vitest";
-import { generateDotnet } from "../../../src/generator/dotnet/index.js";
-import { parseString } from "../../_helpers/parse.js";
+import { generateDotnet } from "../../_helpers/generate.js";
+import { parseValid } from "../../_helpers/parse.js";
 
 const SRC = `
   context Cms {
@@ -23,8 +23,7 @@ const SRC = `
 
 describe("dotnet generator — crudish on a shape: document aggregate (B12)", () => {
   it("document repo impl emits DeleteAsync, matching the interface's declaration", async () => {
-    const { model, errors } = await parseString(SRC);
-    expect(errors).toEqual([]);
+    const model = await parseValid(SRC);
     const files = generateDotnet(model);
 
     // The interface declares DeleteAsync (crudish → canonical destroy).

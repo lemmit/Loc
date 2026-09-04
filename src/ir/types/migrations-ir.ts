@@ -230,6 +230,23 @@ export type MigrationStep =
       from: ColumnType;
       to: ColumnType;
     }
+  // A column's DEFAULT changed (added, removed, or its literal edited) with
+  // the column's type/nullability unchanged — `default` was previously
+  // compared nowhere in `diffSchema`, so a `.ddd` default edit emitted no
+  // migration and the database silently kept the old default
+  // (verification-waves-2026-09.md G2.5). `from`/`to` are pre-rendered
+  // Postgres scalar literals (the `ColumnShape.default` convention —
+  // `"gen_random_uuid()"`, `"0"`, …); `undefined` means no default (an add
+  // drops it, a remove sets it). Non-destructive: existing rows keep their
+  // stored value — only the DEFAULT future inserts pick up changes.
+  | {
+      op: "alterColumnDefault";
+      table: string;
+      schema?: string;
+      name: string;
+      from: string | undefined;
+      to: string | undefined;
+    }
   | { op: "addIndex"; index: IndexShape; schema?: string }
   | { op: "dropIndex"; table: string; schema?: string; name: string }
   // Rename an index in place (M-T2.1 a) — `from`/`to` are the bare (unqualified)

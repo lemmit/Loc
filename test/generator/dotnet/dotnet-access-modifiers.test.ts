@@ -6,12 +6,11 @@
 // Create<Agg>Request shape.
 
 import { describe, expect, it } from "vitest";
-import { generateDotnet } from "../../../src/generator/dotnet/index.js";
-import { parseString } from "../../_helpers/index.js";
+import { generateDotnet } from "../../_helpers/generate.js";
+import { parseValid } from "../../_helpers/index.js";
 
 async function gen(src: string): Promise<Map<string, string>> {
-  const { model, errors } = await parseString(src);
-  if (errors.length) throw new Error(errors.join("; "));
+  const model = await parseValid(src);
   return generateDotnet(model);
 }
 

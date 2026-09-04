@@ -351,6 +351,85 @@ describe("diffSchema", () => {
     ]);
   });
 
+  // G2.5 (verification-waves-2026-09.md): `ColumnShape.default` used to be
+  // compared nowhere in `diffTable`, so a `.ddd` default edit emitted no
+  // migration and the database silently kept the old default. These four
+  // pin `alterColumnDefault` — add, remove, and render on both SQL backends.
+  const withDefault =
+    (columnName: string, def: string | undefined) => (t: SchemaSnapshot["tables"][number]) => ({
+      ...t,
+      columns: t.columns.map((c) =>
+        c.name === columnName ? ({ ...c, default: def } as ColumnShape) : c,
+      ),
+    });
+
+  it("emits alterColumnDefault when a column's default is added", async () => {
+    const { module } = await loadShop();
+    const next = withModifiedTable(schemaFromModule(module), "orders", withDefault("total", "0"));
+    const prev = withModifiedTable(next, "orders", withDefault("total", undefined));
+    const steps = diffSchema(prev, next);
+    expect(steps).toEqual([
+      {
+        op: "alterColumnDefault",
+        table: "orders",
+        schema: undefined,
+        name: "total",
+        from: undefined,
+        to: "0",
+      },
+    ]);
+  });
+
+  it("emits alterColumnDefault (DROP DEFAULT) when a column's default is removed", async () => {
+    const { module } = await loadShop();
+    const next = schemaFromModule(module); // "total" carries no default
+    const prev = withModifiedTable(next, "orders", withDefault("total", "0"));
+    const steps = diffSchema(prev, next);
+    expect(steps).toEqual([
+      {
+        op: "alterColumnDefault",
+        table: "orders",
+        schema: undefined,
+        name: "total",
+        from: "0",
+        to: undefined,
+      },
+    ]);
+  });
+
+  it("renders alterColumnDefault to Postgres DDL (SET DEFAULT and DROP DEFAULT)", async () => {
+    const { module } = await loadShop();
+    const next = withModifiedTable(schemaFromModule(module), "orders", withDefault("total", "0"));
+    const prev = withModifiedTable(next, "orders", withDefault("total", undefined));
+    const [added] = diffSchema(prev, next);
+    expect(renderPgStep(added!)).toBe('ALTER TABLE "orders" ALTER COLUMN "total" SET DEFAULT 0;');
+    const [dropped] = diffSchema(next, prev);
+    expect(renderPgStep(dropped!)).toBe('ALTER TABLE "orders" ALTER COLUMN "total" DROP DEFAULT;');
+  });
+
+  it("renders alterColumnDefault as a bit-identical Ecto execute/1", async () => {
+    const { module } = await loadShop();
+    const next = withModifiedTable(schemaFromModule(module), "orders", withDefault("total", "0"));
+    const prev = withModifiedTable(next, "orders", withDefault("total", undefined));
+    const [step] = diffSchema(prev, next);
+    expect(renderEctoStep(step!)).toEqual([
+      'execute("ALTER TABLE \\"orders\\" ALTER COLUMN \\"total\\" SET DEFAULT 0")',
+    ]);
+  });
+
+  it("does NOT gate alterColumnDefault behind --allow-destructive — a default change is never destructive", async () => {
+    const { module } = await loadShop();
+    const next = schemaFromModule(module);
+    const prev = withModifiedTable(next, "orders", withDefault("total", "0"));
+    const steps = diffSchema(prev, next);
+    expect(() =>
+      applyDestructivePolicy(steps, prev, { allowDestructive: false, module: "Sales" }),
+    ).not.toThrow();
+    expect(
+      applyDestructivePolicy(steps, prev, { allowDestructive: false, module: "Sales" }),
+    ).toEqual(steps);
+  });
+
   it("detects index additions and removals by name", async () => {
     const { module } = await loadShop();
     const next = schemaFromModule(module);
@@ -370,10 +449,11 @@ describe("diffSchema — explicit renames (M-T2.1)", () => {
   // Minimal single-table snapshots (no FK/index noise) so the assertions
   // isolate the rename pass.  Renames are a flat list keyed by table name;
   // diffSchema indexes them internally (no schema here → public).
-  const col = (name: string, kind = "int", nullable = false): ColumnShape => ({
+  const col = (name: string, kind = "int", nullable = false, def?: string): ColumnShape => ({
     name,
     type: { kind } as ColumnShape["type"],
     nullable,
+    ...(def !== undefined ? { default: def } : {}),
   });
   const snap = (columns: ColumnShape[]): SchemaSnapshot => ({
     schemaVersion: 1,
@@ -437,6 +517,30 @@ describe("diffSchema — explicit renames (M-T2.1)", () => {
         name: "quantity",
         from: { kind: "int" },
         to: { kind: "bigint" },
+      },
+    ]);
+  });
+
+  it("emits renameColumn + alterColumnDefault for a rename that also changes the default (G2.5)", () => {
+    const prev = snap([col("id", "uuid"), col("qty", "int", false, "0")]);
+    const next = snap([col("id", "uuid"), col("quantity", "int", false, "1")]);
+    const steps = diffSchema(prev, next, [{ table: "orders", from: "qty", to: "quantity" }]);
+    expect(steps).toEqual([
+      {
+        op: "renameColumn",
+        table: "orders",
+        schema: undefined,
+        from: "qty",
+        to: "quantity",
+        type: { kind: "int" },
+      },
+      {
+        op: "alterColumnDefault",
+        table: "orders",
+        schema: undefined,
+        name: "quantity",
+        from: "0",
+        to: "1",
       },
     ]);
   });

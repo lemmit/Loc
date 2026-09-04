@@ -14,7 +14,7 @@
 // (src/ir/util/domain-service-read-ports.ts), shared with the TS trailblazer.
 
 import { describe, expect, it } from "vitest";
-import { generateDotnet } from "../../../src/generator/dotnet/index.js";
+import { generateDotnet } from "../../_helpers/generate.js";
 import { parseValid } from "../../_helpers/parse.js";
 
 // A reading service (`Registration.isEmailAvailable` reads `Accounts.byHolder`),

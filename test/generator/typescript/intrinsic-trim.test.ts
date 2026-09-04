@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from "vitest";
 import { generateHono } from "../../_helpers/generate.js";
-import { parseString } from "../../_helpers/parse.js";
+import { parseString, parseValid } from "../../_helpers/parse.js";
 
 const SRC = `
   context Catalog {
@@ -29,13 +29,13 @@ describe("typescript generator — string.trim() intrinsic (stdlib A1 pilot)", (
   });
 
   it("renders trim in-memory in derived/invariant bodies", async () => {
-    const { model } = await parseString(SRC);
+    const model = await parseValid(SRC);
     const domain = generateHono(model).get("domain/product.ts")!;
     expect(domain).toContain("this._name.trim()");
   });
 
   it("renders trim as SQL in the find where-clause and imports `sql`", async () => {
-    const { model } = await parseString(SRC);
+    const model = await parseValid(SRC);
     const repo = generateHono(model).get("db/repositories/product-repository.ts")!;
     expect(repo).toContain("eq(sql`trim(${schema.products.name})`, q)");
     expect(repo).toMatch(/import \{[^}]*\bsql\b[^}]*\} from "drizzle-orm";/);
@@ -50,8 +50,7 @@ describe("typescript generator — string.trim() intrinsic (stdlib A1 pilot)", (
         }
       }
     `;
-    const { model, errors } = await parseString(src);
-    expect(errors).toEqual([]);
+    const model = await parseValid(src);
     const repo = generateHono(model).get("db/repositories/product-repository.ts")!;
     expect(repo).toContain("eq(schema.products.name, q.trim())");
   });
@@ -73,8 +72,7 @@ describe("typescript generator — A2 string intrinsics end-to-end", () => {
   `;
 
   it("parses + validates cleanly and renders chained intrinsics in-memory", async () => {
-    const { model, errors } = await parseString(SRC2);
-    expect(errors).toEqual([]);
+    const model = await parseValid(SRC2);
     const domain = generateHono(model).get("domain/product.ts")!;
     expect(domain).toContain("this._name.trim().toLowerCase()");
     expect(domain).toContain("this._name.slice(0, (0) + (1)).toUpperCase()");
@@ -82,7 +80,7 @@ describe("typescript generator — A2 string intrinsics end-to-end", () => {
   });
 
   it("renders toLower on BOTH sides of a where (column SQL + value JS)", async () => {
-    const { model } = await parseString(SRC2);
+    const model = await parseValid(SRC2);
     const repo = generateHono(model).get("db/repositories/product-repository.ts")!;
     expect(repo).toContain("eq(sql`lower(${schema.products.name})`, q.toLowerCase())");
   });
@@ -109,8 +107,7 @@ describe("typescript generator — A3 math intrinsics end-to-end", () => {
   `;
 
   it("parses + validates cleanly and renders numerics in-memory", async () => {
-    const { model, errors } = await parseString(SRC3);
-    expect(errors).toEqual([]);
+    const model = await parseValid(SRC3);
     const domain = generateHono(model).get("domain/invoice.ts")!;
     // int → Math.*, money → decimal.js Decimal methods.
     expect(domain).toContain("Math.abs(this._qty)");
@@ -125,7 +122,7 @@ describe("typescript generator — A3 math intrinsics end-to-end", () => {
   });
 
   it("renders numeric intrinsics as SQL on the column side of a where", async () => {
-    const { model } = await parseString(SRC3);
+    const model = await parseValid(SRC3);
     const repo = generateHono(model).get("db/repositories/invoice-repository.ts")!;
     expect(repo).toContain("gt(sql`round(${schema.invoices.price}, ${2})`, m)");
     // Value-side abs (param receiver) stays host JS while the column side is SQL.

@@ -6,7 +6,7 @@
 // guarantee made physical).
 
 import { describe, expect, it } from "vitest";
-import { generateDotnet } from "../../../src/generator/dotnet/index.js";
+import { generateDotnet } from "../../_helpers/generate.js";
 import { parseValid } from "../../_helpers/parse.js";
 
 const SRC = `

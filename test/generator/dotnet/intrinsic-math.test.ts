@@ -15,8 +15,8 @@
 // floor/ceiling), so no other numeric row carries a query override.
 
 import { describe, expect, it } from "vitest";
-import { generateDotnet } from "../../../src/generator/dotnet/index.js";
-import { parseString } from "../../_helpers/parse.js";
+import { generateDotnet } from "../../_helpers/generate.js";
+import { parseString, parseValid } from "../../_helpers/parse.js";
 
 const SRC = `
   context Billing {
@@ -54,14 +54,14 @@ describe("dotnet generator — numeric math intrinsics (stdlib A3)", () => {
   });
 
   it("renders round in-memory with MidpointRounding.AwayFromZero (both arities)", async () => {
-    const { model } = await parseString(SRC);
+    const model = await parseValid(SRC);
     const domain = generateDotnet(model).get("Domain/Invoices/Invoice.cs")!;
     expect(domain).toContain("Math.Round(this.Amount, 2, MidpointRounding.AwayFromZero)");
     expect(domain).toContain("Math.Round(this.Amount, MidpointRounding.AwayFromZero)");
   });
 
   it("renders abs/min/floor/ceil in-memory via System.Math", async () => {
-    const { model } = await parseString(SRC);
+    const model = await parseValid(SRC);
     const domain = generateDotnet(model).get("Domain/Invoices/Invoice.cs")!;
     expect(domain).toContain("Math.Abs(this.Qty)");
     expect(domain).toContain("Math.Min(this.Amount, this.Budget)");
@@ -70,7 +70,7 @@ describe("dotnet generator — numeric math intrinsics (stdlib A3)", () => {
   });
 
   it("renders chained intrinsics in an operation body (max then round)", async () => {
-    const { model } = await parseString(SRC);
+    const model = await parseValid(SRC);
     const domain = generateDotnet(model).get("Domain/Invoices/Invoice.cs")!;
     expect(domain).toContain(
       "Math.Round(Math.Max(this.Amount, delta), 2, MidpointRounding.AwayFromZero)",
@@ -78,7 +78,7 @@ describe("dotnet generator — numeric math intrinsics (stdlib A3)", () => {
   });
 
   it("renders round in the find Where lambda WITHOUT MidpointRounding (EF-translatable form)", async () => {
-    const { model } = await parseString(SRC);
+    const model = await parseValid(SRC);
     const repo = generateDotnet(model).get("Infrastructure/Repositories/InvoiceRepository.cs")!;
     // Query override: MidpointRounding overloads don't translate; Postgres
     // round() is half-away-from-zero anyway, so the contract holds.
@@ -88,7 +88,7 @@ describe("dotnet generator — numeric math intrinsics (stdlib A3)", () => {
   });
 
   it("renders abs/min/max/floor/ceil in Where lambdas as-is (EF translates them natively)", async () => {
-    const { model } = await parseString(SRC);
+    const model = await parseValid(SRC);
     const repo = generateDotnet(model).get("Infrastructure/Repositories/InvoiceRepository.cs")!;
     expect(repo).toContain(".Where(x => Math.Abs(x.Qty) > n)");
     expect(repo).toContain(".Where(x => Math.Min(x.Amount, q) == q)");

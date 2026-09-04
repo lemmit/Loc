@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from "vitest";
 import { generateHono, generateSystemFiles } from "../../_helpers/generate.js";
-import { parseString } from "../../_helpers/parse.js";
+import { parseValid } from "../../_helpers/parse.js";
 
 const SRC = `
   context Sales {
@@ -26,8 +26,7 @@ const SRC = `
 
 describe("typescript generator — capability filter (contextFilters)", () => {
   it("AND-s the non-principal filter into every root read site", async () => {
-    const { model, errors } = await parseString(SRC);
-    expect(errors).toEqual([]);
+    const model = await parseValid(SRC);
     const files = generateHono(model);
     const repo = files.get("db/repositories/doc-repository.ts")!;
     expect(repo).toBeDefined();
@@ -52,7 +51,7 @@ describe("typescript generator — capability filter (contextFilters)", () => {
     // reified-criteria.md, the anonymous-`filter` row: `filter NotDeleted`
     // calls the criterion's module-level predicate fn instead of re-inlining
     // its body — deduped with find/retrieval consumers of the same criterion.
-    const { model, errors } = await parseString(`
+    const model = await parseValid(`
       context Sales {
         criterion NotDeleted of Doc = !this.isDeleted
         aggregate Doc {
@@ -65,7 +64,6 @@ describe("typescript generator — capability filter (contextFilters)", () => {
         }
       }
     `);
-    expect(errors).toEqual([]);
     const repo = generateHono(model).get("db/repositories/doc-repository.ts")!;
     // One module-level predicate fn, body = the lowered criterion.
     expect(repo).toContain(
@@ -149,7 +147,7 @@ system T {
   });
 
   it("emits no capability predicate when the aggregate has no filter", async () => {
-    const { model } = await parseString(`
+    const model = await parseValid(`
       context Sales {
         aggregate Plain { subject: string }
         repository Plains for Plain {
@@ -211,8 +209,7 @@ describe("typescript generator — principal capability filter (DEBT-01)", () =>
   });
 
   it("does not import requireCurrentUser when the filter is non-principal", async () => {
-    const { model, errors } = await parseString(SRC);
-    expect(errors).toEqual([]);
+    const model = await parseValid(SRC);
     const repo = generateHono(model).get("db/repositories/doc-repository.ts")!;
     expect(repo).not.toContain("requireCurrentUser");
   });

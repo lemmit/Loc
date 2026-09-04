@@ -2,11 +2,10 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { URI } from "langium";
 import { NodeFileSystem } from "langium/node";
-import { parseHelper } from "langium/test";
 import { describe, expect, it } from "vitest";
-import { generateDotnet } from "../../../src/generator/dotnet/index.js";
 import { createDddServices } from "../../../src/language/ddd-module.js";
 import type { Model } from "../../../src/language/generated/ast.js";
+import { generateDotnet, generateSystemFiles } from "../../_helpers/generate.js";
 
 // ---------------------------------------------------------------------------
 // .NET in-process event dispatch (channels.md) — the .NET mirror of the Hono
@@ -37,15 +36,33 @@ async function generate(file: string): Promise<Map<string, string>> {
   return generateDotnet(doc.parseResult.value as Model);
 }
 
-async function generateSource(src: string): Promise<Map<string, string>> {
-  const services = createDddServices(NodeFileSystem);
-  const doc = await parseHelper<Model>(services.Ddd)(src, { validation: true });
-  const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1);
-  expect(
-    errors.map((d) => d.message),
-    "source validation errors",
-  ).toEqual([]);
-  return generateDotnet(doc.parseResult.value);
+// This fixture used to ride the legacy single-context `generateDotnet` helper
+// on a BARE loose context.  Once that path asserts phase ⑦ (M-T9.49) the shape
+// is refused, and correctly: `audited` is a HOSTED capability —
+// `loom.audited-backend-unsupported` ("no audit-capable backend deployable
+// hosts this context") — and the legacy path cannot host anything, because
+// declaring a `system` re-parents every loose context into it and empties the
+// `loom.contexts` list `generateDotnet` emits from.  So the fixture grows the
+// deployable it always implied and emits through the orchestrator instead.
+// The map is re-keyed to drop the deployable directory, so every assertion
+// below reads the same path it did before.
+async function generateHosted(contextSrc: string): Promise<Map<string, string>> {
+  const files = await generateSystemFiles(`
+    system Fulfil {
+      subdomain D {
+        ${contextSrc}
+      }
+      storage primary { type: postgres }
+      resource fulfillmentState { for: Fulfillment, kind: state, use: primary }
+      deployable api {
+        platform: dotnet
+        contexts: [Fulfillment]
+        dataSources: [fulfillmentState]
+        port: 5000
+      }
+    }
+  `);
+  return new Map([...files].map(([k, v]) => [k.replace(/^api\//, ""), v]));
 }
 
 describe(".NET in-process event dispatch emission", () => {
@@ -112,7 +129,7 @@ describe(".NET in-process event dispatch emission", () => {
     }
   }
 }`;
-    const onH = (await generateSource(src)).get(
+    const onH = (await generateHosted(src)).get(
       "Application/Workflows/OrderFulfillmentOnShipmentRequestedHandler.cs",
     )!;
     expect(onH).toBeDefined();

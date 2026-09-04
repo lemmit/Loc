@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from "vitest";
 import { generateHono } from "../../_helpers/generate.js";
-import { parseString } from "../../_helpers/parse.js";
+import { parseValid } from "../../_helpers/parse.js";
 
 const SRC = `
   context Inventory {
@@ -22,8 +22,7 @@ const SRC = `
 
 describe("typescript generator — paged finds (P3b)", () => {
   it("emits a paged repository method: count + limit/offset + wrapped return", async () => {
-    const { model, errors } = await parseString(SRC);
-    expect(errors).toEqual([]);
+    const model = await parseValid(SRC);
     const repo = generateHono(model).get("db/repositories/warehouse-repository.ts")!;
 
     // Signature gains page/pageSize + sort/dir and returns the pagination envelope.
@@ -52,7 +51,7 @@ describe("typescript generator — paged finds (P3b)", () => {
   });
 
   it("threads the find's where-clause into both the count and the page query", async () => {
-    const { model } = await parseString(SRC);
+    const model = await parseValid(SRC);
     const repo = generateHono(model).get("db/repositories/warehouse-repository.ts")!;
     // count + page query both constrained by the region predicate.
     expect(repo).toContain(
@@ -64,7 +63,7 @@ describe("typescript generator — paged finds (P3b)", () => {
   });
 
   it("emits a named <Agg>Paged response DTO + page/pageSize query + toWire mapping", async () => {
-    const { model } = await parseString(SRC);
+    const model = await parseValid(SRC);
     const routes = generateHono(model).get("http/warehouse.routes.ts")!;
 
     // Named paged DTO wrapping the response items.

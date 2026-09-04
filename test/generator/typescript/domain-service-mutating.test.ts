@@ -10,7 +10,7 @@
 
 import { describe, expect, it } from "vitest";
 import { generateHono } from "../../_helpers/generate.js";
-import { parseString } from "../../_helpers/parse.js";
+import { parseValid } from "../../_helpers/parse.js";
 
 const MUTATING = `
   context Banking {
@@ -43,8 +43,7 @@ const MUTATING = `
 
 describe("typescript generator — domainService mutating tier", () => {
   it("emits the service call and saves the mutated args inside the transaction", async () => {
-    const { model, errors } = await parseString(MUTATING);
-    expect(errors).toEqual([]);
+    const model = await parseValid(MUTATING);
     const wf = generateHono(model).get("http/workflows.ts")!;
     expect(wf).toBeDefined();
     // The service is imported and called with the loaded aggregate args.

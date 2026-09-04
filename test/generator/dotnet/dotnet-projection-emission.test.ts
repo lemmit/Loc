@@ -1,9 +1,9 @@
 import { NodeFileSystem } from "langium/node";
 import { parseHelper } from "langium/test";
 import { describe, expect, it } from "vitest";
-import { generateDotnet } from "../../../src/generator/dotnet/index.js";
 import { createDddServices } from "../../../src/language/ddd-module.js";
 import type { Model } from "../../../src/language/generated/ast.js";
+import { generateDotnet } from "../../_helpers/generate.js";
 
 // ---------------------------------------------------------------------------
 // .NET backend — projection read models (projection.md, v1).  A projection
@@ -26,7 +26,7 @@ const SRC = `context Orders {
   repository Customers for Customer { }
   aggregate Order {
     status: OrderStatus
-    create place(customer: Customer id) {}
+    create(customer: Customer id) {}
     operation ship() { emit OrderShipped { order: id } }
   }
   repository Orders for Order { }

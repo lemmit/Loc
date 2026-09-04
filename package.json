@@ -89,6 +89,7 @@
     "test:pairwise-corpus-java": "LOOM_PAIRWISE=1 LOOM_JAVA_BUILD=1 vitest run test/e2e/pairwise-corpus-java.test.ts",
     "test:pairwise-corpus-elixir": "LOOM_PAIRWISE=1 LOOM_ELIXIR_BUILD=1 vitest run test/e2e/pairwise-corpus-elixir.test.ts",
     "test:pairwise-corpus-dotnet": "LOOM_PAIRWISE=1 LOOM_DOTNET_BUILD=1 vitest run test/e2e/pairwise-corpus-dotnet.test.ts",
+    "test:fuzz-deep": "LOOM_FUZZ_DEEP=1 vitest run test/system/pipeline-fuzz-deep.test.ts",
     "test:schemathesis": "LOOM_SCHEMATHESIS=1 node test/behavioral/run-schemathesis.mjs",
     "test:schemathesis-python": "LOOM_SCHEMATHESIS=1 node test/behavioral/run-schemathesis-backend.mjs python",
     "test:schemathesis-java": "LOOM_SCHEMATHESIS=1 node test/behavioral/run-schemathesis-backend.mjs java",

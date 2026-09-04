@@ -4,8 +4,32 @@ name: Generated Vue e2e
 # it, serve the static bundle with `vite preview`, and run the SPA's own
 # emitted Playwright smoke spec (every param-less page navigates + loads)
 # against it.  The runtime sibling of generated-vue-build.yml — that gate
-# compiles the bundle; this one proves it actually runs.  Pure client-side
-# smoke (no backend), so no docker/postgres sidecar is needed.
+# compiles the bundle; this one proves it actually runs.
+#
+# TIERING — per-PR on the Vue blast radius, post-merge on everything else.
+# Wave G1 packet 1.2 of docs/new-plan/verification-waves-2026-09.md: a gate
+# that runs only on `push: main` catches its regressions on a red `main`,
+# so the cheap docker-free SPA smokes are promoted per-PR behind a narrow
+# `paths:`.
+#
+#   pull_request  →  only what can actually change this bundle:
+#                    `src/ir/**`; the Vue frontend generator
+#                    (`src/generator/vue/**`, `src/platform/vue.ts`); the
+#                    shared frontend seams every frontend rides
+#                    (`_frontend/`, `_walker/`, `_packs/`,
+#                    `frontend-dispatch.ts`); the two packs this matrix
+#                    runs (`designs/vuetify`, `designs/shadcnVue`) and
+#                    their stack (`stacks/vue1`); the Vue host template
+#                    layer (`vue/`, `api/`, `docker/`); the example, the
+#                    test and this file.  A change confined to a non-Vue
+#                    backend does not fire it.
+#
+#   push: main    →  the broad `src/**` net, UNCHANGED — the regression
+#                    catch-all for whatever the narrow PR block misses,
+#                    and what ci-red-alarm watches.
+#
+# Cost: no docker, no postgres sidecar.  One `npm ci` + toolchain build,
+# then a `vite build` + Playwright run per pack — 2 jobs.
 
 on:
   push:
@@ -23,19 +47,63 @@ on:
       - 'package-lock.json'
       - 'langium-config.json'
       - '.github/workflows/generated-vue-e2e.yml'
-  # Post-merge only.  This route-driven smoke (navigate every param-less
-  # page) has caught zero regressions per-PR in practice, while the
-  # per-PR generated-vue-build (vue-tsc + vite build) already covers the
-  # Vue surface.  Run it on push:main as the regression net; force a
-  # pre-merge run with workflow_dispatch.
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [main]
+    paths:
+      - 'src/ir/**'
+      - 'src/generator/vue/**'
+      - 'src/generator/_frontend/**'
+      - 'src/generator/_walker/**'
+      - 'src/generator/_packs/**'
+      - 'src/platform/frontend-dispatch.ts'
+      - 'src/platform/vue.ts'
+      - 'designs/vuetify/**'
+      - 'designs/shadcnVue/**'
+      - 'examples/vue-showcase.ddd'
+      - 'vue/**'
+      - 'api/**'
+      - 'docker/**'
+      - 'stacks/vue1/**'
+      - 'test/e2e/generated-vue-e2e.test.ts'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'langium-config.json'
+      - '.github/workflows/generated-vue-e2e.yml'
+      # A change confined to a non-Vue backend cannot alter the Vue
+      # bundle.  The positive list above is already narrow enough to
+      # exclude these trees, so this tail is a guard against a future
+      # widening of that list — and keeps the block legible against its
+      # sibling generated-vue-build.yml, which needs it for real (it
+      # filters on `src/**`).  Negations are ignored by
+      # test/system/workflow-path-coverage.test.ts: it unions the
+      # POSITIVE globs across triggers, and the push block above carries
+      # the five generation trees for both.
+      - '!src/generator/java/**'
+      - '!src/generator/dotnet/**'
+      - '!src/generator/python/**'
+      - '!src/generator/elixir/**'
+      - '!src/platform/java.ts'
+      - '!src/platform/dotnet.ts'
+      - '!src/platform/dotnet/**'
+      - '!src/platform/python.ts'
+      - '!src/platform/elixir.ts'
+      - '!src/platform/hono/**'
+      - '!src/platform/hono.ts'
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # Cancel superseded PR runs (runner slots are the scarce resource); keep
+  # every push:main run so a red `main` stays attributable to its commit.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   vue-e2e:
+    # Draft PRs run only the fast lane (test.yml, langium-generated, workflow-lint,
+    # pr-gate); this and the rest of the fan-out fire when the PR is marked ready
+    # for review -- see docs/ci-gating.md, "Draft PRs and the runner queue".
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false

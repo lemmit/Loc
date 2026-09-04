@@ -42,7 +42,7 @@ function hasDocker(): boolean {
 
 function hasDotnet(): boolean {
   try {
-    execSync("dotnet --version", { stdio: "pipe", timeout: 5_000 });
+    execSync("dotnet --version", { stdio: "pipe", timeout: 15_000 });
     return true;
   } catch {
     return false;

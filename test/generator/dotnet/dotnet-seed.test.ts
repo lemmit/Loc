@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { generateDotnet } from "../../../src/generator/dotnet/index.js";
-import { generateSystemFiles, parseString } from "../../_helpers/index.js";
+import { generateDotnet } from "../../_helpers/generate.js";
+import { generateSystemFiles, parseValid } from "../../_helpers/index.js";
 
 // Mirrors the Hono seed fixture (string / int / enum / value-object fields),
 // targeting a `platform: dotnet` deployable.  Namespace derives from the
@@ -105,8 +105,7 @@ describe("dotnet database seeding (Phase 3a, domain path)", () => {
       repository Widgets for Widget { }
       seed default { Widget { name: "Alpha", size: 1, tier: Free } }
     }`;
-    const { model, errors } = await parseString(TOP_LEVEL);
-    if (errors.length) throw new Error(errors.join("\n"));
+    const model = await parseValid(TOP_LEVEL);
     const files = generateDotnet(model);
     const seed = [...files].find(([k]) => /Seed\.cs$/.test(k))?.[1];
     expect(seed).toBeDefined();

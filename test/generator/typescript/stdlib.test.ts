@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from "vitest";
 import { generateHono } from "../../_helpers/generate.js";
-import { parseString } from "../../_helpers/parse.js";
+import { parseString, parseValid } from "../../_helpers/parse.js";
 
 const SRC = `
   context Sales {
@@ -29,7 +29,7 @@ describe("typescript generator — stdlib prelude", () => {
   });
 
   it("inlines prelude function bodies at the call site (no emitted function)", async () => {
-    const { model } = await parseString(SRC);
+    const model = await parseValid(SRC);
     const domain = generateHono(model).get("domain/order.ts")!;
     // isBlank / isPresent / truncate all inlined, paren-wrapped, args substituted.
     // `.length` on a string is a CODE-POINT count (RS-31), so the inlined

@@ -6,8 +6,8 @@
 // (test/generator/hono/hono-destroy-route.test.ts).
 
 import { describe, expect, it } from "vitest";
-import { generateDotnet } from "../../../src/generator/dotnet/index.js";
-import { parseString } from "../../_helpers/index.js";
+import { generateDotnet } from "../../_helpers/generate.js";
+import { parseValid } from "../../_helpers/index.js";
 
 const FIXTURE = `
 context Ops {
@@ -24,8 +24,7 @@ context Ops {
 `;
 
 async function gen(): Promise<Map<string, string>> {
-  const { model, errors } = await parseString(FIXTURE);
-  if (errors.length) throw new Error(errors.join("; "));
+  const model = await parseValid(FIXTURE);
   return generateDotnet(model);
 }
 

@@ -5,12 +5,29 @@
 // produced TypeScript that failed `tsc --noEmit` on the generated project.
 
 import { describe, expect, it } from "vitest";
-import { generateHono, parseString } from "../../_helpers/index.js";
+import { generateHono, generateSystemFiles, parseValid } from "../../_helpers/index.js";
 
 async function gen(src: string): Promise<Map<string, string>> {
-  const { model, errors } = await parseString(src);
-  if (errors.length) throw new Error(errors.join("; "));
+  const model = await parseValid(src);
   return generateHono(model);
+}
+
+/**
+ * `gen` for the two TPH fixtures below.
+ *
+ * TPH is a HOSTED capability — `validateInheritanceStorage` reports
+ * `loom.tph-backend-unsupported` ("no TPH-capable backend deployable hosts this
+ * context") for a hierarchy no backend deployable hosts — and the legacy
+ * `generateHono` path cannot host one: declaring a `system` re-parents every
+ * loose context into it, emptying the `loom.contexts` list that path emits
+ * from.  So these two fixtures carry the deployable they always implied and go
+ * through the orchestrator, which the phase-⑦ assertion on `generateHono`
+ * (M-T9.48) forced into the open.  The map is re-keyed to drop the deployable
+ * directory, so the assertions read the same paths as the rest of the file.
+ */
+async function genHosted(src: string): Promise<Map<string, string>> {
+  const files = await generateSystemFiles(src);
+  return new Map([...files].map(([k, v]) => [k.replace(/^api\//, ""), v]));
 }
 
 describe("Hono ERP-bundle generator regressions", () => {
@@ -129,15 +146,27 @@ describe("Hono ERP-bundle generator regressions", () => {
   });
 
   it("a TPH concrete subtype's repository delete targets the shared base table", async () => {
-    const files = await gen(`
-      context Crm {
-        abstract aggregate Contact inheritanceUsing: sharedTable {
-          email: string
+    const files = await genHosted(`
+      system Sys {
+        subdomain D {
+          context Crm {
+            abstract aggregate Contact inheritanceUsing: sharedTable {
+              email: string
+            }
+            aggregate PersonContact extends Contact with crudish {
+              firstName: string
+            }
+            repository PersonContacts for PersonContact { }
+          }
         }
-        aggregate PersonContact extends Contact with crudish {
-          firstName: string
+        storage primary { type: postgres }
+        resource crmState { for: Crm, kind: state, use: primary }
+        deployable api {
+          platform: node
+          contexts: [Crm]
+          dataSources: [crmState]
+          port: 3000
         }
-        repository PersonContacts for PersonContact { }
       }
     `);
     const repo = files.get("db/repositories/personContact-repository.ts") ?? "";
@@ -160,16 +189,28 @@ describe("Hono ERP-bundle generator regressions", () => {
     // shallow `aggregateUsesMoney`, so `Decimal` was used unimported (TS2304).
     // Delegating deletes both: the reader hydrates nothing and filters nothing
     // itself; the concrete loader that already knows how does all of it.
-    const files = await gen(`
+    const files = await genHosted(`
       valueobject Money { amount: money  currency: string }
-      context Catalog {
-        abstract aggregate Product inheritanceUsing: sharedTable { title: string }
-        aggregate Car extends Product { price: Money }
-        aggregate Bike extends Product { note: string }
-        aggregate Depot { anchor: Product id }
-        repository Cars for Car { }
-        repository Bikes for Bike { }
-        repository Depots for Depot { }
+      system Sys {
+        subdomain D {
+          context Catalog {
+            abstract aggregate Product inheritanceUsing: sharedTable { title: string }
+            aggregate Car extends Product { price: Money }
+            aggregate Bike extends Product { note: string }
+            aggregate Depot { anchor: Product id }
+            repository Cars for Car { }
+            repository Bikes for Bike { }
+            repository Depots for Depot { }
+          }
+        }
+        storage primary { type: postgres }
+        resource catalogState { for: Catalog, kind: state, use: primary }
+        deployable api {
+          platform: node
+          contexts: [Catalog]
+          dataSources: [catalogState]
+          port: 3000
+        }
       }
     `);
     const baseReader = files.get("db/repositories/product-repository.ts") ?? "";

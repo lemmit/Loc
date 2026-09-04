@@ -6,13 +6,21 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { discoverSourceTypePlugins } from "../../src/platform/source-type-plugins.js";
 import {
+  _unregisterSourceTypeForTests,
   capabilitiesFor,
   configSchemaFor,
+  registeredSourceTypes,
   sourceTypeFor,
   supportsSurfaceKind,
 } from "../../src/util/source-types.js";
 
 let dir: string;
+/** The registry is module-global and the unit project runs `isolate: false`,
+ *  so a sourceType registered here outlives this file and leaks into whatever
+ *  runs next in the same worker.  Snapshot the names up front and drop the
+ *  delta after each case, so discovery tests cannot pollute a later file's
+ *  exact-contents assertions. */
+let registeredBefore: string[];
 
 function writePkg(name: string, pkg: unknown): void {
   const root = path.join(dir, name);
@@ -22,9 +30,13 @@ function writePkg(name: string, pkg: unknown): void {
 
 beforeEach(() => {
   dir = mkdtempSync(path.join(tmpdir(), "loom-stplugins-"));
+  registeredBefore = registeredSourceTypes();
 });
 afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
+  for (const name of registeredSourceTypes()) {
+    if (!registeredBefore.includes(name)) _unregisterSourceTypeForTests(name);
+  }
 });
 
 describe("sourceType plugin discovery", () => {

@@ -3,7 +3,8 @@
 > **Status: SLICES 1–3 LANDED** (#2444, #2488) — the register + its gate, the
 > 19 non-gaps renamed out of the suffix, and every gap owned by a mission.
 > **Slice 4 open.** First drain landed too: M-T6.33 (#2506) took
-> `MAX_OPEN_GAPS` 42 → 37 by re-classification.
+> `MAX_OPEN_GAPS` down by five, by re-classification; the live value is the
+> constant in `test/system/unsupported-register.test.ts`.
 > `src/diagnostics/unsupported-register.ts` is the machine-checked truth; the
 > counts in the body below are as-of slice 1 unless a section says otherwise.
 > Sources: language-size review 2026-08-04/05. `src/diagnostics/unsupported-register.ts`
@@ -85,9 +86,13 @@ where one exists, and `verified` (classification confirmed against the site).
 2. every registered code is still emitted — **a drained gap deletes its row in
    the same PR**, so the register ratchets down instead of becoming a graveyard;
 3. no duplicate rows;
-4. the open-gap count is pinned at `MAX_OPEN_GAPS` — **42** at slice 1, **37**
-   since M-T6.33 — asserted both `<=` and `===` so draining without lowering the
-   pin fails loudly.
+4. the open-gap count is pinned at `MAX_OPEN_GAPS` — asserted both `<=` and
+   `===`, so draining without lowering the pin fails loudly and minting a gap
+   without raising it fails too. **The live value is the constant in
+   `test/system/unsupported-register.test.ts`**; it was 42 at slice 1 and came
+   down by five at M-T6.33, but it moves in both directions, so this doc does
+   not restate it (retro §91 — a count in prose is a cache with no
+   invalidation).
 
 **Mutation-proven** (CLAUDE.md — a green first run proves nothing):
 
@@ -105,7 +110,7 @@ M-T5.21 §Symptom 1.)
 
 | # | unit | codes | owner |
 |---|---|---:|---|
-| 1 | ~~**Lifecycle stamps**~~ — **DRAINED (M-T6.33)**, and not as expected: both arms re-verified as permanent refusals, so the five codes were renamed out rather than emitted. `MAX_OPEN_GAPS` 42 → 37 | ~~5~~ 0 | M-T6.33 `done` |
+| 1 | ~~**Lifecycle stamps**~~ — **DRAINED (M-T6.33)**, and not as expected: both arms re-verified as permanent refusals, so the five codes were renamed out rather than emitted. `MAX_OPEN_GAPS` down by five | ~~5~~ 0 | M-T6.33 `done` |
 | 2 | **Projections** — groupby, query-time, projection-source, workflow-source, whole-table aggregation, Java field shapes | 6 | M-T4.2 |
 | 3 | **Persistence adapters** — dapper, mikroorm, unlowerable find predicates, persistence-mode, saving-shape | 5 | M-T6.23 |
 | 4 | **Frontend primitives** — Chart, DataGrid, Flutter renderers, frontend collection ops, Feliz async effects | 5 | M-T1.1 / M-T1.3 |
@@ -194,7 +199,8 @@ one shared body whose two arms read only the model (`dep.auth`, `sys.user`,
 `agg.persistedAs`), never a backend capability. Renamed to
 `loom.stamp-principal-without-auth` and `loom.stamp-on-event-sourced-invalid`;
 five validators collapsed to one; five register rows removed. **`MAX_OPEN_GAPS`
-42 → 37.**
+came down by five** (the live value is the constant in
+`test/system/unsupported-register.test.ts`).
 
 Note how that number moved: **by re-classification, not by emitting anything.**
 Two of the remaining five units (M-T6.32, M-T6.35) carry the same verify-first

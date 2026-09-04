@@ -23,7 +23,7 @@ Sources: [database-seeding](../old/proposals/database-seeding.md), D-SEED-*.
 Sources: [uniqueness-and-indexes](../old/proposals/uniqueness-and-indexes.md) Slice 2.
 
 ## M-T2.9 — Storage-config tail — `partial` · **M** · P3
-Remaining from the storage RFC: logical `dataSource` bindings (`dataSources:` per D-STORAGE-SPLIT), the `STORAGE_CAPABILITIES` matrix, per-deployable outbox overrides. Note 2026-07-12 pruning: `style:` knob and `marten`/`layered` stubs are gone — don't resurrect.
+Remaining from the storage RFC: logical `dataSource` bindings (`dataSources:` per D-STORAGE-SPLIT), the `STORAGE_CAPABILITIES` matrix, per-deployable outbox overrides. Note 2026-07-12 pruning: `style:` knob and `marten`/`layered` stubs are gone — don't resurrect. **Owns `loom.persistence-mode-unsupported` (re-owned 2026-09-03 off M-T6.35)** — a hosted aggregate whose deployable declares no matching `dataSource` for its persistence kind (`kind: state` for stateBased, `kind: eventLog` for eventSourced); this is the missing-binding half of the `dataSources:` work this mission already tracks, not an adapter capability limit.
 Sources: [storage-and-platform-config](../old/proposals/storage-and-platform-config.md).
 
 ## M-T2.10 — Document/embedded shape completion — `partial` · **M** · P2

@@ -7,7 +7,12 @@ import type {
   TableShape,
 } from "../../ir/types/migrations-ir.js";
 import { snake, upperFirst } from "../../util/naming.js";
-import { renderAlterColumnTypeSql, renderBackfillSql, renderRenameIndexSql } from "../sql-pg.js";
+import {
+  renderAlterColumnDefaultSql,
+  renderAlterColumnTypeSql,
+  renderBackfillSql,
+  renderRenameIndexSql,
+} from "../sql-pg.js";
 
 // ---------------------------------------------------------------------------
 // Phoenix Ecto migration emitter.
@@ -627,6 +632,14 @@ export function renderEctoStep(step: MigrationStep): string[] {
       // `execute`, matching D-MIG-NO-DOWN — which is also why dropping Ecto's
       // rollback-only `from:` costs nothing.
       return [`execute(${elixirStr(renderAlterColumnTypeSql(step))})`];
+    case "alterColumnDefault":
+      // Ecto's `modify` requires a literal (or MFA-tuple) default, not
+      // arbitrary SQL — `default` here is a raw Postgres expression
+      // (`gen_random_uuid()`, `now()`, …) exactly like `addColumn`'s, so wrap
+      // the shared SQL in `execute/1` (the `alterColumnType` precedent
+      // above) for a statement bit-identical with the Postgres backends.
+      // Forward-only single-arg `execute`, matching D-MIG-NO-DOWN.
+      return [`execute(${elixirStr(renderAlterColumnDefaultSql(step))})`];
     case "addIndex": {
       const cols = ectoIndexColumns(step.index);
       return [

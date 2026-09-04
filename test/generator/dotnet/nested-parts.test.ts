@@ -5,8 +5,8 @@
 // EF materialises/persists the owned graph, so there are no repository changes.
 
 import { describe, expect, it } from "vitest";
-import { generateDotnet } from "../../../src/generator/dotnet/index.js";
-import { parseString } from "../../_helpers/parse.js";
+import { generateDotnet } from "../../_helpers/generate.js";
+import { parseValid } from "../../_helpers/parse.js";
 
 const SRC = `
   context Logistics {
@@ -30,8 +30,7 @@ const SRC = `
 
 describe("dotnet generator — part-in-part containment", () => {
   it("nests the owned-type config with the direct-parent FK column", async () => {
-    const { model, errors } = await parseString(SRC);
-    expect(errors).toEqual([]);
+    const model = await parseValid(SRC);
     const cfg = generateDotnet(model).get(
       "Infrastructure/Persistence/Configurations/OrderConfiguration.cs",
     )!;
@@ -48,8 +47,7 @@ describe("dotnet generator — part-in-part containment", () => {
   });
 
   it("brands the nested part ParentId to the direct-parent id type", async () => {
-    const { model, errors } = await parseString(SRC);
-    expect(errors).toEqual([]);
+    const model = await parseValid(SRC);
     const files = generateDotnet(model);
     // Label's parent is Shipment, so its ParentId is ShipmentId (not OrderId).
     const label = files.get("Domain/Orders/Label.cs")!;

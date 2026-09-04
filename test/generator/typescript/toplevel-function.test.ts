@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from "vitest";
 import { generateHono } from "../../_helpers/generate.js";
-import { parseString } from "../../_helpers/parse.js";
+import { parseString, parseValid } from "../../_helpers/parse.js";
 
 const SRC = `
   function isBlank(s: string): bool = s.trim().length == 0
@@ -29,7 +29,7 @@ describe("typescript generator — Phase B top-level function", () => {
   });
 
   it("inlines the function body at the call site (no emitted function)", async () => {
-    const { model } = await parseString(SRC);
+    const model = await parseValid(SRC);
     const domain = generateHono(model).get("domain/invoice.ts")!;
     // `taxed(net, 20)` inlined, paren-wrapped, args substituted.
     expect(domain).toContain("get gross(): number { return (this._net + this._net * 20 / 100); }");

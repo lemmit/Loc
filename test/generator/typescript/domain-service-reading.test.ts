@@ -10,7 +10,7 @@
 
 import { describe, expect, it } from "vitest";
 import { generateHono } from "../../_helpers/generate.js";
-import { parseString } from "../../_helpers/parse.js";
+import { parseValid } from "../../_helpers/parse.js";
 
 const READING_SRC = `
   context Banking {
@@ -43,8 +43,7 @@ const READING_SRC = `
 
 describe("typescript generator — domainService reading tier", () => {
   it("declares a read-port parameter and renders the read against it", async () => {
-    const { model, errors } = await parseString(READING_SRC);
-    expect(errors).toEqual([]);
+    const model = await parseValid(READING_SRC);
     const files = generateHono(model);
     const services = files.get("domain/services.ts")!;
     expect(services).toBeDefined();
@@ -63,7 +62,7 @@ describe("typescript generator — domainService reading tier", () => {
   });
 
   it("keeps the PURE-tier operation byte-identical (no port, no async, no await)", async () => {
-    const { model } = await parseString(READING_SRC);
+    const model = await parseValid(READING_SRC);
     const services = generateHono(model).get("domain/services.ts")!;
     // FeeQuote takes no read-port, is a plain `export function`, returns the
     // value directly — the pure-tier shell unchanged by the reading slice.
@@ -76,7 +75,7 @@ describe("typescript generator — domainService reading tier", () => {
   });
 
   it("wires the read-port handle at the workflow call site", async () => {
-    const { model } = await parseString(READING_SRC);
+    const model = await parseValid(READING_SRC);
     const wf = generateHono(model).get("http/workflows.ts")!;
     expect(wf).toBeDefined();
     // The workflow constructs the read-port repo even though its own body never
@@ -111,7 +110,7 @@ describe("typescript generator — pure domainService stays byte-identical", () 
   `;
 
   it("emits no read-port import and no async for a pure-only context", async () => {
-    const { model } = await parseString(PURE_SRC);
+    const model = await parseValid(PURE_SRC);
     const services = generateHono(model).get("domain/services.ts")!;
     expect(services).toContain("export function quote(cart: Cart, customer: Customer): Decimal {");
     expect(services).not.toContain("Repository");

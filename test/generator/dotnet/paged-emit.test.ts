@@ -10,10 +10,10 @@
 import { NodeFileSystem } from "langium/node";
 import { parseHelper } from "langium/test";
 import { describe, expect, it } from "vitest";
-import { generateDotnet } from "../../../src/generator/dotnet/index.js";
 import { createDddServices } from "../../../src/language/ddd-module.js";
 import type { Model } from "../../../src/language/generated/ast.js";
 import { generateSystems } from "../../../src/system/index.js";
+import { generateDotnet } from "../../_helpers/generate.js";
 import { parseValid } from "../../_helpers/parse.js";
 
 const SRC = `
