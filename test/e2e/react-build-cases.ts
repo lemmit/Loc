@@ -26,7 +26,16 @@ export const reactBuildExamples = [
   // locks in that the scaffold honours the API-read projection.  Compiled once
   // (on the first pack cell) since injectDesign only rewrites console_web's
   // slot — admin_web builds identically under every pack.
-  { ddd: "examples/showcase.ddd", reactDir: "console_web", extraReactDirs: ["admin_web"] },
+  //
+  // `ops_web` is the THIRD frontend deployable (the `ui: Ops` sugar binding
+  // over the Hono api).  It was outside the gate entirely until the coverage
+  // guard in `react-build-deployable-coverage.test.ts` derived the emitted set
+  // and found it — the same silent skip `admin_web` was added to close.
+  {
+    ddd: "examples/showcase.ddd",
+    reactDir: "console_web",
+    extraReactDirs: ["admin_web", "ops_web"],
+  },
   { ddd: "web/src/examples/banking-system.ddd", reactDir: "web_app" },
   { ddd: "web/src/examples/inventory-system.ddd", reactDir: "web_app" },
   { ddd: "web/src/examples/provenance-system.ddd", reactDir: "web_app" },

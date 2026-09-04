@@ -40,7 +40,10 @@ describe("react api-builder — single-success union finds", () => {
 
   it("the find hook parses the success variant's <Agg>Response directly", async () => {
     const api = await apiModule();
-    expect(api).toContain("export function useRecentOrder(query: RecentQuery) {");
+    // Zero-parameter find → the query argument is defaulted, so the page's
+    // `useRecentOrder()` call site type-checks (`RecentQuery` is the empty
+    // object here).
+    expect(api).toContain("export function useRecentOrder(query: RecentQuery = {}) {");
     expect(api).toContain("return OrderResponse.parse(r);");
   });
 });

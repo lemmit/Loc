@@ -22,7 +22,14 @@ system GridDemo {
                 signedUpAt: datetime
             }
 
-            repository Customers for Customer { }
+            repository Customers for Customer {
+                // A ZERO-PARAMETER find.  The page below reads it with no
+                // arguments, which is the only shape that reaches the emitted
+                // hook's zero-arg call form — every other find in the react
+                // matrix takes a filter, so an arity mismatch on THIS shape
+                // compiled green everywhere for as long as it existed.
+                find gold(): Customer[] where this.tier == Gold
+            }
         }
     }
 
@@ -61,6 +68,32 @@ system GridDemo {
                     testid: "customer-data-grid"
                 } },
                 testid: "customer-grid-page"
+            }
+        }
+
+        // A hand-written page over the ZERO-PARAMETER find.  It emits
+        // `useGoldCustomer()` — the walker renders a query bag only when the
+        // call site passed arguments — so the emitted hook must not REQUIRE
+        // one.  Until it defaulted the parameter this was a TS2554 ("Expected
+        // 1 arguments, but got 0") in every generated React app, invisible to
+        // everything except a type checker.
+        page GoldCustomers {
+            route: "/gold"
+            title: "Gold customers"
+            body: Stack {
+                Heading { "Gold customers", level: 1 },
+                QueryView {
+                    of: Sales.Customer.gold,
+                    loading: Skeleton { count: 3 },
+                    error: Alert { "Couldn't load customers" },
+                    empty: Empty { "No gold customers yet." },
+                    data: rows => Table {
+                        rows: rows,
+                        Column { "Name", o => Text { o.name } },
+                        Column { "Tier", o => EnumBadge { o.tier } }
+                    }
+                },
+                testid: "gold-customers-page"
             }
         }
     }

@@ -159,7 +159,13 @@ const FILE: Case = {
  *  change to their grid children rode on hand-run builds.  Filterable +
  *  computed-cell + selection on purpose: those three switch on the branches
  *  (`hasFilters`, the template cell branch, the `selectionChange` emit) that a
- *  bare grid leaves unemitted. */
+ *  bare grid leaves unemitted.
+ *
+ *  It also carries the ZERO-PARAMETER find (`gold`) and a hand-written page
+ *  reading it — that page emits `useGoldCustomer()` with no argument, so the
+ *  emitted hook must not require one ("Expected 1 arguments, but got 0" under
+ *  `vue-tsc` otherwise).  Folded into this case rather than given its own so
+ *  the shape gets pack-matrix coverage without adding a matrix cell. */
 const GRID: Case = {
   name: "grid",
   vueDir: "web",
@@ -173,11 +179,31 @@ const GRID: Case = {
           sequence: int
           spend: money
         }
-        repository Customers for Customer { }
+        repository Customers for Customer {
+          find gold(): Customer[] where this.tier == Gold
+        }
       } }
       api SalesApi from Sales
       ui WebApp {
         api Sales: SalesApi
+        page GoldCustomers {
+          route: "/gold"
+          title: "Gold customers"
+          body: Stack {
+            Heading { "Gold customers", level: 1 },
+            QueryView {
+              of: Sales.Customer.gold,
+              loading: Skeleton { count: 3 },
+              error: Alert { "Couldn't load customers" },
+              empty: Empty { "No gold customers yet." },
+              data: rows => Table {
+                rows: rows,
+                Column { "Name", o => Text { o.name } },
+                Column { "Tier", o => EnumBadge { o.tier } }
+              }
+            }
+          }
+        }
         page CustomerGrid {
           route: "/customers"
           title: "Customers"

@@ -313,8 +313,16 @@ export function buildSvelteApiModule(
             : find.returnType.kind === "optional"
               ? `${agg.name}Response.nullable()`
               : `${agg.name}Response`;
+      // Zero-parameter find → an EMPTY query object, and the walker's call
+      // site passes nothing (`useOpenIssuesIssue()`), which svelte-check
+      // reports as "Expected 1 arguments, but got 0".  Default the accessor so
+      // the zero-arg call is legal.  Gated on `!paged`: a paged find's query
+      // type is the `z.infer` shape whose page/pageSize/sort/dir are REQUIRED
+      // (svelte does not emit the `z.input` alias the react/vue module uses),
+      // so `() => ({})` would not satisfy it.
+      const queryDefault = find.params.length === 0 && !paged ? " = () => ({})" : "";
       lines.push(
-        `export function use${upperFirst(find.name)}${agg.name}(query: () => ${upperFirst(find.name)}Query) {`,
+        `export function use${upperFirst(find.name)}${agg.name}(query: () => ${upperFirst(find.name)}Query${queryDefault}) {`,
       );
       lines.push(`  return createQuery(() => ({`);
       lines.push(`    queryKey: ["${tag}", "find", "${findSnake}", query()],`);
